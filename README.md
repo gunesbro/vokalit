@@ -4,6 +4,8 @@
 characters, generate takes, compare them and export the result — all on your own computer with an NVIDIA GPU.
 Your voice, your text and the generated audio never leave your machine.
 
+![The Studio: a script with several characters, takes for each line, and Play all](docs/images/studio.png)
+
 - **Studio** — sessions with a cast of characters and a script. Generate one or more takes per line, pick the best,
   trim it, listen to the whole script with *Play all*, and export it as one file (WAV, FLAC, MP3 or OGG).
 - **Characters** — a library of reusable voices. Each character can have several samples (e.g. *calm*, *excited*, or
@@ -14,6 +16,23 @@ Your voice, your text and the generated audio never leave your machine.
   reproducible.
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
 - **Languages** — per session or per line, limited to what the selected models support.
+
+## Screenshots
+
+**Line details** — text, sample, language and pause; generate with one or more models; per-line settings; takes
+to compare, trim and pick; and *Perform this line* to convert your own recording.
+
+![Line details with takes, line settings and Perform this line](docs/images/line-details.png)
+
+**Characters** — reusable voices with several labelled samples, each tagged with its language.
+
+![Characters with samples](docs/images/characters.png)
+
+**Models** — install and remove models; size and license are shown first.
+
+![Models](docs/images/models.png)
+
+<sub>Screenshots use made-up demo data; no real voices were used.</sub>
 
 ## Models
 
