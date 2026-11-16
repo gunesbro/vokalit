@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- Vokalit icon: a V carried by a sound wave over a chip (local AI). Detailed version for 64 px and up. -->
+  <!-- Vokalit icon: a sound wave whose tallest swing forms the V, over a chip (local AI). Detailed version for 64 px and up. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#25272d"/>
@@ -43,11 +43,12 @@
     <circle cx="116" cy="196" r="7"/><circle cx="116" cy="316" r="7"/><circle cx="396" cy="196" r="7"/><circle cx="396" cy="316" r="7"/>
   </g>
 
-  <!-- sound wave through the V -->
-  <path filter="url(#glow)" fill="none" stroke="url(#wave)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"
-        d="M70 262 H140 L160 214 L182 306 L204 236 L222 274 L240 262 H272 L290 226 L308 300 L326 214 L346 286 L362 244 L378 270 L392 254 L404 262 H442"/>
-
-  <!-- V -->
-  <path filter="url(#glow)" fill="none" stroke="url(#v)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"
-        d="M178 168 L256 346 L334 168"/>
+  <!-- one sound wave; its tallest swing is the V -->
+  <g filter="url(#glow)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="url(#wave)" stroke-width="12"
+          d="M66 270 H108 L122 248 L136 294 L150 258 L164 284 L178 156 L256 340 L334 156 L348 286 L362 252 L376 284 L390 260 L404 278 L418 266 L432 270 H446"/>
+    <!-- the V: the same stroke, swelling from the wave's width at the tips to bold at the bottom -->
+    <path fill="url(#v)" stroke="url(#v)" stroke-width="2"
+          d="M172 156 Q178 146 184 156 L256 330 L328 156 Q334 146 340 156 L268 352 Q256 378 244 352 Z"/>
+  </g>
 </svg>
