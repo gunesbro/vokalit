@@ -298,3 +298,18 @@ def test_bulk_line_endpoints(api):
     assert status == 400
     status, body, _ = api("POST", f"/api/sessions/{sid}/lines/delete", {"lines": [l1]})
     assert status == 200 and [l["id"] for l in body["lines"]] == [l2["id"]]
+
+
+def test_export_formats_endpoint_and_audio_files(api, monkeypatch, tmp_path):
+    monkeypatch.setattr(ws, "export_formats", lambda: ["wav", "mp3"])
+    status, body, _ = api("GET", "/api/export-formats")
+    assert status == 200 and [f["id"] for f in body] == ["wav", "mp3"]
+    assert all(f["label"] and f["note"] for f in body)
+    sid, _, _ = _session_with_line(api, "one")
+    exports = ws.session_dir(sid) / "exports"
+    exports.mkdir()
+    (exports / "a.mp3").write_bytes(b"ID3")
+    opened = []
+    monkeypatch.setattr(server, "_show_in_file_manager", lambda path: opened.append(path))
+    status, _, _ = api("POST", "/api/reveal", {"path": f"sessions/{sid}/exports/a.mp3"})
+    assert status == 200 and len(opened) == 1

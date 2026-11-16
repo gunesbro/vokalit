@@ -673,8 +673,24 @@ def take_has_custom_settings(session: dict, take: dict, defaults: dict) -> bool:
 # --- Export -------------------------------------------------------------------------------------
 
 
-def export_session(session_id: str) -> Path:
-    """Joins each line's selected take and its pause into exports/<session>-<time>.wav."""
+# Export formats other than WAV are written by libsndfile (soundfile): (format, subtype).
+EXPORT_ENCODINGS = {"flac": ("FLAC", "PCM_16"), "mp3": ("MP3", "MPEG_LAYER_III"), "ogg": ("OGG", "VORBIS")}
+
+
+def export_formats() -> list[str]:
+    """Formats this computer can export to: WAV always, the others when its libsndfile can write them."""
+    try:
+        majors = sf.available_formats()
+    except AttributeError:
+        return ["wav"]
+    return ["wav"] + [name for name, (major, subtype) in EXPORT_ENCODINGS.items()
+                      if major in majors and subtype in sf.available_subtypes(major)]
+
+
+def export_session(session_id: str, fmt: str = "wav") -> Path:
+    """Joins each line's selected take and its pause into exports/<session>-<time>.<fmt>."""
+    if fmt not in export_formats():
+        raise WorkspaceError(f"This computer cannot export {fmt.upper()} files.")
     data = load_session(session_id)
     missing = [str(n) for n, line in enumerate(data["lines"], 1) if not line["selected"]]
     if missing:
@@ -699,10 +715,15 @@ def export_session(session_id: str) -> Path:
         chunks.append(np.zeros(round(line["pause_after"] * rate), dtype="<i2"))
     folder = session_dir(session_id) / "exports"
     folder.mkdir(exist_ok=True)
-    out = folder / f"{slugify(data['name'])}-{time.strftime('%Y%m%d-%H%M%S')}.wav"
-    with wave.open(str(out), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(np.concatenate(chunks).tobytes())
+    out = folder / f"{slugify(data['name'])}-{time.strftime('%Y%m%d-%H%M%S')}.{fmt}"
+    samples = np.concatenate(chunks)
+    if fmt == "wav":
+        with wave.open(str(out), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(samples.tobytes())
+    else:
+        major, subtype = EXPORT_ENCODINGS[fmt]
+        sf.write(str(out), samples.astype(np.float32) / 32768, rate, format=major, subtype=subtype)
     return out

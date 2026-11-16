@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import workspace as ws
@@ -218,3 +220,49 @@ def test_update_lines_sets_fields_on_several(tmp_workspace):
     assert [l["character"] for l in data["lines"]] == [other, data["lines"][1]["character"], other]
     with pytest.raises(ValueError):
         ws.update_lines(sid, [l1], takes=[])
+
+
+class _FakeSoundfile:
+    """Records sf.write calls; reports which formats libsndfile can write."""
+    def __init__(self, formats):
+        self.formats, self.writes = formats, []
+
+    def available_formats(self):
+        return {f: f for f in self.formats}
+
+    def available_subtypes(self, fmt):
+        return {"FLAC": {"PCM_16": ""}, "MP3": {"MPEG_LAYER_III": ""}, "OGG": {"VORBIS": ""}}.get(fmt, {})
+
+    def write(self, path, data, rate, format=None, subtype=None):
+        self.writes.append((Path(path).suffix, format, subtype, rate, len(data), data.dtype.kind))
+        Path(path).write_bytes(b"encoded")
+
+
+def test_export_formats_follow_libsndfile(monkeypatch):
+    monkeypatch.setattr(ws, "sf", _FakeSoundfile(["WAV", "FLAC", "OGG"]))
+    assert ws.export_formats() == ["wav", "flac", "ogg"]
+    monkeypatch.setattr(ws, "sf", _FakeSoundfile(["WAV", "FLAC", "OGG", "MP3"]))
+    assert ws.export_formats() == ["wav", "flac", "mp3", "ogg"]
+    monkeypatch.setattr(ws, "sf", object())  # no format list at all: WAV only
+    assert ws.export_formats() == ["wav"]
+
+
+def test_export_to_mp3_encodes_the_joined_audio(tmp_workspace, monkeypatch):
+    fake = _FakeSoundfile(["WAV", "FLAC", "OGG", "MP3"])
+    monkeypatch.setattr(ws, "sf", fake)
+    sid, (l1, l2) = _session_with_lines(["one", "two"])
+    _add_take(sid, l1, "chatterbox", 1.0)
+    _add_take(sid, l2, "chatterbox", 0.5)
+    out = ws.export_session(sid, "mp3")
+    assert out.suffix == ".mp3" and out.read_bytes() == b"encoded"
+    suffix, fmt, subtype, rate, frames, kind = fake.writes[0]
+    assert (suffix, fmt, subtype, rate, kind) == (".mp3", "MP3", "MPEG_LAYER_III", 24000, "f")
+    assert frames == round((1.0 + 0.5 + 2 * ws.DEFAULT_PAUSE) * 24000)
+    assert not list(out.parent.glob("*.wav"))  # no leftover WAV
+
+
+def test_export_refuses_unknown_format(tmp_workspace):
+    sid, (l1,) = _session_with_lines(["one"])
+    _add_take(sid, l1, "chatterbox", 1.0)
+    with pytest.raises(ws.WorkspaceError, match="cannot export"):
+        ws.export_session(sid, "aiff")

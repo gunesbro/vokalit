@@ -19,7 +19,8 @@ file. Everything is done by clicking in a desktop window.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
     generation settings at three levels (model defaults → session → line); voice conversion ("Perform this line");
-    export of the selected takes to one WAV.
+    export of the selected takes to one file (WAV always; FLAC, MP3 and OGG Vorbis when the computer's libsndfile can
+    write them). Export is enabled once every line has a take.
   - **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
     before saving). Session-only characters can be saved to the library.
   - **Models:** install / remove with size, location and license shown first; progress and a collapsible log.

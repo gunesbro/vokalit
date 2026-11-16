@@ -160,6 +160,9 @@ def _random_seed():
 
 _routes = []
 
+# Audio files /files/ may serve and /api/reveal may show (all inside workspace/).
+AUDIO_TYPES = {".wav": "audio/wav", ".flac": "audio/flac", ".mp3": "audio/mpeg", ".ogg": "audio/ogg"}
+
 RENAME_NOTICE = ("Some take files are open in another program, so their 01-, 02- numbers were not updated. "
                  "They will be on the next change.")
 
@@ -213,7 +216,7 @@ def reveal(req):
     """Shows an audio file of the workspace in the system file manager."""
     root = ws.workspace_root().resolve()
     target = (root / str(req["json"].get("path", ""))).resolve()
-    if not target.is_relative_to(root) or not target.is_file() or target.suffix != ".wav":
+    if not target.is_relative_to(root) or not target.is_file() or target.suffix not in AUDIO_TYPES:
         raise NotFound()
     _show_in_file_manager(target)
     return {}
@@ -540,7 +543,21 @@ def stop_generation(req, sid):
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/export")
 def export_session(req, sid):
-    return _start_job(lambda job: ws.export_session(sid).relative_to(ws.workspace_root()).as_posix())
+    fmt = req["json"].get("format", "wav")
+    return _start_job(lambda job: ws.export_session(sid, fmt).relative_to(ws.workspace_root()).as_posix())
+
+
+EXPORT_INFO = {
+    "wav": ("WAV", "Lossless, largest file. Best for editing."),
+    "flac": ("FLAC", "Lossless and about half the size of WAV."),
+    "mp3": ("MP3", "Small, plays everywhere. Good for sharing."),
+    "ogg": ("OGG Vorbis", "Small, open format."),
+}
+
+
+@route("GET", "/api/export-formats")
+def export_formats(req):
+    return [{"id": f, "label": EXPORT_INFO[f][0], "note": EXPORT_INFO[f][1]} for f in ws.export_formats()]
 
 
 # --- HTTP ---------------------------------------------------------------------------------------
@@ -575,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path.startswith("/ui/"):
             return self._file(_ui_dir, unquote(path[len("/ui/"):]), STATIC_TYPES)
         if method == "GET" and path.startswith("/files/"):
-            return self._file(ws.workspace_root(), unquote(path[len("/files/"):]), {".wav": "audio/wav"})
+            return self._file(ws.workspace_root(), unquote(path[len("/files/"):]), AUDIO_TYPES)
         if not path.startswith("/api/"):
             return self._send(404)
         if not secrets.compare_digest(self.headers.get("X-Vokalit-Token", ""), _token):

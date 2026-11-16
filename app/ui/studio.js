@@ -42,6 +42,8 @@ export async function renderStudio(root) {
   let library = [];
   let session = null;
   let openLine = null;
+  let exportFormats = []; // what this computer can export (from the server)
+  let exportFormat = (() => { try { return localStorage.getItem("vokalit.exportFormat") || "wav"; } catch { return "wav"; } })();
   const picked = new Set(); // lines ticked for bulk actions
   let lastPicked = null; // anchor for Shift+click ranges
   let justClosed = null; // the row that replaces closed details fades in
@@ -103,8 +105,8 @@ export async function renderStudio(root) {
   // --- Loading -------------------------------------------------------------------------------
 
   async function load() {
-    [sessions, models, library] = await Promise.all([api("GET", "/api/sessions"), api("GET", "/api/models"),
-      api("GET", "/api/characters")]);
+    [sessions, models, library, exportFormats] = await Promise.all([api("GET", "/api/sessions"), api("GET", "/api/models"),
+      api("GET", "/api/characters"), exportFormats.length ? exportFormats : api("GET", "/api/export-formats").catch(() => [])]);
     drawList();
     const id = selectedId();
     if (!id) {
@@ -198,8 +200,7 @@ export async function renderStudio(root) {
       el("div", { class: "muted generate-label", title: TIP_MODELS }, "Generate with"), picker.element, language,
       el("div", { class: "pop-holder" }, settingsButton),
       el("label", { class: "row muted", title: TIP_SEED }, "Seed", seedInput),
-      el("button", { class: "btn", onclick: exportSession,
-        title: "Joins the selected take of every line, with its pause, into one WAV file." }, "Export"),
+      el("div", { class: "pop-holder" }, exportButton()),
       batch
         ? el("button", { class: "btn btn-primary", onclick: () => api("POST", `/api/sessions/${sid()}/stop`, {}).catch(fail) }, "Stop")
         : el("button", { class: "btn btn-primary", onclick: generateMissing,
@@ -897,25 +898,58 @@ export async function renderStudio(root) {
 
   const pendingTextIds = () => Object.keys(pendingText);
 
-  async function exportSession() {
-    setMessage(message, "Exporting…");
+  // Export is possible once every line has a selected take; it opens a small panel to choose the format.
+  function exportButton() {
+    const missing = session.lines.map((l, n) => (l.selected ? null : n + 1)).filter(Boolean);
+    const ready = session.lines.length && !missing.length;
+    const button = el("button", { class: "btn", "aria-haspopup": "dialog", disabled: !ready,
+      title: !session.lines.length ? "Add lines first."
+        : missing.length ? `Every line needs a take before exporting. Missing: ${plural(missing.length, "line")} (${missing.join(", ")}).`
+          : "Join the selected take of every line, with its pause, into one audio file." }, "Export");
+    button.onclick = () => popover(button, exportPanel(), { align: "right" });
+    return button;
+  }
+
+  function exportPanel() {
+    let choice = exportFormat;
+    const options = exportFormats.length ? exportFormats : [{ id: "wav", label: "WAV", note: "Lossless." }];
+    if (!options.some((f) => f.id === choice)) choice = options[0].id;
+    return el("div", { class: "menu export-panel" },
+      el("strong", {}, "Export"),
+      el("div", { class: "muted small" }, `The selected take of all ${plural(session.lines.length, "line")}, with their pauses, in one file.`),
+      el("div", { class: "export-options", role: "radiogroup", "aria-label": "File format" },
+        options.map((f) => el("label", { class: "export-option" },
+          el("input", { type: "radio", name: "export-format", value: f.id, checked: f.id === choice,
+            onchange: () => { choice = f.id; } }),
+          el("span", { class: "export-format" }, f.label, el("span", { class: "faint" }, ` .${f.id}`)),
+          el("span", { class: "muted small" }, f.note)))),
+      el("button", { class: "btn btn-primary", onclick: () => {
+        document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+        exportFormat = choice;
+        try { localStorage.setItem("vokalit.exportFormat", choice); } catch { /* storage may be unavailable */ }
+        exportSession(choice);
+      } }, "Export"));
+  }
+
+  async function exportSession(fmt) {
+    setMessage(message, "Exporting\u2026");
     try {
-      const { id } = await api("POST", `/api/sessions/${sid()}/export`, {});
+      const { id } = await api("POST", `/api/sessions/${sid()}/export`, { format: fmt });
       const file = await waitForJob(id);
-      const url = `/files/${file}`;
       const name = file.split("/").pop();
       setMessage(message, "");
-      exportInfo.replaceChildren(el("span", { class: "muted" }, `Last export: ${name}`),
-        player(url, { buckets: 40 }),
-        el("a", { href: url, download: name }, "Download"),
-        revealButton(file, { text: true }));
+      exportInfo.replaceChildren(
+        player(`/files/${file}`, { buckets: 40, label: "Play the export" }),
+        el("span", { class: "export-name", title: `Last export: ${name}` },
+          el("span", { class: "export-label" }, "Last export: "), name),
+        revealButton(file));
     } catch (error) { setMessage(message, error.message, "warn"); }
   }
 
   function footer() {
     return el("footer", { class: "main-foot" },
       picked.size ? selectionBar() : transport,
-      batch && el("span", { class: "spinner", "aria-hidden": "true" }), message, el("div", { class: "spacer" }), exportInfo);
+      batch && el("span", { class: "spinner", "aria-hidden": "true" }), message, exportInfo);
   }
 
   // --- Selecting lines for bulk actions -----------------------------------------------------
