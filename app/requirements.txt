@@ -1,4 +1,3 @@
 gradio>=6,<7
-soundfile
 pywebview; sys_platform == "win32"
 pywebview[qt]; sys_platform == "linux"

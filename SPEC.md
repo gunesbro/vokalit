@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.6** (v1.5'e göre: Gradio'nun kırpma aracı yerine kendi kırpma aracımız — §7; repo herkese açık — §5.4; kriter 14–15).
+> Durum: **v1.7** (v1.6'ya göre: kendi kırpma aracımız denendi, geri alındı; Gradio'nun yerleşik kırpma aracı kullanılır — §7).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -15,7 +15,7 @@ Her şey masaüstü penceresinden tıklanarak yapılır.
 
 - İki model: **Chatterbox Multilingual** (Resemble AI) ve **OmniVoice** (k2-fsa).
 - Masaüstü penceresi (Gradio arayüzü + pywebview penceresi):
-  - Referans sesi dosyadan yükleme veya mikrofondan kaydetme; kayıtta mikrofon seçimi, üretimden önce kaydı dinleme ve kırpma.
+  - Referans sesi dosyadan yükleme veya mikrofondan kaydetme; kayıtta mikrofon seçimi, üretimden önce kaydı dinleme ve kırpma (Gradio'nun yerleşik aracı).
   - Okunacak metni girme.
   - İki ses modu:
     - **Clone voice:** referans sesle klonlayarak okutma.
@@ -203,12 +203,10 @@ Tüm arayüz metinleri İngilizce (bkz. V2).
 └─────────────────────────────────────────────────────┘
 ```
 
-- Kırpma: Gradio'nun yerleşik kırpma/geri alma düğmeleri kapalıdır (`editable=False`). Yerine:
-  `Start (s)` ve `End (s)` alanları, `Trim` ve `Undo trim` düğmeleri.
-  - Yeni kayıt/yükleme olunca alanlar `0` ve kaydın süresine ayarlanır.
-  - `Trim` seçili aralığı yeni bir wav olarak kaydeder ve oynatıcıda onu gösterir.
-  - `Undo trim` en son yüklenen/kaydedilen orijinal sese döner.
-  - Kırpılan dosyalar da `GRADIO_TEMP_DIR` altına yazılır (§5.3).
+- Kırpma: Gradio'nun yerleşik kırpma aracı (✂ ve ↺) kullanılır. Kendi kırpma aracımız denendi;
+  hata verdi ve görsel olarak daha kötüydü, geri alındı (v1.7).
+  - Bilinen görsel sorun (Gradio kaynaklı, kabul edildi): kırpmadan sonra turuncu seçim görünmeye devam edebilir.
+  - README'de not: ↺ kaydı kırpılmamış hâline döndürür.
 - Clone voice modunda referans 10 sn'den kısaysa "Generate" devre dışı ve uyarı gösterilir.
 - Default voice modunda referans alanları gizlenir, 10 sn kontrolü uygulanmaz.
 - Kurulu olmayan model sonuç bölümünde "not installed" yazar.
@@ -254,7 +252,7 @@ vokalit/
 11. Modeller kurulduktan sonra ağ bağlantısı kesikken iki mod da iki modelle çalışıyor.
 12. Üretim sırasında `127.0.0.1` dışında hiçbir ağ bağlantısı açılmıyor — Linux'ta `ss -tnp`, Windows'ta Kaynak İzleyicisi > Ağ ile doğrulanır; uygulama kapandıktan sonra sistem geçici klasöründe ses dosyası kalmıyor.
 13. Kayıt alanında bilgisayardaki mikrofonlar listeleniyor ve seçilebiliyor; kayıt durdurulunca kayıt pencerede dinlenebiliyor; temizle (✕) düğmesi kaydı/dosyayı kaldırıyor; "share" düğmesi yok; Gradio'nun kendi düğmeleri İngilizce ve düzgün görünüyor.
-14. Kırpma: `Trim` sonrası oynatıcı yalnızca seçili aralığı çalıyor ve süre güncelleniyor; `Undo trim` orijinale dönüyor; Gradio'nun kendi kırpma araçları görünmüyor.
+14. Kırpma: Gradio'nun ✂ aracıyla kırpılan kayıt, üretimde kırpılmış hâliyle kullanılıyor.
 15. Repoda ses dosyası yok (`git ls-files | grep -iE "\.(wav|mp3|flac|ogg|m4a|webm)$"` boş) ve README'de Privacy ve Responsible use bölümleri var.
 
 ## 10. Riskler
