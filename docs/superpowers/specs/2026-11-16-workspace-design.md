@@ -1,6 +1,8 @@
 # Vokalit Workspace — Design
 
-Date: 2026-11-16 · Status: **approved** (v2)
+Date: 2026-11-16 · Status: **approved** (v3)
+
+Visual design (canvas): https://claude.ai/artifact/C1nriBHz4bLm6CuxN3s3gR — Studio, line details, settings, Characters, Models.
 
 > Items marked "*(proposal)*" are the designer's calls, not the user's; they can be revised.
 
@@ -29,14 +31,15 @@ What users do with the generated audio is their responsibility; the app does not
 4. Script: lines (character, sample, text, pause after); insert a line between any two lines; **drag-and-drop reordering** if the spike in the plan (Task 0) shows it works reliably in Gradio, otherwise up/down buttons.
 5. Per-line generation; model(s) chosen at generation time; every attempt (take) is kept.
 6. **Voice conversion (Chatterbox VC):** the user records the line, it is converted to the character's voice and becomes a take.
-7. **Seed:** each take records its seed; a take can be reproduced with the same seed.
+7. **Seed and generation settings:** per-session, per-model settings (e.g. Chatterbox expressiveness, pace control, variation); each take records its seed and settings; a take's seed and settings can be loaded back into the session.
 8. Choose a take (★), regenerate a single line, delete takes.
 9. Export: selected takes + pauses → one audio file.
 
 **Non-goals (later releases)**
 - With OmniVoice: voice design (character from a description), recording prep (denoise, normalize,
   auto-transcribe). This design must accommodate them.
-- Emotion intensity control, tags such as `[laughter]`, reading numbers.
+- Tags such as `[laughter]`, reading numbers.
+- **Fine-tuning on your own recordings** (training a model for a character). Planned for the Characters screen later; see §6 extension point.
 - Sound effects, fine-tuning, LLM text suggestions.
 - Keyboard shortcuts.
 - Transcript import (SRT/VTT, timestamps, screenplay format). User decision: later, possibly with a local language model. The simple `Character: text` paste stays.
@@ -82,6 +85,8 @@ Storage and model layers stay independent of the UI, so only the UI would need r
 - This release: voice conversion and seed. With the OmniVoice step: voice design and recording prep.
 - Lines can be inserted between lines and reordered by dragging.
 - Transcript import is postponed.
+- Generation settings in this release; fine-tuning later on the Characters screen, and the structure must allow it.
+- The model choice must scale to many models (a multi-select dropdown, not side-by-side checkboxes).
 
 ## 6. Data model and storage
 
@@ -118,6 +123,7 @@ workspace/
 }
 ```
 
+- **Extension point for fine-tuning (later):** a character may get `"finetunes": {"<model>": {"path": "finetunes/<model>/", "created": "..."}}` and a `finetunes/` folder; samples are the training data source. Workers will accept an optional `checkpoint` path. Nothing of this is built now; the layout must not block it.
 - A character may have no samples: it then uses **the model's default voice** (for OmniVoice that means a random voice per generation; the UI says so).
 
 ### session.json
@@ -126,6 +132,8 @@ workspace/
 {
   "name": "Episode 1",
   "created": "2026-11-16T16:14:00",
+  "models": ["chatterbox"],
+  "settings": {"chatterbox": {"exaggeration": 0.7, "cfg_weight": 0.5, "temperature": 0.8}},
   "cast": [
     {"character": "20261116-163000", "scope": "library"},
     {"character": "20261116-164500", "scope": "session"}
@@ -147,6 +155,7 @@ workspace/
           "sample_label": "calm",
           "text": "We're talking about local AI today.",
           "seed": 1234567,
+          "settings": {"exaggeration": 0.7, "cfg_weight": 0.5, "temperature": 0.8},
           "created": "2026-11-16T16:20:11",
           "generation_seconds": 2.1,
           "duration": 3.4
@@ -209,9 +218,11 @@ with none installed it shows "Install a model in the Models tab."
   - **New character in session:** a session-only character (name + optional samples, using the same sample component as the Characters tab, in a small panel inside the cast).
   - **Save as character:** moves a session-only character to the library so other sessions can use it.
   - A character used by lines cannot be removed from the cast (explained in the message line).
-- **Models:** checkboxes of installed models (default: first installed model checked *(proposal)*); line and batch generation produce one take **per checked model**.
-- **Seed:** empty = random (the value used is stored in the take); filled = that value. A take's seed can be copied into this field with one click *(proposal)*.
-- **Line:** drag handle, character, sample (the character's samples; default "default"), text, pause (seconds, default 0.3 *(proposal)*), up/down, delete. Between lines (and after the last) a "+ Insert line" control adds an empty line at that position, with the previous line's character.
+- **Generate with:** a multi-select dropdown of installed models (`gr.Dropdown(multiselect=True)`); closed it shows the selected names ("3 models" when long). Stored as `session.models` (default: first installed model *(proposal)*). Line and batch generation produce one take **per selected model**. The line details panel has the same dropdown for that generation.
+- **Settings:** a header button opens per-model tabs with that model's settings (sliders with defaults and help text) and "Reset to defaults"; stored in `session.settings`; used by every generation in the session; recorded in each take. Settings are declared per model in `models.MODELS[name]["settings"]` (key, label, min, max, step, default, help), so a new model brings its own.
+- **Seed:** empty = random (the value used is stored in the take); filled = that value. "Use these settings" on a take copies its seed and settings into the session *(proposal)*.
+- **Line (collapsed, see canvas):** speaker (color dot, name, sample label under it), text, and on the right the selected take's player with "<model> · N takes" — or a Generate button when there are none. Drag handle and ⋯ menu (Convert, Delete, Move up/down) appear on hover. Pause shows on the divider between lines ("0.3 s pause"); "+ Insert line" appears there on hover, adding an empty line with the previous line's character.
+- **Line details (opened by clicking a line):** edit text, sample and pause; "Generate with" dropdown + seed + "Generate N takes"; the takes list (select, play, model, seed, settings summary, delete); "Perform this line" (voice conversion).
 - **Takes:** each take has a player + label (model or "converted", take no., sample label), ★ select, delete. The first take is selected automatically. If the selected take is deleted, the newest remaining take is selected *(proposal)*. If the line's text differs from the take's text, the take shows "text changed" *(proposal)*.
 - **Convert:** opens a record/upload area under the line; the user performs the line; Chatterbox VC converts it to the line's character/sample. The user's recording is kept in `recordings/` (to convert again).
 - **Paste script…** *(proposal)*: paste `Character: text` lines; characters not in the cast are added as **session-only** characters (without samples); lines are appended.
@@ -250,10 +261,10 @@ with none installed it shows "Install a model in the Models tab."
 
 **Voice conversion (convert):** the user's recording is saved to `recordings/` → conversion request to the Chatterbox worker → take (`kind: "convert"`, `model: "chatterbox-vc"`).
 
-**Protocol additions (SPEC §5.2):**
+**Protocol additions (SPEC §5.2):** (`settings` keys must be declared in that model's settings schema; unknown keys are rejected)
 
 ```
-→ {"text": "...", "ref": "<path>|null", "out": "<path>", "seed": 1234567}                 # tts
+→ {"text": "...", "ref": "<path>|null", "out": "<path>", "seed": 1234567, "settings": {...}}   # tts
 → {"task": "convert", "source": "<path>", "ref": "<path>|null", "out": "<path>"}          # Chatterbox only
 ← {"ok": true, "out": "<path>", "seconds": 1.2}
 ```

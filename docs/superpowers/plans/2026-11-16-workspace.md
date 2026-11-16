@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11, Gradio 6 (`@gr.render`), pywebview, soundfile, stdlib `wave`/`json`, pytest (dev only), chatterbox-tts 0.1.7 (`ChatterboxMultilingualTTS`, `ChatterboxVC`).
 
-**Spec:** `docs/superpowers/specs/2026-11-16-workspace-design.md` (read it first; section numbers below refer to it).
+**Spec:** `docs/superpowers/specs/2026-11-16-workspace-design.md` (read it first; section numbers below refer to it). **Visual design:** https://claude.ai/artifact/C1nriBHz4bLm6CuxN3s3gR (Studio, line details, settings, Characters, Models). Gradio will approximate it with a custom CSS theme; Task 0 measures how close it gets.
 
 ## Global Constraints
 
@@ -53,13 +53,14 @@
 
 ---
 
-### Task 0: Spike — drag-and-drop reordering in Gradio (throwaway)
+### Task 0: Spike — drag-and-drop and the line row in Gradio (throwaway)
 
-**Question:** can rows drawn with `@gr.render` be reordered by dragging, reliably, in the pywebview window?
+**Questions:** (a) can rows drawn with `@gr.render` be reordered by dragging, reliably, in the pywebview window? (b) how close can custom CSS get one collapsed line row (speaker, text, selected-take player, hover-only controls) and the line details panel to the canvas design?
 
 - [ ] **Step 1:** In a scratch file outside `app/` (not committed), render 5 rows with `@gr.render`; inject a small script with `gr.Blocks(head=...)` that makes each row draggable (HTML5 drag events on a handle) and on drop writes the new ID order into a hidden `gr.Textbox`, then dispatches an `input` event; a `.change` handler prints the order and re-renders.
 - [ ] **Step 2 (user, Windows):** drag rows 10 times, including after adding/removing rows (re-render). Pass = order always correct, no stuck state, no console errors.
-- [ ] **Step 3:** Report to the user. Pass → Task 7 implements dragging the same way and keeps ↑↓ as a fallback. Fail → Task 7 ships ↑↓ only; record the outcome in the design doc. Delete the scratch file either way.
+- [ ] **Step 2b:** In the same scratch app, style 3 rows and one opened details panel with `gr.Blocks(css=...)` against the canvas; user compares side by side.
+- [ ] **Step 3:** Report to the user. Drag pass → Task 7 implements dragging the same way and keeps ↑↓ in the ⋯ menu. Fail → ↑↓ only. If the row/panel look is far from the canvas, the user decides: accept the Gradio approximation or move the Studio editor to approach B (spec §4). Record the outcome in the design doc. Delete the scratch file either way.
 
 ### Task 1: Characters and samples storage
 
@@ -147,7 +148,8 @@
 - Produces:
   - `new_take_path(session_id, line_id, model: str) -> Path` — name rule from Global Constraints; `n` = number of existing takes of the line + 1.
   - `new_recording_path(session_id, line_id) -> Path` — `recordings/<line no 2 digits>-take<n>.wav`
-  - `add_take(session_id, line_id, take: dict) -> None` — `take` holds the §6 fields; `file` is stored relative to the session folder; becomes `selected` if the line has none.
+  - `set_session_models(session_id, models: list[str])`, `set_session_settings(session_id, model: str, settings: dict)` (stored in `session.json`, spec §6)
+  - `add_take(session_id, line_id, take: dict) -> None` — `take` holds the §6 fields (including `seed` and `settings` for tts); `file` is stored relative to the session folder; becomes `selected` if the line has none.
   - `select_take(session_id, line_id, file)`, `delete_take(session_id, line_id, file)` (removes the file; selects the newest remaining)
   - `take_text_changed(line: dict, take: dict) -> bool` (only for `kind == "tts"`)
   - `export_session(session_id) -> Path`
@@ -173,13 +175,17 @@
 **Interfaces:**
 - Consumes: protocol in spec §8.
 - Produces:
-  - `models.generate(name, text, ref, out, seed: int) -> float` (seconds)
+  - `models.generate(name, text, ref, out, seed: int, settings: dict) -> float` (seconds)
+  - `models.MODELS[name]["settings"]: list[dict]` — `{key, label, min, max, step, default, help}`; Chatterbox: `exaggeration` "Expressiveness" 0.25–2.0 step 0.05 default 0.5; `cfg_weight` "Pace control" 0.0–1.0 step 0.05 default 0.5; `temperature` "Variation" 0.05–5.0 step 0.05 default 0.8 (help texts as on the canvas Settings artboard)
+  - `models.default_settings(name) -> dict`, `models.validate_settings(name, settings: dict) -> dict` (fills defaults; `ValueError` on unknown key or out-of-range value)
   - `models.convert(name, source, ref, out) -> float` — `RuntimeError("Chatterbox Multilingual does not support voice conversion.")` style message for models without it (only `"chatterbox"` supports it; mark with `"supports_convert": True` in `MODELS`).
   - `models.MODELS[name]["supports_convert"]: bool`
   - Worker: `torch.manual_seed(request["seed"])` when `seed` is present; `task == "convert"` → `ChatterboxVC` loaded on first use (`ChatterboxVC.from_pretrained(device="cuda")`, `vc.generate(audio=source, target_voice_path=ref)`, `vc.sr`); `--download` also calls `ChatterboxVC.from_pretrained(device="cpu")`; outputs written with `subtype="PCM_16"`.
 
 - [ ] **Step 1: Write failing tests** in `tests/test_worker.py` (they install a stub "model" with empty `pip_steps` into a temp `.local`, as in the earlier manual harness; need `uv` and `python3.11` on PATH):
   - `test_seed_is_applied`: stub torch records the last seed; the stub model returns it in the output → output file contains `seed=42`.
+  - `test_settings_are_passed_to_generate`: `settings={"exaggeration": 0.7}` → stub `generate` received `exaggeration=0.7`, `cfg_weight=0.5`, `temperature=0.8`.
+  - `test_unknown_setting_is_rejected`: `validate_settings("chatterbox", {"foo": 1})` and `{"exaggeration": 9}` raise `ValueError`.
   - `test_convert_uses_vc_and_default_voice`: `convert(..., ref=None)` → stub VC called with `target_voice_path=None`; VC loaded once across two calls.
   - `test_default_voice_restored_after_clone`: keep the existing regression (clone → default uses built-in conds).
   - `test_network_still_blocked_in_convert`: stub VC tries a socket connect → reply `ok: false` with "Network access is blocked".
@@ -236,7 +242,10 @@ Behavior is spec §7.1. With no installed model, the model area shows "Install a
 - Script editor: one `@gr.render(inputs=[session_state, refresh_counter])`; every mutating handler writes through `workspace` and bumps `refresh_counter`.
 - "+ Insert line" between lines calls `add_line(..., after=<previous line id>)` with the previous line's character.
 - Dragging (only if Task 0 passed): the Task 0 mechanism calls `reorder_lines`.
-- Seed field: `gr.Textbox` (empty = random `random.randint(0, 2**31 - 1)`); each take label shows its seed with a "Use seed" button.
+- Seed field: `gr.Textbox` (empty = random `random.randint(0, 2**31 - 1)`); "Use these settings" on a take copies its seed and settings into the session.
+- Generate with: `gr.Dropdown(choices=installed models, multiselect=True)` bound to `session.models`; the same dropdown in the line details.
+- Settings: header button toggles a panel with one `gr.Tab` per selected model, sliders built from `models.MODELS[name]["settings"]`, "Reset to defaults".
+- Layout follows the canvas: collapsed rows + one opened details panel at a time (`gr.State(open_line_id)`).
 - Batch generation is a generator handler that yields the message line ("Line 3/12…"); Stop sets a module-level `threading.Event` checked between lines.
 - A line whose character is missing (`cast_character` is `None`) shows "deleted character" and its Generate/Convert are refused with a message.
 - Convert uses `gr.Audio(sources=["microphone", "upload"], type="filepath", buttons=[])`; the file is copied to `new_recording_path` before conversion.
