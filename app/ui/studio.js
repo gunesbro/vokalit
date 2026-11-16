@@ -6,7 +6,6 @@ import { commonLanguages, formatTime, moveLine, settingsChanges, splitSentences,
 import { dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
 import { player, stopAudio } from "./waveform.js";
 
-const ICON_GRIP = ["M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"];
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
 const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
 
@@ -391,10 +390,28 @@ export async function renderStudio(root) {
       } }, "Delete line")), { align: "right" });
   }
 
+  // Six solid dots: easier to see than a stroked icon.
+  function grip() {
+    const svg = el("svg", { width: 14, height: 18, viewBox: "0 0 14 18", fill: "currentColor", "aria-hidden": "true" });
+    for (const x of [4, 10]) for (const y of [3, 9, 15]) svg.append(el("circle", { cx: x, cy: y, r: 1.7 }));
+    return svg;
+  }
+
+  // Drag to reorder; with the keyboard, focus it and press the up/down arrows.
   function handle(line) {
-    return el("button", { class: "handle", "aria-label": "Drag to reorder", title: "Drag to reorder",
+    return el("button", { class: "handle", "aria-label": "Reorder: drag, or press the up and down arrow keys",
+      title: "Drag to reorder",
       onpointerdown: (e) => { e.target.closest("[data-line]").draggable = true; },
-      onpointerup: (e) => { e.target.closest("[data-line]").draggable = false; } }, icon(ICON_GRIP, 16));
+      onpointerup: (e) => { e.target.closest("[data-line]").draggable = false; },
+      onkeydown: (e) => {
+        const step = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+        const order = session.lines.map((l) => l.id);
+        const i = order.indexOf(line.id);
+        if (!step || i + step < 0 || i + step >= order.length) return;
+        e.preventDefault();
+        api("POST", `/api/sessions/${sid()}/lines/order`, { order: moveLine(order, line.id, order[i + step], step > 0) })
+          .then((data) => { apply(data); main.querySelector(`[data-line="${line.id}"] .handle`)?.focus(); }, fail);
+      } }, grip());
   }
 
   function dragTarget(node, line) {

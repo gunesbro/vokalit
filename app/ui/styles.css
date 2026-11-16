@@ -232,9 +232,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line { display: grid; grid-template-columns: 20px 160px minmax(0, 1fr) 380px; gap: 16px; align-items: center; padding: 14px 8px;
   border-radius: 8px; cursor: pointer; position: relative; }
 .line:hover { background: var(--raised); }
-.handle { width: 20px; height: 32px; border: none; background: transparent; color: transparent; cursor: grab; padding: 0;
-  display: flex; align-items: center; justify-content: center; }
-.line:hover .handle, .line-details .handle, .handle:focus-visible { color: var(--faint); }
 .speaker { min-width: 0; }
 .speaker-name { font-weight: 600; gap: 8px; }
 .speaker-sample { padding-left: 16px; gap: 4px; }
@@ -325,3 +322,13 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line-details { animation: open-details .22s ease-out; }
 .btn:disabled[title]:hover { cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { .line-details { animation: none; } }
+
+/* Reorder handle: always visible, clearer on hover */
+.line { grid-template-columns: 28px 160px minmax(0, 1fr) 380px; }
+.handle { width: 28px; height: 36px; border: none; border-radius: 6px; background: transparent; color: var(--faint);
+  cursor: grab; padding: 0; display: flex; align-items: center; justify-content: center;
+  transition: color .15s ease, background-color .15s ease; }
+.line:hover .handle, .line-details .handle { color: var(--text); }
+.handle:hover, .handle:focus-visible { color: var(--text); background: var(--hover); outline: none; }
+.handle:active { cursor: grabbing; }
+.gap { padding-left: 52px; }
