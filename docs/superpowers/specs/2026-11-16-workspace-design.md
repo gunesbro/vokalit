@@ -1,6 +1,6 @@
 # Vokalit Workspace — Design
 
-Date: 2026-11-16 · Status: **approved** (v3)
+Date: 2026-11-16 · Status: **approved** (v4 — UI approach changed to B)
 
 Visual design (canvas): https://claude.ai/artifact/C1nriBHz4bLm6CuxN3s3gR — Studio, line details, settings, Characters, Models.
 
@@ -52,7 +52,7 @@ What users do with the generated audio is their responsibility; the app does not
 
 ## 3. Constraints
 
-- Gradio 6 + pywebview window (current stack). Toasts do not show in the app window; messages are shown on the page.
+- pywebview window showing our own HTML/CSS/JS UI (approach B, §4). Messages are shown on the page.
 - Models run in separate worker processes using the JSON-lines protocol (SPEC §5.2); this design adds two fields (§8).
 - Models take **one** reference recording per generation; several samples means choosing one per line (they are not merged).
 - Both models output 24 kHz mono.
@@ -69,8 +69,29 @@ What users do with the generated audio is their responsibility; the app does not
 
 Rejected: a Gradio custom component (needs a JS build toolchain; B's difficulty plus A's limits).
 
-**Choice A**, user decision: "let's go with Gradio for now and see what we get."
-Storage and model layers stay independent of the UI, so only the UI would need rewriting for B.
+~~Choice A~~ — tried in the plan's Task 0 spike: Gradio could not get close to the canvas design and
+drag-and-drop did not work. **Choice B**, user decision (2026-11-16): "write the UI ourselves". Storage
+(`app/workspace.py`) and model layers (`app/models.py`, workers) are unchanged.
+
+### 4.1 Architecture for B (builder's calls)
+
+- **Server:** Python standard library `http.server.ThreadingHTTPServer` on `127.0.0.1`, a free port chosen at start.
+  No web framework: fewer dependencies, smaller install, everything readable. Gradio is removed.
+- **Access token:** a random token is generated at start and put into the page URL; every API request must send it
+  (header `X-Vokalit-Token`). Other programs or websites on the same computer cannot use the API. Requests with a
+  `Host` other than `127.0.0.1:<port>` are refused.
+- **Content Security Policy:** every page response sends `default-src 'self'; media-src 'self' blob:; img-src 'self' data:`
+  so the UI cannot load anything from the internet, even by mistake.
+- **API:** JSON endpoints that map one-to-one to `workspace` / `models` functions; long operations (install,
+  generation, export) run as background jobs that the UI polls (`GET /api/jobs/<id>`).
+- **Files:** `GET /files/<path>` serves audio only from inside `workspace/`; paths are resolved and anything outside
+  is refused.
+- **UI:** `app/ui/` — `index.html`, `styles.css`, plain JavaScript modules; no build step, no external libraries,
+  no CDN. Pure helpers (WAV encoding, trimming, waveform peaks) are tested with Node's built-in test runner.
+- **Audio in the browser:** recording uses the Web Audio API and is encoded as 16-bit WAV in JavaScript; uploaded files
+  (mp3, m4a, ogg, wav) are decoded with `decodeAudioData` and also sent as WAV. The server only ever receives WAV.
+  Microphone choice via `enumerateDevices`. Trimming is a draggable range on the waveform before a sample is saved.
+- **Drag-and-drop:** native HTML5 drag events on script rows; the new order is sent to `reorder_lines`.
 
 ## 5. User decisions
 
@@ -78,7 +99,7 @@ Storage and model layers stay independent of the UI, so only the UI would need r
 - Sessions are separate; old ones can be reopened.
 - Multi-character (podcast-style) work is in scope.
 - The model is chosen **at generation time**; a line can be generated with several models; the model is recorded and **hinted in the file name**.
-- UI technology: Gradio.
+- UI technology: our own HTML/CSS/JS (approach B), after the Gradio spike failed.
 - Characters can be created outside sessions; a character created inside a session moves to the library **via a button**, otherwise it stays in that session only.
 - A character can have several voice recordings.
 - No cloud-sync folder warning.
@@ -220,7 +241,7 @@ with none installed it shows "Install a model in the Models tab."
   - **New character in session:** a session-only character (name + optional samples, using the same sample component as the Characters tab, in a small panel inside the cast).
   - **Save as character:** moves a session-only character to the library so other sessions can use it.
   - A character used by lines cannot be removed from the cast (explained in the message line).
-- **Generate with:** a multi-select dropdown of installed models (`gr.Dropdown(multiselect=True)`); closed it shows the selected names ("3 models" when long). Stored as `session.models` (default: first installed model *(proposal)*). Line and batch generation produce one take **per selected model**. The line details panel has the same dropdown for that generation.
+- **Generate with:** a multi-select dropdown of installed models; closed it shows the selected names ("3 models" when long). Stored as `session.models` (default: first installed model *(proposal)*). Line and batch generation produce one take **per selected model**. The line details panel has the same dropdown for that generation.
 - **Session settings:** the header Settings button opens a panel under it with one tab per selected model (sliders with help text) and "Reset to model defaults"; stored in `session.settings`.
 - **Line settings:** in the line details, "Settings for this line" shows the same sliders per model; changed values are highlighted with the session value next to them ("Session: 0.70") and a count ("1 change from session settings"); "Reset to session settings" clears `line.settings`. Settings are declared per model in `models.MODELS[name]["settings"]` (key, label, min, max, step, default, help), so a new model brings its own.
 - **Seed:** empty = random (the value used is stored in the take); filled = that value. "Use these settings" on a take copies its seed into the seed field and its settings into that line's settings *(proposal)*.
@@ -247,8 +268,8 @@ with none installed it shows "Install a model in the Models tab."
 └─────────────────────┘ └──────────────────────────────────────────────────────────────┘
 ```
 
-- A finished recording/upload becomes a sample **automatically** (consistent with the user's decision); default label "sample N", editable. ★ sets the default sample.
-- Trimming: with Gradio's tool, in the recording area. If Gradio fires an event after trimming, the trimmed audio overwrites the same sample; if not *(proposal)*, added samples are not trimmed — re-record instead (verified during build).
+- A finished recording/upload becomes a sample when the user confirms the trim ("Add sample"); without trimming it is one click. Default label "sample N", editable. ★ sets the default sample.
+- Trimming: drag the start/end handles on the new recording's waveform, then it is added. Added samples are not trimmed again *(proposal)*; re-record instead.
 - Audio shorter than 10 s is not added as a sample (the message states its length).
 - **Delete character:** confirmed, permanent. Sessions using it are listed in the confirmation; afterwards they show it as "deleted character", lines remain but a different character must be chosen to generate *(proposal)*. Existing take records are kept.
 - **Delete sample:** confirmed; lines using it fall back to the default sample.
@@ -287,7 +308,7 @@ with none installed it shows "Install a model in the Models tab."
 
 - `app/models.py`: install/worker management unchanged; `generate()` takes a seed; new `convert()`.
 - `workers/chatterbox/worker.py`: seed, `task: "convert"`, VC in `--download`.
-- `app/main.py` UI is rewritten; storage goes into a new `app/workspace.py` (session/character read-write, export) — independent of the UI, testable without Gradio.
+- `app/main.py` starts the local server and the window; `app/server.py` (new) holds the API; `app/ui/` (new) the page. Storage is `app/workspace.py`, tested without any UI.
 - The `outputs/` folder goes away (replaced by `takes/` and `exports/`). No migration (no users yet).
 - SPEC.md is updated (translated to English, §7 and §7.1 replaced by this structure).
 
@@ -304,11 +325,13 @@ with none installed it shows "Install a model in the Models tab."
 9. After editing a line's text, the old take keeps the old text and shows "text changed".
 10. Deleting a character/sample does not break existing take records.
 11. `git status` never shows `workspace/` content.
-12. Unit tests for `app/workspace.py` without Gradio (create session/character, save/load, Save as character, export join, delete).
+12. Unit tests for `app/workspace.py` (create session/character, save/load, Save as character, export join, delete), `app/server.py` (token, Host check, path traversal, endpoints) and the JS audio helpers.
+13. Drag-and-drop reorders lines reliably in the app window (10 drags, including after adding/removing lines).
+14. The page loads nothing from outside `127.0.0.1` (verified with the window's network inspector or by running offline).
 
 ## 12. Left to the builder
 
-- Exact Gradio layout and button labels (the sketches give direction).
-- `@gr.render` performance on long scripts is measured; paging/collapsing may be added if slow (ask the user first).
+- Exact layout and labels follow the canvas; small deviations are the builder's call.
+- Rendering performance on long scripts (100+ lines) is measured; virtualizing may be added if slow (ask the user first).
 - Slug and ID details.
 - Which files VC downloads and the effect on install size.

@@ -4,9 +4,9 @@
 
 **Goal:** Turn Vokalit into a workspace with sessions, a character library (multiple samples per character), a line-by-line script with takes, voice conversion, seeds and export.
 
-**Architecture:** A new UI-free storage module `app/workspace.py` owns every file under `workspace/` (JSON + WAV) and is unit-tested without Gradio. `app/models.py` and the Chatterbox worker gain `seed` and a `convert` task. `app/main.py` is rewritten as three tabs (Studio, Characters, Models) whose handlers are thin calls into `workspace` and `models`.
+**Architecture:** A UI-free storage module `app/workspace.py` owns every file under `workspace/` (JSON + WAV). `app/models.py` and the Chatterbox worker gain `seed`, settings and a `convert` task. **(Revised after Task 0, spec §4.1)** The UI is our own HTML/CSS/JS in `app/ui/`, served with its JSON API by a standard-library HTTP server (`app/server.py`) on 127.0.0.1 with a per-run token, shown in the pywebview window. Gradio is removed.
 
-**Tech Stack:** Python 3.11, Gradio 6 (`@gr.render`), pywebview, soundfile, stdlib `wave`/`json`, pytest (dev only), chatterbox-tts 0.1.7 (`ChatterboxMultilingualTTS`, `ChatterboxVC`).
+**Tech Stack:** Python 3.11, stdlib `http.server`/`wave`/`json`, pywebview, soundfile, numpy, plain JavaScript (ES modules, Web Audio API, HTML5 drag-and-drop), pytest + `node --test` (dev only), chatterbox-tts 0.1.7 (`ChatterboxMultilingualTTS`, `ChatterboxVC`).
 
 **Spec:** `docs/superpowers/specs/2026-11-16-workspace-design.md` (read it first; section numbers below refer to it). **Visual design:** https://claude.ai/artifact/C1nriBHz4bLm6CuxN3s3gR (Studio, line details, settings, Characters, Models). Gradio will approximate it with a custom CSS theme; Task 0 measures how close it gets.
 
@@ -14,7 +14,9 @@
 
 - All code, comments, UI text and repository documents are English. User data may be any language.
 - User data lives only under `workspace/`; `.gitignore` contains `workspace/` (the old `voices/` line is removed).
-- Messages are shown on the page (a message line), never with `gr.Info/gr.Warning/gr.Error` pop-ups.
+- Messages are shown on the page (a message line).
+- The UI loads nothing from outside 127.0.0.1: no CDN, no web fonts; CSP `default-src 'self'; media-src 'self' blob:; img-src 'self' data:`.
+- Every API request needs the per-run token (header `X-Vokalit-Token`); `Host` must be `127.0.0.1:<port>`; `/files/` serves only inside `workspace/`.
 - Minimum sample length: 10 seconds (`MIN_SAMPLE_SECONDS = 10`).
 - Default pause after a line: 0.3 s (`DEFAULT_PAUSE = 0.3`).
 - Take file name: `<line no, 2 digits>-<character-slug>-<model>-take<n>.wav`; export: `exports/<session-slug>-<YYYYmmdd-HHMMSS>.wav`.
@@ -22,7 +24,7 @@
 - JSON writes are atomic (write `*.tmp`, then `os.replace`).
 - Workers keep the network block (SPEC §5.3); no new network access anywhere.
 - Every generated or converted take is written as 16-bit PCM WAV (`subtype="PCM_16"`), so export can join them with stdlib `wave`.
-- Tests run with `python3 -m pytest tests -q` from the repo root, without GPU, network, Gradio or real models.
+- Tests run with `python3 -m pytest tests -q` and `node --test app/ui/tests/` from the repo root, without GPU, network or real models.
 
 ## Review Focus
 
@@ -41,10 +43,9 @@
 | `app/workspace.py` (new) | All reads/writes under `workspace/`: characters, samples, sessions, cast, lines, takes, recordings, export, slugs, IDs. No Gradio. |
 | `app/models.py` (modify) | `generate(..., seed)`, new `convert(...)`; install unchanged except VC download. |
 | `workers/chatterbox/worker.py` (modify) | Seed, `task: "convert"` with lazily loaded `ChatterboxVC`, VC in `--download`, PCM_16 output. |
-| `app/main.py` (rewrite) | Window, theme, three tabs; thin glue only. |
-| `app/ui_models.py` (new) | Models tab: the existing install/remove rows (`build_model_row`) moved out of `main.py`. |
-| `app/ui_characters.py` (new) | Characters tab and the reusable sample panel (also used for session-only characters). |
-| `app/ui_studio.py` (new) | Studio tab: sessions, cast, models/seed, script lines, takes, convert, batch, export. |
+| `app/main.py` (rewrite) | Starts the server and the window. |
+| `app/server.py` (new) | Local HTTP server: token, CSP, static UI, `/files/`, JSON API, background jobs. |
+| `app/ui/` (new) | HTML/CSS/JS screens (Studio, Characters, Models), audio helpers, Node tests. |
 | `tests/conftest.py` (new) | `tmp_workspace` fixture; `soundfile` shim (PCM_16 WAV via `wave` + numpy) used only when real `soundfile` is missing; helper `make_wav(path, seconds, sr=24000)`. |
 | `tests/stubs/` (new) | Fake `torch`, `chatterbox.mtl_tts`, `chatterbox.vc` for worker tests. |
 | `tests/test_characters.py`, `tests/test_sessions.py`, `tests/test_takes_export.py`, `tests/test_worker.py` (new) | Unit tests. |
@@ -201,70 +202,78 @@
 - [ ] **Step 5: Commit** `feat: seed and voice conversion`.
 - [ ] **Step 6 (user, Windows):** remove and reinstall Chatterbox; record the new "Disk usage" and update `disk_gb` in `MODELS`. Same seed + text twice → identical audio.
 
-### Task 5: Models tab
+### Task 5: Local server and API
 
 **Files:**
-- Create: `app/ui_models.py` (move `model_status` and `build_model_row` from `app/main.py` unchanged)
-- Modify: `app/main.py` (wrap the existing single-shot UI in a "Studio" tab and add the "Models" tab; Task 7 replaces the Studio content)
+- Create: `app/server.py`, `tests/test_server.py`
+- Modify: `app/main.py` (start the server and the window; remove Gradio), `app/requirements.txt` (drop `gradio`; keep `soundfile`, `numpy`, `pywebview`), `start.sh`/`start.bat` (drop Gradio env vars; keep `GRADIO_TEMP_DIR` → rename to `VOKALIT_TEMP_DIR`)
+
 
 **Interfaces:**
-- Produces: `build_models() -> None` (called inside `gr.Tab("Models")`).
+- Consumes: Tasks 1–4.
+- Produces: `server.start(ui_dir: Path, port: int = 0) -> tuple[str, str]` (base URL, token), `server.stop()`. Routes (all JSON unless noted; `{"error": "..."}` with HTTP 400 for `WorkspaceError`/`ValueError`):
+  - `GET /` → `ui/index.html` with the token injected as `<meta name="vokalit-token">`; `GET /ui/<file>` static.
+  - `GET /files/<relative path under workspace>` → audio (`audio/wav`), 404 outside `workspace/`.
+  - Models: `GET /api/models` (title, url, license, disk_gb, installed, size_gb, settings, supports_convert), `POST /api/models/<name>/install` → job, `POST /api/models/<name>/cancel`, `POST /api/models/<name>/remove`.
+  - Characters: `GET/POST /api/characters`, `GET/PATCH/DELETE /api/characters/<id>` (`?session=` for session-only), `POST /api/characters/<id>/samples` (body: WAV bytes, `?source=recording|upload`), `PATCH/DELETE /api/characters/<id>/samples/<sid>`.
+  - Sessions: `GET/POST /api/sessions`, `GET/PATCH/DELETE /api/sessions/<id>`, cast (`POST/DELETE /api/sessions/<id>/cast`, `POST .../cast/<cid>/save`), lines (`POST .../lines`, `PATCH/DELETE .../lines/<lid>`, `POST .../lines/order`, `POST .../paste`), settings (`PUT .../settings/<model>`, `DELETE .../settings/<model>`, `PUT/DELETE .../lines/<lid>/settings`), takes (`POST .../lines/<lid>/generate` → job, `POST .../lines/<lid>/convert` body WAV → job, `POST .../lines/<lid>/takes/select`, `DELETE .../lines/<lid>/takes`), `POST .../generate-missing` → job, `POST .../stop`, `POST .../export` → job.
+  - Jobs: `GET /api/jobs/<id>` → `{"state": "running"|"done"|"failed", "progress": str, "log": str, "result": any, "error": str}`.
 
-- [ ] **Step 1 (user, Windows):** Models tab shows Chatterbox with its link, size and Remove; install/cancel still work.
-- [ ] **Step 2: Run** `python3 -m pytest tests -q` → PASS; `python3 -m py_compile app/*.py`.
-- [ ] **Step 3: Commit** `refactor: Models tab`.
+- [ ] **Step 1: Write failing tests** in `tests/test_server.py` (start the server on port 0 with a temp workspace; call it with `urllib`):
+  - `test_token_required`: API call without the token → 403; with it → 200.
+  - `test_foreign_host_refused`: `Host: evil.example` → 403.
+  - `test_files_path_traversal_refused`: `/files/../app/server.py` and an encoded `%2e%2e` variant → 404.
+  - `test_page_has_token_and_csp`: `GET /` contains the token meta tag; response has the CSP header.
+  - `test_session_lifecycle_over_api`: create session, add character + line, `PATCH` text, reorder → `GET` shows the change.
+  - `test_workspace_error_is_400_with_message`: removing a used character → 400 with the workspace message.
+  - `test_sample_upload_wav`: POST 11 s WAV bytes → sample listed; 7 s → 400 "must be at least 10 seconds".
+  - `test_generate_job_with_fake_model`: monkeypatch `models.generate` to write a WAV; generate job reaches `done` and the line has a take.
+- [ ] **Step 2: Run** `python3 -m pytest tests/test_server.py -q` → FAIL.
+- [ ] **Step 3: Implement** `app/server.py`; `app/main.py` starts it and opens `webview.create_window("Vokalit", url)` (private_mode False, storage in `.local/webview`, `--lang=en-US`).
+- [ ] **Step 4: Run** all tests → PASS.
+- [ ] **Step 5: Commit** `feat: local server and API; remove Gradio`.
 
-### Task 6: Characters tab
-
-**Files:**
-- Create: `app/ui_characters.py`
-- Modify: `app/main.py` (add the Characters tab)
-
-**Interfaces:**
-- Consumes: Task 1.
-- Produces: `build_characters() -> None`; `sample_panel(char_id_state, session_id: str | None) -> None` (sample list with ▶, label edit, ★ default, delete; add-by-record/upload that saves automatically on `stop_recording`/`upload`).
-
-Behavior is spec §7.2. Decisions:
-- Delete confirmations are two-step (button shows a confirm row), as in the Models section.
-- Trim: verify whether Gradio fires `edit` after trimming. If it does, overwrite the sample just added; if not, leave as the spec's fallback and note it in the README task.
-
-- [ ] **Step 1 (user, Windows):** spec §11 criteria 5, 10; short (<10 s) recording shows its length; deleting a character lists the sessions that use it.
-- [ ] **Step 2: Run** `python3 -m pytest tests -q` → PASS.
-- [ ] **Step 3: Commit** `feat: Characters tab`.
-
-### Task 7: Studio tab
-
-**Files:**
-- Create: `app/ui_studio.py`
-- Modify: `app/main.py` (Studio tab content; remove `generate()`, `OUTPUTS_DIR` and the single-shot UI)
-
-**Interfaces:**
-- Consumes: Tasks 1–6; `ui_characters.sample_panel(char_id_state, session_id)` from Task 6 for "New character in session"; `models.is_installed` for the model checkboxes.
-- Produces: `build_studio() -> None` (called inside `gr.Blocks`).
-
-Behavior is spec §7.1. With no installed model, the model area shows "Install a model in the Models tab." Decisions the spec leaves open:
-- Session list: `gr.Radio` of session names (value = ID); state `gr.State(session_id)`.
-- Script editor: one `@gr.render(inputs=[session_state, refresh_counter])`; every mutating handler writes through `workspace` and bumps `refresh_counter`.
-- "+ Insert line" between lines calls `add_line(..., after=<previous line id>)` with the previous line's character.
-- Dragging (only if Task 0 passed): the Task 0 mechanism calls `reorder_lines`.
-- Seed field: `gr.Textbox` (empty = random `random.randint(0, 2**31 - 1)`); "Use these settings" on a take copies its seed and settings into the session.
-- Generate with: `gr.Dropdown(choices=installed models, multiselect=True)` bound to `session.models`; the same dropdown in the line details.
-- Session settings: header button toggles a panel with one `gr.Tab` per selected model, sliders built from `models.MODELS[name]["settings"]`, "Reset to model defaults".
-- Line settings: the same sliders in the line details, initialized from `effective_settings`; changes store only differing keys via `set_line_settings`; "Reset to session settings".
-- Layout follows the canvas: collapsed rows + one opened details panel at a time (`gr.State(open_line_id)`).
-- Batch generation is a generator handler that yields the message line ("Line 3/12…"); Stop sets a module-level `threading.Event` checked between lines.
-- A line whose character is missing (`cast_character` is `None`) shows "deleted character" and its Generate/Convert are refused with a message.
-- Convert uses `gr.Audio(sources=["microphone", "upload"], type="filepath", buttons=[])`; the file is copied to `new_recording_path` before conversion.
-
-- [ ] **Step 1 (user, Windows):** run the manual checklist after implementing: spec §11 criteria 1, 2, 3, 6, 7, 8, 9, plus Review Focus 4 (deleted character line refuses to generate) and 5 (paste the edge-case script).
-- [ ] **Step 2: Run** `python3 -m pytest tests -q` → PASS (no regressions); `python3 -m py_compile app/*.py`.
-- [ ] **Step 3: Commit** `feat: Studio tab`.
-
-### Task 8: SPEC in English and cleanup
+### Task 6: UI shell and Models screen
 
 **Files:**
-- Modify: `SPEC.md` (translate to English; replace §7/§7.1 with a pointer to the design doc and a summary; protocol §5.2 gets `seed`/`task`), `.gitignore` (drop `outputs/`), `app/main.py` (no leftovers)
+- Create: `app/ui/index.html`, `app/ui/styles.css`, `app/ui/app.js` (router, API client with token, message line, job polling), `app/ui/models.js`
 
-- [ ] **Step 1:** `grep -rnP "[\x{00C7}\x{00E7}\x{011E}\x{011F}\x{0130}\x{0131}\x{00D6}\x{00F6}\x{015E}\x{015F}\x{00DC}\x{00FC}]" --exclude-dir=.git . | grep -v "^./samples/"` → no output.
-- [ ] **Step 2:** `python3 -m pytest tests -q` → PASS; `git status` shows no `workspace/` files after a manual run.
+Behavior: left rail (Studio, Characters, Models, GPU status), the Models screen of the canvas (status, size, license, link opening in the system browser, Install with confirmation, progress bar + percentage, collapsible log, Cancel, Remove with confirmation). Colors, spacing and type from the canvas (`#111214` background, `#e9a15b` accent, system fonts).
+
+- [ ] **Step 1 (user, Windows):** start the app; Models screen matches the canvas; install/cancel/remove work; external link opens in the browser.
+- [ ] **Step 2: Run** all tests → PASS.
+- [ ] **Step 3: Commit** `feat: UI shell and Models screen`.
+
+### Task 7: Characters screen and browser audio helpers
+
+**Files:**
+- Create: `app/ui/audio.js` (pure: `encodeWav(samples: Float32Array, sampleRate) -> ArrayBuffer`, `trim(samples, sampleRate, startSec, endSec) -> Float32Array`, `peaks(samples, buckets) -> number[]`; browser: `record(deviceId)`, `decodeFile(file)`), `app/ui/waveform.js`, `app/ui/characters.js`, `app/ui/tests/audio.test.mjs`
+
+**Interfaces:** `characters.samplePanel(container, charId, sessionId|null)` reused by Studio for session-only characters.
+
+- [ ] **Step 1: Write failing tests** in `app/ui/tests/audio.test.mjs`: `encodeWav` header (RIFF, 16-bit, mono, rate, data length) and clipping at ±1; `trim(…, 1, 2)` length = 1 s of samples; `peaks` returns `buckets` values in 0..1.
+- [ ] **Step 2: Run** `node --test app/ui/tests/` → FAIL.
+- [ ] **Step 3: Implement** helpers, waveform, Characters screen per canvas (list, rename, samples with ★/▶/label/delete, record with microphone choice + timer + 10 s hint, trim range, upload, delete character listing sessions).
+- [ ] **Step 4: Run** node and pytest suites → PASS.
+- [ ] **Step 5 (user, Windows):** record, trim, upload mp3, set default, delete sample; spec §11 criteria 5, 10.
+- [ ] **Step 6: Commit** `feat: Characters screen`.
+
+### Task 8: Studio screen
+
+**Files:**
+- Create: `app/ui/studio.js` (sessions list + search, header with Generate with multi-select, Settings popover, Export, Generate missing/Stop; cast strip; script rows with drag-and-drop, hover controls, insert-line dividers; line details panel with takes, line settings, Perform this line; paste script dialog), `app/ui/settings.js`
+
+Decisions: rows follow the canvas exactly; one details panel open at a time; drag uses HTML5 DnD on the row handle and calls `POST .../lines/order`; ↑/↓ stay in the ⋯ menu; "Use these settings" fills the seed field and the line settings.
+
+- [ ] **Step 1 (user, Windows):** spec §11 criteria 1–4, 6–9, 13, 14 and Review Focus 4–5.
+- [ ] **Step 2: Run** all tests → PASS.
+- [ ] **Step 3: Commit** `feat: Studio screen`.
+
+### Task 9: SPEC in English and cleanup
+
+**Files:**
+- Modify: `SPEC.md` (translate to English; replace §5.2/§7/§7.1 with a summary and a pointer to the design doc), `.gitignore` (drop `outputs/`), README not in scope.
+
+- [ ] **Step 1:** `grep -rnP "[\x{00C7}\x{00E7}\x{011E}\x{011F}\x{0130}\x{0131}\x{00D6}\x{00F6}\x{015E}\x{015F}\x{00DC}\x{00FC}]" --exclude-dir=.git --exclude-dir=.superpowers . | grep -v "^./samples/"` → no output.
+- [ ] **Step 2:** all tests → PASS; `git status` clean after a manual run.
 - [ ] **Step 3: Commit** `docs: English SPEC for the workspace`.
