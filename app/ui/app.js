@@ -1,6 +1,7 @@
 // App shell: API client, DOM helper, message line, job polling, screen router.
 import { renderCharacters } from "./characters.js";
 import { renderModels } from "./models.js";
+import { renderStudio } from "./studio.js";
 
 const TOKEN = document.querySelector('meta[name="vokalit-token"]').content;
 
@@ -42,7 +43,8 @@ export function el(tag, attrs = {}, ...children) {
     if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
     else if (key === "class") node.setAttribute("class", value);
     else if (key === "style" && typeof value === "object") Object.assign(node.style, value);
-    else if (key in node && typeof value !== "string" && !(node instanceof SVGElement)) node[key] = value;
+    // `value` must be a property (a textarea ignores the attribute); SVG sizes must stay attributes.
+    else if (key === "value" || (key in node && typeof value !== "string" && !(node instanceof SVGElement))) node[key] = value;
     else node.setAttribute(key, value === true ? "" : value);
   }
   for (const child of children.flat()) {
@@ -77,13 +79,9 @@ export function setMessage(node, text = "", kind = "info") {
 
 const SCREENS = {
   models: renderModels,
-  studio: (root) => placeholder(root, "Studio", "The Studio screen comes in the next step."),
+  studio: renderStudio,
   characters: renderCharacters,
 };
-
-function placeholder(root, title, text) {
-  root.append(el("div", { class: "empty" }, el("h1", {}, title), el("p", {}, text)));
-}
 
 let current = null;
 

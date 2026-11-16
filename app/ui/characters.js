@@ -7,9 +7,14 @@ const MIN_SECONDS = 10;
 const COLORS = [["#7aa2f7", "#1b2436"], ["#bb9af7", "#2a2038"], ["#e5c07b", "#2e2716"], ["#6fbf8a", "#17291f"],
   ["#e5807a", "#33201f"], ["#7dcfff", "#162a33"]];
 
+// [color, tint] for a character, stable for its ID.
+export function characterColors(id) {
+  const hash = [...id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
+  return COLORS[hash % COLORS.length];
+}
+
 export function avatar(id, name, size = 28) {
-  const sum = [...id].reduce((total, ch) => total + ch.charCodeAt(0), 0);
-  const [color, tint] = COLORS[sum % COLORS.length];
+  const [color, tint] = characterColors(id);
   return el("div", { class: "avatar", style: { width: `${size}px`, height: `${size}px`, color, background: tint } },
     (name.trim()[0] || "?").toUpperCase());
 }

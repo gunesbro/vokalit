@@ -1,0 +1,679 @@
+// Studio screen: sessions, cast, script lines with takes, generation, export.
+import { api, el, icon, ICONS, setMessage, waitForJob } from "./app.js";
+import { decode, encodeWav, microphones, record } from "./audio.js";
+import { avatar, characterColors, samplePanel } from "./characters.js";
+import { formatTime, moveLine, settingsChanges, takeNumber } from "./script.js";
+import { dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
+import { player } from "./waveform.js";
+
+const ICON_GRIP = ["M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"];
+const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
+const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const when = (created) => created.slice(0, 16).replace("T", " ");
+
+export async function renderStudio(root) {
+  const list = el("div", { class: "list" });
+  const search = el("input", { class: "input", placeholder: "Search", "aria-label": "Search sessions", oninput: () => drawList() });
+  const main = el("div", { class: "main" });
+  const message = el("div", { class: "message", role: "status" });
+  const exportInfo = el("div", { class: "row export-info" });
+  root.append(
+    el("aside", { class: "sidebar" },
+      el("div", { class: "sidebar-head" }, el("h2", {}, "Sessions"),
+        el("button", { class: "btn icon-btn", title: "New session", "aria-label": "New session", onclick: newSession }, icon(ICONS.plus))),
+      el("div", { class: "search" }, search),
+      list),
+    main);
+
+  let sessions = [];
+  let models = [];
+  let library = [];
+  let session = null;
+  let openLine = null;
+  let editing = null; // session-only character whose samples are open
+  let seed = "";
+  let batch = null;
+  let pasting = false;
+  let dragging = null;
+  const generating = new Set();
+  const lineModels = {}; // line id -> models chosen in its details
+  const lineSeeds = {};
+
+  const installed = () => models.filter((m) => m.installed);
+  // Short names ("Chatterbox") keep the header and take labels compact; menus show the full title.
+  const titles = () => Object.fromEntries(models.flatMap((m) => [[m.name, m.title.split(" ")[0]], [`${m.name}-vc`, "Converted"]]));
+  const modelInfo = (name) => models.find((m) => m.name === name);
+  const defaults = (name) => Object.fromEntries((modelInfo(name)?.settings || []).map((s) => [s.key, s.default]));
+  const sessionValues = (name) => ({ ...defaults(name), ...(session.settings[name] || {}) });
+  const castEntry = (id) => session.cast.find((c) => c.character === id);
+  const fail = (error) => setMessage(message, error.message, "error");
+  const sid = () => session.id;
+  const selectedId = () => (location.hash.match(/^#\/studio\/([0-9-]+)/) || [])[1] || sessions[0]?.id;
+
+  function sampleOf(line) {
+    const entry = castEntry(line.character);
+    if (!entry || !entry.samples.length) return null;
+    return entry.samples.find((s) => s.id === line.sample) || entry.samples.find((s) => s.id === entry.default_sample);
+  }
+
+  // --- Loading -------------------------------------------------------------------------------
+
+  async function load() {
+    [sessions, models, library] = await Promise.all([api("GET", "/api/sessions"), api("GET", "/api/models"),
+      api("GET", "/api/characters")]);
+    drawList();
+    const id = selectedId();
+    if (!id) {
+      session = null;
+      main.replaceChildren(el("div", { class: "empty" }, el("h1", {}, "No sessions yet"),
+        el("p", {}, "A session holds a script, its cast and every take you generate."),
+        el("button", { class: "btn btn-primary", onclick: newSession }, "New session")));
+      return;
+    }
+    if (session?.id !== id) { openLine = null; editing = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
+    try {
+      session = await api("GET", `/api/sessions/${id}`);
+    } catch {
+      main.replaceChildren(el("div", { class: "empty" }, el("p", {}, "This session no longer exists.")));
+      return;
+    }
+    draw();
+  }
+
+  async function refresh() {
+    session = await api("GET", `/api/sessions/${sid()}`);
+    draw();
+  }
+
+  // Applies a session returned by the API and redraws.
+  const apply = (data) => { session = data.session || data; draw(); return data; };
+
+  function drawList() {
+    const term = search.value.trim().toLowerCase();
+    const current = selectedId();
+    list.replaceChildren(...sessions.filter((s) => s.name.toLowerCase().includes(term)).map((s) => el("a", {
+      class: "list-item", href: `#/studio/${s.id}`, "aria-current": s.id === current ? "true" : "false" },
+    el("div", { class: "name" }, s.name),
+    el("div", { class: "sub" }, `${plural(s.lines, "line")} · ${when(s.created)}`))));
+  }
+
+  async function newSession() {
+    const created = await api("POST", "/api/sessions", {});
+    location.hash = `#/studio/${created.id}`;
+  }
+
+  // --- Drawing -------------------------------------------------------------------------------
+
+  function draw() {
+    const listed = sessions.find((s) => s.id === session.id);
+    if (listed && listed.lines !== session.lines.length) { listed.lines = session.lines.length; drawList(); }
+    const scroll = main.querySelector(".main-body")?.scrollTop || 0;
+    main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, script()), footer());
+    main.querySelector(".main-body").scrollTop = scroll;
+  }
+
+  function header() {
+    const name = el("input", { class: "title-input", value: session.name, "aria-label": "Session name", onchange: async () => {
+      const value = name.value.trim();
+      if (!value) { name.value = session.name; return; }
+      try {
+        apply(await api("PATCH", `/api/sessions/${sid()}`, { name: value }));
+        sessions = await api("GET", "/api/sessions");
+        drawList();
+      } catch (error) { fail(error); }
+    } });
+    const picker = modelPicker(installed(), session.models, (names) =>
+      api("PATCH", `/api/sessions/${sid()}`, { models: names }).then((data) => { session = data; }, fail));
+    const settingsButton = el("button", { class: "btn", "aria-haspopup": "dialog" }, icon(ICON_SLIDERS), "Settings");
+    settingsButton.onclick = () => popover(settingsButton, sessionSettings(), { align: "right" });
+    const seedInput = el("input", { class: "input seed", placeholder: "Random", value: seed, inputmode: "numeric",
+      "aria-label": "Seed", oninput: () => { seed = seedInput.value.replace(/\D/g, ""); seedInput.value = seed; } });
+    const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More session actions", title: "More" }, icon(ICON_MORE));
+    more.onclick = () => popover(more, el("div", { class: "menu" },
+      el("button", { class: "menu-item danger", onclick: () => confirmDeleteSession(more) }, "Delete session")), { align: "right" });
+    return el("header", { class: "main-head" },
+      name, el("div", { class: "spacer" }),
+      el("div", { class: "muted" }, "Generate with"), picker.element,
+      el("div", { class: "pop-holder" }, settingsButton),
+      el("label", { class: "row muted" }, "Seed", seedInput),
+      el("button", { class: "btn", onclick: exportSession }, "Export"),
+      batch
+        ? el("button", { class: "btn btn-primary", onclick: () => api("POST", `/api/sessions/${sid()}/stop`, {}).catch(fail) }, "Stop")
+        : el("button", { class: "btn btn-primary", onclick: generateMissing }, "Generate missing"),
+      el("div", { class: "pop-holder" }, more));
+  }
+
+  function confirmDeleteSession(anchor) {
+    popover(anchor, el("div", { class: "menu confirm-menu" },
+      el("strong", {}, `Delete “${session.name}”?`),
+      el("div", { class: "muted small" }, "Its lines, takes, recordings and session-only characters are removed permanently."),
+      el("div", { class: "row" },
+        el("button", { class: "btn btn-danger", onclick: async () => {
+          await api("DELETE", `/api/sessions/${sid()}`).catch(fail);
+          session = null;
+          location.hash = "#/studio";
+          load();
+        } }, "Delete session"))), { align: "right" });
+  }
+
+  function sessionSettings() {
+    const names = session.models.length ? session.models : installed().map((m) => m.name);
+    const box = el("div", { class: "settings-panel" });
+    const paint = () => box.replaceChildren(
+      el("div", { class: "row" }, el("h2", {}, "Session settings")),
+      modelTabs(names, titles(), (name) => {
+        const base = defaults(name);
+        const values = sessionValues(name);
+        return el("div", {},
+          sliders(modelInfo(name)?.settings || [], values, base, (spec) => spec.help, (key, value) =>
+            api("PUT", `/api/sessions/${sid()}/settings/${name}`, { ...values, [key]: value })
+              .then((data) => { session = data; paint(); }, fail)),
+          el("div", { class: "row settings-foot" },
+            el("div", { class: "muted small" }, "Default for every line in this session. Lines can override them."),
+            el("div", { class: "spacer" }),
+            el("button", { class: "btn btn-small", disabled: !session.settings[name], onclick: () =>
+              api("DELETE", `/api/sessions/${sid()}/settings/${name}`).then((data) => { session = data; paint(); }, fail) },
+            "Reset to model defaults")));
+      }));
+    if (!names.length) {
+      box.append(el("p", { class: "muted small" }, "Install a model in the Models tab."));
+      return box;
+    }
+    paint();
+    return box;
+  }
+
+  // --- Cast ----------------------------------------------------------------------------------
+
+  function cast() {
+    const add = el("button", { class: "btn btn-ghost" }, icon(ICONS.plus), "Add character");
+    add.onclick = () => popover(add, addCharacterMenu());
+    const section = el("section", { class: "cast", "aria-label": "Cast" },
+      el("div", { class: "muted" }, "Cast"),
+      session.cast.map(chip),
+      el("div", { class: "pop-holder" }, add));
+    if (!editing || !castEntry(editing)) return section;
+    return el("div", {}, section, sessionCharacterEditor(castEntry(editing)));
+  }
+
+  function chip(entry) {
+    const sessionOnly = entry.scope === "session";
+    const deleted = entry.name === null;
+    const label = deleted ? "Deleted character" : entry.name;
+    const meta = deleted ? "" : sessionOnly ? "this session"
+      : entry.samples.length ? plural(entry.samples.length, "sample") : "default voice";
+    const nameNode = deleted ? el("span", { class: "warn" }, label)
+      : sessionOnly ? el("button", { class: "link-btn", title: "Edit samples", onclick: () => { editing = editing === entry.character ? null : entry.character; draw(); } }, label)
+        : el("a", { class: "link-btn", href: `#/characters/${entry.character}`, title: "Open in Characters" }, label);
+    return el("div", { class: "chip" },
+      avatar(entry.character, deleted ? "?" : entry.name, 24), nameNode,
+      meta && el("span", { class: "muted small" }, meta),
+      sessionOnly && el("button", { class: "btn btn-small chip-action", onclick: () =>
+        api("POST", `/api/sessions/${sid()}/cast/${entry.character}/save`, {}).then((data) => {
+          apply(data); setMessage(message, `${entry.name} is now in your character library.`);
+        }, fail) }, "Save to library"),
+      el("button", { class: "chip-x", "aria-label": `Remove ${label} from cast`, title: "Remove from cast", onclick: () =>
+        api("DELETE", `/api/sessions/${sid()}/cast/${entry.character}`).then(apply, fail) }, icon(ICONS.close, 12)));
+  }
+
+  function addCharacterMenu() {
+    const inCast = new Set(session.cast.map((c) => c.character));
+    const available = library.filter((c) => !inCast.has(c.id));
+    const nameInput = el("input", { class: "input", placeholder: "Name", "aria-label": "New character name",
+      onkeydown: (e) => { if (e.key === "Enter") createInSession(); } });
+    async function createInSession() {
+      const value = nameInput.value.trim();
+      if (!value) return nameInput.focus();
+      try {
+        const created = await api("POST", "/api/characters", { name: value, session: sid() });
+        editing = created.id;
+        document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+        await refresh();
+      } catch (error) { fail(error); }
+    }
+    return el("div", { class: "menu add-menu" },
+      el("div", { class: "menu-title" }, "From your library"),
+      available.length ? available.map((c) => el("button", { class: "menu-item", onclick: () => {
+        document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+        api("POST", `/api/sessions/${sid()}/cast`, { character: c.id, scope: "library" }).then(apply, fail);
+      } }, avatar(c.id, c.name, 20), el("span", { class: "grow" }, c.name),
+      el("span", { class: "faint small" }, c.samples.length ? plural(c.samples.length, "sample") : "default voice")))
+        : el("div", { class: "faint small menu-note" }, library.length ? "Everyone is already in the cast." : "No library characters yet."),
+      el("div", { class: "menu-sep" }),
+      el("div", { class: "menu-title" }, "Only in this session"),
+      el("div", { class: "row menu-note" }, nameInput, el("button", { class: "btn", onclick: createInSession }, "Create")));
+  }
+
+  function sessionCharacterEditor(entry) {
+    const name = el("input", { class: "input", value: entry.name, "aria-label": "Character name", onchange: () => {
+      const value = name.value.trim();
+      if (!value) { name.value = entry.name; return; }
+      api("PATCH", `/api/characters/${entry.character}?session=${sid()}`, { name: value }).then(refresh, fail);
+    } });
+    let first = true;
+    return el("div", { class: "cast-editor" },
+      el("div", { class: "row" }, avatar(entry.character, entry.name, 24), name,
+        el("span", { class: "muted small" }, "Only in this session. Save to library to reuse it elsewhere."),
+        el("div", { class: "spacer" }),
+        el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close", onclick: () => { editing = null; draw(); } }, icon(ICONS.close))),
+      samplePanel(null, entry.character, sid(), async () => {
+        if (first) { first = false; return; }
+        session = await api("GET", `/api/sessions/${sid()}`); // keep the panel; chips update on the next redraw
+      }));
+  }
+
+  // --- Script --------------------------------------------------------------------------------
+
+  function script() {
+    const rows = el("div", { class: "script" });
+    if (!session.lines.length) {
+      rows.append(el("div", { class: "script-empty muted" }, session.cast.length
+        ? "No lines yet. Add a line or paste a script."
+        : "Add a character to the cast, then add lines or paste a script."));
+    }
+    session.lines.forEach((line, i) => {
+      rows.append(openLine === line.id ? details(line, i) : row(line, i));
+      if (i < session.lines.length - 1) rows.append(gap(line));
+    });
+    rows.append(el("div", { class: "script-actions" },
+      el("button", { class: "btn btn-ghost", onclick: () => addLine(null) }, icon(ICONS.plus), "Add line"),
+      el("button", { class: "btn btn-ghost", onclick: () => { pasting = !pasting; draw(); } }, "Paste script")));
+    if (pasting) rows.append(pasteBox());
+    return el("section", { class: "script-wrap", "aria-label": "Script" }, rows);
+  }
+
+  function speaker(line) {
+    const deleted = !castEntry(line.character)?.name;
+    const [color] = characterColors(line.character);
+    return el("div", { class: "speaker" },
+      el("div", { class: "row speaker-name" }, dot(deleted ? "var(--faint)" : color, 8),
+        deleted ? el("span", { class: "warn" }, "Deleted character") : line.character_name),
+      el("div", { class: "faint small speaker-sample" }, sampleOf(line)?.label || "default voice"));
+  }
+
+  function row(line, i) {
+    const takes = line.takes;
+    const selected = takes.find((t) => t.file === line.selected);
+    const right = el("div", { class: "row line-right" });
+    if (generating.has(line.id)) {
+      right.append(el("span", { class: "muted small" }, "Generating…"));
+    } else if (selected) {
+      right.append(player(`/files/sessions/${sid()}/${selected.file}`, { buckets: 30, showTime: false, label: "Play selected take" }),
+        el("button", { class: "btn btn-ghost btn-takes", onclick: () => open(line.id) },
+          `${titles()[selected.model] || selected.model} · ${plural(takes.length, "take")}`));
+    } else {
+      right.append(el("button", { class: "btn", onclick: () => generate(line, session.models, seed) }, "Generate"));
+    }
+    const more = el("button", { class: "icon-btn btn btn-ghost hover-only", "aria-label": "More actions" }, icon(ICON_MORE));
+    more.onclick = () => popover(more, lineMenu(line, i, more), { align: "right" });
+    right.append(el("div", { class: "pop-holder" }, more));
+
+    const node = el("div", { class: "line", "data-line": line.id },
+      handle(line), speaker(line),
+      el("div", { class: `line-text ${line.text ? "" : "faint"}` }, line.text || "Empty line"),
+      right);
+    node.addEventListener("click", (e) => { if (!e.target.closest("button, a, input, select, .player, .popover")) open(line.id); });
+    dragTarget(node, line);
+    return node;
+  }
+
+  function lineMenu(line, i, anchor) {
+    const close = () => document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+    const order = session.lines.map((l) => l.id);
+    const move = (to) => { close(); api("POST", `/api/sessions/${sid()}/lines/order`, { order: moveLine(order, line.id, order[to], to > i) }).then(apply, fail); };
+    return el("div", { class: "menu" },
+      el("button", { class: "menu-item", onclick: () => { close(); open(line.id); } }, "Edit and takes"),
+      el("button", { class: "menu-item", onclick: () => { close(); open(line.id); } }, "Perform this line"),
+      el("button", { class: "menu-item", disabled: i === 0, onclick: () => move(i - 1) }, "Move up"),
+      el("button", { class: "menu-item", disabled: i === session.lines.length - 1, onclick: () => move(i + 1) }, "Move down"),
+      el("div", { class: "menu-sep" }),
+      el("button", { class: "menu-item danger", onclick: () => popover(anchor, el("div", { class: "menu confirm-menu" },
+        el("strong", {}, `Delete line ${i + 1}?`),
+        el("div", { class: "muted small" }, line.takes.length ? `Its ${plural(line.takes.length, "take")} are removed permanently.` : "It has no takes."),
+        el("button", { class: "btn btn-danger", onclick: () => { close(); if (openLine === line.id) openLine = null;
+          api("DELETE", `/api/sessions/${sid()}/lines/${line.id}`).then(apply, fail); } }, "Delete line")), { align: "right" }) },
+      "Delete line…"));
+  }
+
+  function handle(line) {
+    return el("button", { class: "handle", "aria-label": "Drag to reorder", title: "Drag to reorder",
+      onpointerdown: (e) => { e.target.closest("[data-line]").draggable = true; },
+      onpointerup: (e) => { e.target.closest("[data-line]").draggable = false; } }, icon(ICON_GRIP, 16));
+  }
+
+  function dragTarget(node, line) {
+    node.addEventListener("dragstart", (e) => {
+      dragging = line.id;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", line.id);
+      node.classList.add("dragging");
+    });
+    node.addEventListener("dragend", () => {
+      node.draggable = false;
+      dragging = null;
+      document.querySelectorAll(".dragging, .drop-before, .drop-after").forEach((n) => n.classList.remove("dragging", "drop-before", "drop-after"));
+    });
+    node.addEventListener("dragover", (e) => {
+      if (!dragging || dragging === line.id) return;
+      e.preventDefault();
+      const box = node.getBoundingClientRect();
+      const after = e.clientY > box.top + box.height / 2;
+      node.classList.toggle("drop-after", after);
+      node.classList.toggle("drop-before", !after);
+    });
+    node.addEventListener("dragleave", () => node.classList.remove("drop-before", "drop-after"));
+    node.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const after = node.classList.contains("drop-after");
+      const moved = dragging;
+      node.classList.remove("drop-before", "drop-after");
+      if (!moved || moved === line.id) return;
+      const order = moveLine(session.lines.map((l) => l.id), moved, line.id, after);
+      api("POST", `/api/sessions/${sid()}/lines/order`, { order }).then(apply, fail);
+    });
+  }
+
+  function gap(line) {
+    return el("div", { class: "gap" },
+      el("button", { class: "insert", onclick: () => addLine(line) }, "+ Insert line"),
+      el("div", { class: "gap-line" }),
+      el("div", { class: "faint num gap-pause" }, `${Number(line.pause_after).toFixed(1)} s pause`));
+  }
+
+  async function addLine(after) {
+    const last = after || session.lines[session.lines.length - 1];
+    const character = last?.character || session.cast.find((c) => c.name)?.character;
+    if (!character) return setMessage(message, "Add a character to the cast first.", "warn");
+    try {
+      const result = await api("POST", `/api/sessions/${sid()}/lines`, { character, after: after?.id || null });
+      openLine = result.id;
+      apply(result);
+      main.querySelector(".line-details textarea")?.focus();
+    } catch (error) { fail(error); }
+  }
+
+  function pasteBox() {
+    const text = el("textarea", { class: "textarea", rows: 6, "aria-label": "Script to paste",
+      placeholder: "Host: Welcome to the show.\nGuest: Thanks for having me." });
+    return el("div", { class: "paste" },
+      text,
+      el("div", { class: "row" },
+        el("button", { class: "btn btn-primary", onclick: async () => {
+          try {
+            const result = await api("POST", `/api/sessions/${sid()}/paste`, { text: text.value });
+            pasting = false;
+            apply(result);
+            setMessage(message, `Added ${plural(result.added, "line")}.`);
+          } catch (error) { fail(error); }
+        } }, "Add lines"),
+        el("button", { class: "btn btn-ghost", onclick: () => { pasting = false; draw(); } }, "Cancel"),
+        el("span", { class: "muted small" }, "One line per speaker as “Name: text”. New names join the cast as session characters.")));
+  }
+
+  function open(lineId) {
+    openLine = lineId;
+    draw();
+  }
+
+  // --- Line details --------------------------------------------------------------------------
+
+  function details(line, i) {
+    const patch = (fields) => api("PATCH", `/api/sessions/${sid()}/lines/${line.id}`, fields).then(apply, fail);
+    const entry = castEntry(line.character);
+    const characterSelect = el("select", { class: "select select-small", "aria-label": "Character",
+      onchange: () => patch({ character: characterSelect.value, sample: null }) },
+    !entry?.name && el("option", { value: line.character, disabled: true }, "Deleted character"),
+    session.cast.filter((c) => c.name).map((c) => el("option", { value: c.character }, c.name)));
+    characterSelect.value = line.character;
+    const sample = sampleOf(line);
+    const sampleSelect = el("select", { class: "select select-small", "aria-label": "Sample", disabled: !entry?.samples.length,
+      onchange: () => patch({ sample: sampleSelect.value }) },
+    entry?.samples.length ? entry.samples.map((s) => el("option", { value: s.id }, s.label)) : el("option", {}, "default voice"));
+    if (sample) sampleSelect.value = sample.id;
+    const text = el("textarea", { class: "textarea line-input", rows: 2, "aria-label": "Line text", value: line.text,
+      onchange: () => patch({ text: text.value }) });
+    const pause = el("input", { class: "input pause", value: line.pause_after, inputmode: "decimal", "aria-label": "Pause after the line in seconds",
+      onchange: () => {
+        const value = Number(pause.value.replace(",", "."));
+        if (!Number.isFinite(value) || value < 0 || value > 10) { pause.value = line.pause_after; return setMessage(message, "Pause must be between 0 and 10 seconds.", "warn"); }
+        patch({ pause_after: value });
+      } });
+
+    const chosen = lineModels[line.id] || session.models;
+    const picker = modelPicker(installed(), chosen, (names) => { lineModels[line.id] = names; draw(); });
+    const lineSeed = el("input", { class: "input seed", placeholder: "Random", value: lineSeeds[line.id] ?? seed, inputmode: "numeric",
+      "aria-label": "Seed for this line", oninput: () => { lineSeeds[line.id] = lineSeed.value.replace(/\D/g, ""); lineSeed.value = lineSeeds[line.id]; } });
+    const count = picker.get().length;
+    const busy = generating.has(line.id);
+
+    const node = el("div", { class: "line-details", "data-line": line.id },
+      el("div", { class: "line detail-top" },
+        handle(line),
+        el("div", { class: "speaker" },
+          el("div", { class: "row speaker-name" }, dot(characterColors(line.character)[0], 8), characterSelect),
+          el("label", { class: "row faint small speaker-sample" }, "Sample", sampleSelect)),
+        text,
+        el("div", { class: "row line-right" },
+          el("label", { class: "row muted" }, "Pause", pause, "s"),
+          el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close details", onclick: () => { openLine = null; draw(); } }, icon(ICONS.close)))),
+      el("div", { class: "detail-row row wrap" },
+        el("div", { class: "muted" }, "Generate with"), picker.element,
+        el("label", { class: "row muted" }, "Seed", lineSeed),
+        el("button", { class: "btn btn-primary", disabled: busy || !count,
+          onclick: () => generate(line, picker.get(), lineSeeds[line.id] ?? seed) },
+        busy ? "Generating…" : `Generate ${plural(count || 0, "take")}`),
+        el("div", { class: "faint small" }, "One take per selected model, so you can compare them.")),
+      lineSettings(line, picker.get()),
+      el("div", { class: "detail-bottom" }, takesList(line), perform(line)));
+    dragTarget(node, line);
+    return node;
+  }
+
+  function lineSettings(line, names) {
+    if (!names.length) return null;
+    const changes = names.reduce((n, name) => n + settingsChanges(line.settings[name], sessionValues(name)).length, 0);
+    return el("section", { class: "detail-row line-settings", "aria-label": "Line settings" },
+      el("div", { class: "row" },
+        el("h3", {}, "Settings for this line"),
+        el("div", { class: `small ${changes ? "accent" : "faint"}` },
+          changes ? `${plural(changes, "change")} from session settings` : "Same as session settings"),
+        el("div", { class: "spacer" }),
+        el("button", { class: "btn btn-small", disabled: !Object.keys(line.settings).length, onclick: () =>
+          api("DELETE", `/api/sessions/${sid()}/lines/${line.id}/settings`).then(apply, fail) }, "Reset to session settings")),
+      modelTabs(names, titles(), (name) => {
+        const base = sessionValues(name);
+        const values = { ...base, ...(line.settings[name] || {}) };
+        return sliders(modelInfo(name)?.settings || [], values, base,
+          (spec, value, baseValue) => (value === baseValue ? "Same as session" : `Session: ${Number(baseValue).toFixed(2)}`),
+          (key, value) => {
+            const overrides = { ...(line.settings[name] || {}), [key]: value };
+            if (value === base[key]) delete overrides[key];
+            api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${name}`, overrides).then(apply, fail);
+          });
+      }));
+  }
+
+  function takesList(line) {
+    const takes = [...line.takes].reverse();
+    return el("section", { class: "takes" },
+      el("h3", {}, "Takes"),
+      takes.length ? takes.map((take) => takeRow(line, take)) : el("p", { class: "muted small" }, "No takes yet."),
+      takes.length > 1 && el("div", { class: "faint small" }, "The selected take is used in the export."));
+  }
+
+  function takeRow(line, take) {
+    const isSelected = take.file === line.selected;
+    const converted = take.kind === "convert";
+    const model = converted ? "Converted" : titles()[take.model] || take.model;
+    const meta = converted
+      ? `from your recording · Chatterbox VC · ${take.duration} s`
+      : `${take.sample_label} · seed ${take.seed} · ${take.duration} s`;
+    const rowNode = el("div", { class: "take" },
+      el("input", { type: "radio", name: `take-${line.id}`, checked: isSelected, "aria-label": `Use take ${takeNumber(take.file)}`,
+        onchange: () => api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/select`, { file: take.file }).then(apply, fail) }),
+      player(`/files/sessions/${sid()}/${take.file}`, { buckets: 60, showTime: false, selected: isSelected }),
+      el("div", { class: "take-info" },
+        el("div", { class: "row" }, dot(modelColor(take.model)), el("span", {}, model),
+          el("span", { class: "muted" }, `· take ${takeNumber(take.file) ?? "?"}`)),
+        el("div", { class: "faint small" }, meta,
+          take.custom_settings && [" · ", el("span", { class: "accent" }, "custom settings")],
+          take.text_changed && [" · ", el("span", { class: "warn", title: take.text }, "text changed")])),
+      !converted && take.settings && el("button", { class: "btn btn-small btn-ghost", title: "Copy this take's seed and settings to the line",
+        onclick: () => useSettings(line, take) }, "Use these settings"),
+      el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Delete take", title: "Delete take", onclick: () => {
+        rowNode.querySelector(".confirm")?.remove();
+        rowNode.append(el("div", { class: "confirm" },
+          el("span", {}, `Delete take ${takeNumber(take.file) ?? ""}? The file is removed.`),
+          el("div", { class: "row" },
+            el("button", { class: "btn btn-danger btn-small", onclick: () =>
+              api("DELETE", `/api/sessions/${sid()}/lines/${line.id}/takes`, { file: take.file }).then(apply, fail) }, "Delete"),
+            el("button", { class: "btn btn-ghost btn-small", onclick: (e) => e.target.closest(".confirm").remove() }, "Cancel"))));
+      } }, icon(ICONS.trash)));
+    return rowNode;
+  }
+
+  async function useSettings(line, take) {
+    lineSeeds[line.id] = String(take.seed);
+    const chosen = lineModels[line.id] || session.models;
+    if (!chosen.includes(take.model)) lineModels[line.id] = [...chosen, take.model];
+    const base = sessionValues(take.model);
+    const overrides = Object.fromEntries(Object.entries(take.settings).filter(([key, value]) => base[key] !== value));
+    try {
+      apply(await api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${take.model}`, overrides));
+      setMessage(message, `Line ${session.lines.findIndex((l) => l.id === line.id) + 1} now uses seed ${take.seed} and that take's settings.`);
+    } catch (error) { fail(error); }
+  }
+
+  function perform(line) {
+    const status = el("div", { class: "muted small grow" }, "Ready to record");
+    const meter = el("div", { class: "meter" }, el("div"));
+    const mic = el("select", { class: "select select-small", "aria-label": "Microphone" });
+    const button = el("button", { class: "record-round", "aria-label": "Record", title: "Record" }, el("span", { class: "rec-dot" }));
+    const fileInput = el("input", { type: "file", accept: "audio/*", class: "sr-only", onchange: async () => {
+      const file = fileInput.files[0];
+      fileInput.value = "";
+      if (!file) return;
+      try {
+        const { samples, sampleRate } = await decode(file);
+        convert(samples, sampleRate);
+      } catch { setMessage(message, "Cannot read this file. Use WAV, MP3, M4A, OGG or FLAC.", "error"); }
+    } });
+    let recorder = null;
+    let ticker = null;
+    const fill = () => microphones().then((devices) => {
+      const current = mic.value;
+      mic.replaceChildren(...devices.map((d, n) => el("option", { value: d.deviceId }, d.label || `Microphone ${n + 1}`)));
+      if (!devices.length) mic.append(el("option", { value: "" }, "Default microphone"));
+      if (devices.some((d) => d.deviceId === current)) mic.value = current;
+    }).catch(() => {});
+    button.onclick = async () => {
+      if (!recorder) {
+        try { recorder = await record(mic.value); } catch (error) { return setMessage(message, `Cannot use the microphone: ${error.message}`, "error"); }
+        fill();
+        button.classList.add("on");
+        button.setAttribute("aria-label", "Stop");
+        ticker = setInterval(() => {
+          status.textContent = `Recording ${formatTime(recorder.seconds())}`;
+          meter.firstChild.style.width = `${Math.min(100, recorder.level() * 100)}%`;
+        }, 200);
+        return;
+      }
+      clearInterval(ticker);
+      const { samples, sampleRate } = await recorder.stop();
+      recorder = null;
+      button.classList.remove("on");
+      button.setAttribute("aria-label", "Record");
+      meter.firstChild.style.width = "0";
+      convert(samples, sampleRate);
+    };
+    async function convert(samples, sampleRate) {
+      if (samples.length < sampleRate * 0.3) { status.textContent = "Too short. Record the whole line."; return; }
+      status.textContent = "Converting…";
+      generating.add(line.id);
+      try {
+        const { id } = await api("POST", `/api/sessions/${sid()}/lines/${line.id}/convert`, encodeWav(samples, sampleRate));
+        await waitForJob(id);
+      } catch (error) { fail(error); }
+      generating.delete(line.id);
+      await refresh();
+    }
+    fill();
+    const name = castEntry(line.character)?.name || "the character";
+    return el("section", { class: "perform" },
+      el("h3", {}, "Perform this line"),
+      el("div", { class: "muted small" }, `Record it with your own delivery; it becomes a take in ${name}’s voice.`),
+      el("div", { class: "row perform-controls" }, button, status, meter,
+        el("button", { class: "btn btn-small", onclick: () => fileInput.click() }, "Upload"), fileInput),
+      el("label", { class: "row faint small" }, "Microphone", mic));
+  }
+
+  // --- Generation and export -----------------------------------------------------------------
+
+  async function generate(line, names, seedValue) {
+    if (!names.length) return setMessage(message, installed().length ? "Choose a model in “Generate with”." : "Install a model in the Models tab.", "warn");
+    const number = session.lines.findIndex((l) => l.id === line.id) + 1;
+    generating.add(line.id);
+    draw();
+    setMessage(message, `Generating line ${number}…`);
+    try {
+      const { id } = await api("POST", `/api/sessions/${sid()}/lines/${line.id}/generate`, { models: names, seed: seedValue || null });
+      await waitForJob(id);
+      setMessage(message, `Line ${number} done.`);
+    } catch (error) { fail(error); }
+    generating.delete(line.id);
+    if (session?.id) await refresh();
+  }
+
+  async function generateMissing() {
+    if (!session.models.length) return setMessage(message, installed().length ? "Choose a model in “Generate with”." : "Install a model in the Models tab.", "warn");
+    if (!session.lines.some((l) => !l.takes.length)) return setMessage(message, "Every line already has a take.");
+    try {
+      const { id } = await api("POST", `/api/sessions/${sid()}/generate-missing`, { seed: seed || null });
+      batch = id;
+      draw();
+      let last = "";
+      const result = await waitForJob(id, (job) => {
+        if (job.progress && job.progress !== last) {
+          last = job.progress;
+          setMessage(message, `${job.progress}…`);
+          refresh();
+        }
+      });
+      setMessage(message, last.startsWith("Stopped") ? last : `Generated ${plural(result.generated, "line")}.`);
+    } catch (error) { fail(error); }
+    batch = null;
+    await refresh();
+  }
+
+  async function exportSession() {
+    setMessage(message, "Exporting…");
+    try {
+      const { id } = await api("POST", `/api/sessions/${sid()}/export`, {});
+      const file = await waitForJob(id);
+      const url = `/files/${file}`;
+      const name = file.split("/").pop();
+      setMessage(message, "");
+      exportInfo.replaceChildren(el("span", { class: "muted" }, `Last export: ${name}`),
+        player(url, { buckets: 40 }),
+        el("a", { href: url, download: name }, "Download"));
+    } catch (error) { setMessage(message, error.message, "warn"); }
+  }
+
+  function footer() {
+    return el("footer", { class: "main-foot" }, message, el("div", { class: "spacer" }), exportInfo);
+  }
+
+  // --- Routing -------------------------------------------------------------------------------
+
+  const onHash = () => {
+    if (!root.isConnected || !(location.hash.startsWith("#/studio") || location.hash === "" || location.hash === "#/")) {
+      window.removeEventListener("hashchange", onHash);
+      return;
+    }
+    load().catch(fail);
+  };
+  window.addEventListener("hashchange", onHash);
+  await load().catch(fail);
+}
