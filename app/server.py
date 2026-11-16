@@ -408,8 +408,9 @@ def reorder_lines(req, sid):
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/paste")
 def paste_script(req, sid):
-    added = ws.paste_script(sid, req["json"]["text"])
-    return {"added": added, "session": get_session(req, sid)}
+    split_long = req["json"].get("split", True)
+    added, split = ws.paste_script(sid, req["json"]["text"], split_over=300 if split_long else None, chunk=250)
+    return {"added": added, "split": split, "session": get_session(req, sid)}
 
 
 @route("PUT", "/api/sessions/(?P<sid>[0-9-]+)/settings/(?P<model>[a-z0-9_-]+)")

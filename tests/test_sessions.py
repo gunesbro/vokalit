@@ -127,9 +127,9 @@ def test_paste_script_edge_cases(tmp_workspace):
     sid = ws.create_session("E")
     host = ws.create_character("Host")
     ws.add_to_cast(sid, host, "library")
-    added = ws.paste_script(sid, "host: Hello\n\nGuest: It's 10:30\nand still going\nHost: Bye")
+    added, split = ws.paste_script(sid, "host: Hello\n\nGuest: It's 10:30\nand still going\nHost: Bye")
     data = ws.load_session(sid)
-    assert added == 3
+    assert (added, split) == (3, 0)
     assert [l["text"] for l in data["lines"]] == ["Hello", "It's 10:30 and still going", "Bye"]
     assert data["lines"][0]["character"] == host
     guest_entry = data["cast"][1]
@@ -205,3 +205,32 @@ def test_sample_language_tag(tmp_workspace, tmp_path):
     assert ws.load_character(cid)["samples"][0]["language"] == "tr"
     ws.set_sample_language(cid, sample, None)
     assert ws.load_character(cid)["samples"][0]["language"] is None
+
+
+def test_split_sentences_matches_the_ui():
+    assert ws.split_sentences("One. Two! Three?", 9) == ["One. Two!", "Three?"]
+    assert ws.split_sentences("A sentence... Next one; still going. Last", 20) == [
+        "A sentence...", "Next one;", "still going. Last"]
+    long = " ".join(["word"] * 100)
+    parts = ws.split_sentences(long, 120)
+    assert all(len(p) <= 120 for p in parts) and " ".join(parts) == long
+    assert ws.split_sentences("   ", 10) == []
+
+
+def test_paste_splits_long_speeches(tmp_workspace):
+    sid = ws.create_session("E")
+    speech = " ".join(f"Sentence number {n} is here." for n in range(1, 31))  # ~830 characters
+    added, split = ws.paste_script(sid, f"Host: Hi.\nGuest: {speech}", split_over=300, chunk=250)
+    lines = ws.load_session(sid)["lines"]
+    assert added == len(lines) and split == 1
+    assert lines[0]["text"] == "Hi."
+    guest = [l["text"] for l in lines[1:]]
+    assert len(guest) > 1 and all(len(t) <= 250 for t in guest) and " ".join(guest) == speech
+    assert len({l["character"] for l in lines[1:]}) == 1
+
+
+def test_paste_can_keep_long_speeches(tmp_workspace):
+    sid = ws.create_session("E")
+    speech = "word " * 200
+    added, split = ws.paste_script(sid, f"Guest: {speech}", split_over=None)
+    assert (added, split) == (1, 0)

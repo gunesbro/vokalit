@@ -454,9 +454,40 @@ def sync_file_names(session_id: str) -> bool:
 _SPEAKER = re.compile(r"^\s*([^:]{1,40}?)\s*:\s*(.*)$")
 
 
-def paste_script(session_id: str, text: str) -> int:
+_SENTENCE_END = re.compile(r"(?<=[.!?\u2026;:])\s+")
+
+
+def split_sentences(text: str, limit: int) -> list[str]:
+    """Chunks of whole sentences of at most `limit` characters; a longer sentence is split between words.
+    Same rule as splitSentences() in app/ui/script.js."""
+    pieces = []
+    for sentence in filter(None, _SENTENCE_END.split(text.strip())):
+        if len(sentence) <= limit:
+            pieces.append(sentence)
+            continue
+        current = ""
+        for word in sentence.split():
+            if current and len(f"{current} {word}") > limit:
+                pieces.append(current)
+                current = word
+            else:
+                current = f"{current} {word}" if current else word
+        if current:
+            pieces.append(current)
+    chunks = []
+    for piece in pieces:
+        if chunks and len(f"{chunks[-1]} {piece}") <= limit:
+            chunks[-1] = f"{chunks[-1]} {piece}"
+        else:
+            chunks.append(piece)
+    return chunks
+
+
+def paste_script(session_id: str, text: str, split_over: int | None = None, chunk: int = 250) -> tuple[int, int]:
     """Adds `Character: text` lines. A line without a speaker continues the previous line.
-    Unknown characters become session-only characters without samples."""
+    Unknown characters become session-only characters without samples. Speeches longer than `split_over`
+    characters become several lines of at most `chunk` characters, split by sentence.
+    Returns (lines added, speeches split)."""
     parsed = []
     for raw in text.splitlines():
         if not raw.strip():
@@ -479,9 +510,16 @@ def paste_script(session_id: str, text: str) -> int:
             char_id = create_character(name, session_id=session_id)
             add_to_cast(session_id, char_id, "session")
             by_name[name.casefold()] = char_id
+    added = split = 0
     for name, line_text in parsed:
-        add_line(session_id, by_name[name.casefold()], line_text)
-    return len(parsed)
+        parts = [line_text]
+        if split_over is not None and len(line_text) > split_over:
+            parts = split_sentences(line_text, chunk)
+            split += len(parts) > 1
+        for part in parts:
+            add_line(session_id, by_name[name.casefold()], part)
+            added += 1
+    return added, split
 
 
 # --- Takes and recordings -----------------------------------------------------------------------

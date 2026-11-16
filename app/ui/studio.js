@@ -20,7 +20,7 @@ const ICON_OPEN = ["M6 9l6 6 6-6"]; // chevron down: open the line
 const ICON_CLOSE = ["M6 15l6-6 6 6"]; // chevron up: close it
 
 const textRows = (text) => Math.min(10, Math.max(2, Math.ceil(text.length / 140) + (text.match(/\n/g) || []).length));
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 const when = (created) => created.slice(0, 16).replace("T", " ");
 
 export async function renderStudio(root) {
@@ -491,19 +491,24 @@ export async function renderStudio(root) {
   function pasteBox() {
     const text = el("textarea", { class: "textarea", rows: 6, "aria-label": "Script to paste",
       placeholder: "Host: Welcome to the show.\nGuest: Thanks for having me." });
+    const split = el("input", { type: "checkbox", checked: true });
     return el("div", { class: "paste" },
       text,
+      el("label", { class: "row small muted paste-option",
+        title: "Models work best with a sentence or two. Long speeches become several lines of the same speaker." },
+      split, `Split speeches longer than ${LONG_LINE} characters into lines by sentence`),
       el("div", { class: "row" },
         el("button", { class: "btn btn-primary", onclick: async () => {
           try {
-            const result = await api("POST", `/api/sessions/${sid()}/paste`, { text: text.value });
+            const result = await api("POST", `/api/sessions/${sid()}/paste`, { text: text.value, split: split.checked });
             pasting = false;
             apply(result);
-            setMessage(message, `Added ${plural(result.added, "line")}.`);
+            const note = result.split ? ` ${plural(result.split, "long speech", "long speeches")} split by sentence.` : "";
+            setMessage(message, `Added ${plural(result.added, "line")}.${note}`);
           } catch (error) { fail(error); }
         } }, "Add lines"),
         el("button", { class: "btn btn-ghost", onclick: () => { pasting = false; draw(); } }, "Cancel"),
-        el("span", { class: "muted small" }, "One line per speaker as “Name: text”. New names join the cast as session characters.")));
+        el("span", { class: "muted small" }, "One line per speaker as \u201cName: text\u201d. New names join the cast as session characters.")));
   }
 
   function open(lineId) {

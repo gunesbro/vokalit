@@ -361,3 +361,5 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .transport-label { color: var(--text); margin-left: 6px; white-space: nowrap; }
 .transport-clock { margin-left: 4px; }
 .line.now-playing, .line-details.now-playing { box-shadow: inset 3px 0 0 var(--accent); background: #1b1813; }
+.paste-option { gap: 8px; cursor: pointer; }
+.paste-option input { accent-color: var(--accent); margin: 0; }
