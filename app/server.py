@@ -555,6 +555,25 @@ EXPORT_INFO = {
 }
 
 
+@route("GET", "/api/sessions/(?P<sid>[0-9-]+)/exports")
+def list_exports(req, sid):
+    _session_or_404(sid)
+    return ws.list_exports(sid)
+
+
+@route("DELETE", "/api/sessions/(?P<sid>[0-9-]+)/exports")
+def delete_export(req, sid):
+    ws.delete_export(sid, str(req["json"].get("name", "")))
+    return ws.list_exports(sid)
+
+
+@route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)/takes/trim")
+def trim_take(req, sid, lid):
+    body = req["json"]
+    ws.trim_take(sid, lid, body["file"], float(body["start"]), float(body["end"]))
+    return get_session(req, sid)
+
+
 @route("GET", "/api/export-formats")
 def export_formats(req):
     return [{"id": f, "label": EXPORT_INFO[f][0], "note": EXPORT_INFO[f][1]} for f in ws.export_formats()]

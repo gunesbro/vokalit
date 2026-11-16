@@ -111,3 +111,15 @@ def test_language_is_passed(installed):
 def test_unsupported_language_is_refused():
     with pytest.raises(ValueError, match="does not support"):
         models.generate("chatterbox", "hello", None, "/x.wav", seed=1, settings={}, language="xx")
+
+
+def test_gpu_error_restarts_the_worker(installed):
+    _, local = installed
+    models.generate("chatterbox", "warm up", None, _out(local, "warm.wav"), seed=1, settings={}, language="tr")
+    first = models._workers["chatterbox"].process
+    with pytest.raises(RuntimeError, match="restarted"):
+        models.generate("chatterbox", "CRASH", None, _out(local, "crash.wav"), seed=1, settings={}, language="tr")
+    assert "chatterbox" not in models._workers and first.wait(timeout=10) is not None
+    out = _out(local, "after.wav")
+    models.generate("chatterbox", "works again", None, out, seed=1, settings={}, language="tr")
+    assert "text=works again" in _read(out)

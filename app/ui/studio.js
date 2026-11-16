@@ -3,10 +3,12 @@ import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJ
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { commonLanguages, findPlayable, formatTime, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
-import { dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
-import { pauseAll, player, stopAudio } from "./waveform.js";
+import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
+import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
+const ICON_SCISSORS = ["M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M20 4L8.1 15.9",
+  "M14.5 14.5L20 20", "M8.1 8.1L12 12"];
 const ICON_PREV = ["M18 6l-8 6 8 6z", "M6 6v12"];
 const ICON_NEXT = ["M6 6l8 6-8 6z", "M18 6v12"];
 const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
@@ -117,8 +119,10 @@ export async function renderStudio(root) {
       return;
     }
     if (session?.id !== id) { stopAll(); picked.clear(); lastPicked = null; openLine = null; editing = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
+    const changed = session?.id !== id;
     try {
       session = await api("GET", `/api/sessions/${id}`);
+      if (changed) loadExports();
     } catch {
       main.replaceChildren(el("div", { class: "empty" }, el("p", {}, "This session no longer exists.")));
       return;
@@ -142,10 +146,81 @@ export async function renderStudio(root) {
   function drawList() {
     const term = search.value.trim().toLowerCase();
     const current = selectedId();
-    list.replaceChildren(...sessions.filter((s) => s.name.toLowerCase().includes(term)).map((s) => el("a", {
-      class: "list-item", href: `#/studio/${s.id}`, "aria-current": s.id === current ? "true" : "false" },
-    el("div", { class: "name" }, s.name),
-    el("div", { class: "sub" }, `${plural(s.lines, "line")} · ${when(s.created)}`))));
+    list.replaceChildren(...sessions.filter((s) => s.name.toLowerCase().includes(term)).map((s) => {
+      const item = el("a", { class: "list-item", href: `#/studio/${s.id}`, "aria-current": s.id === current ? "true" : "false",
+        title: "Right-click to rename or delete" },
+      el("div", { class: "name" }, s.name),
+      el("div", { class: "sub" }, `${plural(s.lines, "line")} \u00b7 ${when(s.created)}`));
+      const more = el("button", { class: "btn btn-ghost icon-btn list-more", "aria-label": `Actions for ${s.name}`, title: "Rename or delete" },
+        icon(ICON_MORE));
+      const holder = el("div", { class: "list-row" }, item, more);
+      const menu = (e) => contextMenu(e, sessionMenu(s, holder));
+      item.addEventListener("contextmenu", menu);
+      more.addEventListener("click", (e) => {
+        const box = more.getBoundingClientRect();
+        menu({ preventDefault() {}, clientX: box.left, clientY: box.bottom + 4 });
+        e.stopPropagation();
+      });
+      return holder;
+    }));
+  }
+
+  function closeMenus() { document.querySelector(".popover")?.dispatchEvent(new Event("close")); }
+
+  // Rename or delete a session from the list (right-click or the ... button).
+  function sessionMenu(entry, holder) {
+    const menu = el("div", { class: "menu" });
+    const actions = () => menu.replaceChildren(
+      el("button", { class: "menu-item", onclick: () => { closeMenus(); renameInList(entry, holder); } }, "Rename"),
+      el("div", { class: "menu-sep" }),
+      el("button", { class: "menu-item danger", onclick: () => menu.replaceChildren(...deleteSessionConfirm(entry, actions)) },
+        "Delete session\u2026"));
+    actions();
+    return menu;
+  }
+
+  function deleteSessionConfirm(entry, back) {
+    return [
+      el("div", { class: "confirm-menu" },
+        el("strong", {}, `Delete \u201c${entry.name}\u201d?`),
+        el("div", { class: "muted small" }, `${entry.lines ? `Its ${plural(entry.lines, "line")}, takes` : "Its takes"}, recordings, `
+          + "exports and session-only characters are removed permanently. This cannot be undone."),
+        el("div", { class: "row" },
+          el("button", { class: "btn btn-danger", onclick: () => { closeMenus(); deleteSession(entry.id); } }, "Delete session"),
+          back && el("button", { class: "btn btn-ghost", onclick: back }, "Cancel")))];
+  }
+
+  async function deleteSession(id) {
+    try {
+      await api("DELETE", `/api/sessions/${id}`);
+      if (session?.id === id) { session = null; location.hash = "#/studio"; }
+      await load();
+    } catch (error) { fail(error); }
+  }
+
+  function renameInList(entry, holder) {
+    const input = el("input", { class: "input list-rename", value: entry.name, "aria-label": "Session name" });
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const value = input.value.trim();
+      if (save && value && value !== entry.name) {
+        try {
+          await api("PATCH", `/api/sessions/${entry.id}`, { name: value });
+          entry.name = value;
+          if (session?.id === entry.id) { session.name = value; draw(); }
+        } catch (error) { fail(error); }
+      }
+      drawList();
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") finish(true);
+      if (e.key === "Escape") { e.stopPropagation(); finish(false); }
+    });
+    input.addEventListener("blur", () => finish(true));
+    holder.replaceChildren(input);
+    input.select();
   }
 
   async function newSession() {
@@ -209,16 +284,8 @@ export async function renderStudio(root) {
   }
 
   function confirmDeleteSession(anchor) {
-    popover(anchor, el("div", { class: "menu confirm-menu" },
-      el("strong", {}, `Delete “${session.name}”?`),
-      el("div", { class: "muted small" }, "Its lines, takes, recordings and session-only characters are removed permanently."),
-      el("div", { class: "row" },
-        el("button", { class: "btn btn-danger", onclick: async () => {
-          await api("DELETE", `/api/sessions/${sid()}`).catch(fail);
-          session = null;
-          location.hash = "#/studio";
-          load();
-        } }, "Delete session"))), { align: "right" });
+    popover(anchor, el("div", { class: "menu" },
+      ...deleteSessionConfirm({ id: session.id, name: session.name, lines: session.lines.length }, null)), { align: "right" });
   }
 
   function sessionSettings() {
@@ -747,10 +814,14 @@ export async function renderStudio(root) {
         el("div", { class: "row" }, dot(modelColor(take.model)), el("span", {}, model),
           el("span", { class: "muted" }, `· take ${takeNumber(take.file) ?? "?"}`)),
         el("div", { class: "faint small" }, meta,
+          take.trimmed_from && [" · ", el("span", { title: `Trimmed copy (${take.trim?.join("\u2013")} s) of ${take.trimmed_from.split("/").pop()}` }, "trimmed")],
           take.custom_settings && [" · ", el("span", { class: "accent", title: "Generated with settings that differ from the session's current ones." }, "custom settings")],
           take.text_changed && [" · ", el("span", { class: "warn", title: `The line's text changed after this take. The take says: \u201c${take.text}\u201d` }, "text changed")])),
       !converted && take.settings && el("button", { class: "btn btn-small btn-ghost", title: "Copy this take's seed and settings to the line",
         onclick: () => useSettings(line, take) }, "Use these settings") || el("span"),
+      el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Trim take", "aria-expanded": "false",
+        title: "Trim: cut silence or noise from the start and end (saved as a new take)",
+        onclick: (e) => toggleTrim(e.currentTarget, rowNode, line, take) }, icon(ICON_SCISSORS)),
       revealButton(`sessions/${sid()}/${take.file}`),
       el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Delete take", title: "Delete take", onclick: () => {
         rowNode.querySelector(".confirm")?.remove();
@@ -764,6 +835,38 @@ export async function renderStudio(root) {
             el("button", { class: "btn btn-ghost btn-small", onclick: (e) => e.target.closest(".confirm").remove() }, "Cancel"))));
       } }, icon(ICONS.trash)));
     return rowNode;
+  }
+
+  // Opens a trim range under a take; saving makes a new trimmed take (the original stays).
+  async function toggleTrim(button, rowNode, line, take) {
+    const open = rowNode.querySelector(".trim-box");
+    if (open) { open.remove(); button.setAttribute("aria-expanded", "false"); return; }
+    button.setAttribute("aria-expanded", "true");
+    const box = el("div", { class: "trim-box" }, el("div", { class: "muted small" }, "Loading\u2026"));
+    rowNode.append(box);
+    try {
+      const { samples, sampleRate } = await decode(`/files/sessions/${sid()}/${take.file}`);
+      const save = el("button", { class: "btn btn-primary btn-small" }, "Save trimmed take");
+      const range = rangeEditor(samples, sampleRate, (start, end) => {
+        save.disabled = end - start < 0.3;
+      });
+      save.onclick = async () => {
+        const [start, end] = range.getRange();
+        save.disabled = true;
+        try {
+          apply(await api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/trim`, { file: take.file, start, end }));
+          setMessage(message, `Saved a trimmed copy of take ${takeNumber(take.file) ?? ""}; it is now selected.`);
+        } catch (error) { save.disabled = false; fail(error); }
+      };
+      box.replaceChildren(
+        el("div", { class: "muted small" }, "Drag the handles to keep only the part you want. The original take is kept."),
+        range.element,
+        el("div", { class: "row" }, save,
+          el("button", { class: "btn btn-ghost btn-small", onclick: () => { box.remove(); button.setAttribute("aria-expanded", "false"); } },
+            "Cancel")));
+    } catch {
+      box.replaceChildren(el("div", { class: "warn small" }, "Cannot read this take's audio."));
+    }
   }
 
   async function useSettings(line, take) {
@@ -936,14 +1039,62 @@ export async function renderStudio(root) {
     try {
       const { id } = await api("POST", `/api/sessions/${sid()}/export`, { format: fmt });
       const file = await waitForJob(id);
-      const name = file.split("/").pop();
-      setMessage(message, "");
-      exportInfo.replaceChildren(
-        player(`/files/${file}`, { buckets: 40, label: "Play the export" }),
-        el("span", { class: "export-name", title: `Last export: ${name}` },
-          el("span", { class: "export-label" }, "Last export: "), name),
-        revealButton(file));
+      setMessage(message, `Exported ${file.split("/").pop()}.`);
+      await loadExports();
     } catch (error) { setMessage(message, error.message, "warn"); }
+  }
+
+  // --- Earlier exports: the newest one in the footer, all of them in a list ------------------
+
+  let exportsList = [];
+
+  async function loadExports() {
+    const id = session?.id;
+    try { exportsList = await api("GET", `/api/sessions/${id}/exports`); } catch { exportsList = []; }
+    if (session?.id === id) paintExports();
+  }
+
+  const sizeText = (bytes) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`);
+
+  function paintExports() {
+    if (!exportsList.length) return exportInfo.replaceChildren();
+    const latest = exportsList[0];
+    const all = el("button", { class: "btn btn-ghost btn-small", "aria-haspopup": "dialog",
+      title: "All exports of this session" }, plural(exportsList.length, "export"), icon(ICONS.chevron, 12));
+    all.onclick = () => popover(all, exportsPanel(), { align: "right", up: true });
+    exportInfo.replaceChildren(
+      player(`/files/${latest.path}`, { buckets: 40, label: "Play the latest export" }),
+      el("span", { class: "export-name", title: `Latest export: ${latest.name} (${when(latest.created)})` },
+        el("span", { class: "export-label" }, "Latest: "), latest.name),
+      revealButton(latest.path),
+      el("div", { class: "pop-holder" }, all));
+  }
+
+  function exportsPanel() {
+    const box = el("div", { class: "menu exports-panel" });
+    const paint = () => box.replaceChildren(
+      el("strong", {}, "Exports"),
+      el("div", { class: "muted small" }, "Files are in this session's exports folder."),
+      ...(exportsList.length ? exportsList.map((item) => {
+        const remove = el("button", { class: "btn btn-ghost icon-btn", "aria-label": `Delete ${item.name}`, title: "Delete this export" },
+          icon(ICONS.trash));
+        remove.onclick = () => {
+          remove.replaceWith(el("button", { class: "btn btn-danger btn-small", onclick: async () => {
+            stopAudio(`/files/${item.path}`);
+            try { exportsList = await api("DELETE", `/api/sessions/${sid()}/exports`, { name: item.name }); } catch (error) { fail(error); }
+            paintExports();
+            paint();
+          } }, "Delete"));
+        };
+        return el("div", { class: "export-item" },
+          player(`/files/${item.path}`, { buckets: 30, showTime: false, label: `Play ${item.name}` }),
+          el("div", { class: "export-item-text" },
+            el("div", { class: "export-item-name", title: item.name }, item.name),
+            el("div", { class: "faint small" }, `${item.format.toUpperCase()} \u00b7 ${sizeText(item.size)} \u00b7 ${when(item.created)}`)),
+          revealButton(item.path), remove);
+      }) : [el("div", { class: "muted small" }, "No exports left.")]));
+    paint();
+    return box;
   }
 
   function footer() {

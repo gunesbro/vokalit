@@ -313,3 +313,27 @@ def test_export_formats_endpoint_and_audio_files(api, monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_show_in_file_manager", lambda path: opened.append(path))
     status, _, _ = api("POST", "/api/reveal", {"path": f"sessions/{sid}/exports/a.mp3"})
     assert status == 200 and len(opened) == 1
+
+
+def test_exports_and_trim_endpoints(api, monkeypatch):
+    def fake_generate(name, text, ref, out, seed, settings, language):
+        make_wav(out, 2)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, lid, _ = _session_with_line(api, "one")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+    _wait(api, job["id"])
+    _, view, _ = api("GET", f"/api/sessions/{sid}")
+    file = view["lines"][0]["takes"][0]["file"]
+    status, body, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/takes/trim", {"file": file, "start": 0.2, "end": 1.2})
+    assert status == 200 and len(body["lines"][0]["takes"]) == 2 and body["lines"][0]["takes"][1]["duration"] == 1.0
+    status, body, _ = api("GET", f"/api/sessions/{sid}/exports")
+    assert status == 200 and body == []
+    _, job, _ = api("POST", f"/api/sessions/{sid}/export", {})
+    _wait(api, job["id"])
+    _, body, _ = api("GET", f"/api/sessions/{sid}/exports")
+    assert len(body) == 1 and body[0]["path"].startswith(f"sessions/{sid}/exports/")
+    status, body, _ = api("DELETE", f"/api/sessions/{sid}/exports", {"name": body[0]["name"]})
+    assert status == 200 and body == []

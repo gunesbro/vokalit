@@ -93,6 +93,7 @@ export function revealButton(path, { text = false } = {}) {
 // One message line per screen: setMessage(node, text, "error" | "warn" | "info").
 export function setMessage(node, text = "", kind = "info") {
   node.textContent = text;
+  node.title = text; // long messages are cut off with "..." in the footer; the full text shows on hover
   node.className = `message ${kind}`;
   node.setAttribute("role", "status");
 }

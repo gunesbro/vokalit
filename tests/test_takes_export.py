@@ -266,3 +266,39 @@ def test_export_refuses_unknown_format(tmp_workspace):
     _add_take(sid, l1, "chatterbox", 1.0)
     with pytest.raises(ws.WorkspaceError, match="cannot export"):
         ws.export_session(sid, "aiff")
+
+
+def test_list_exports_newest_first(tmp_workspace):
+    import os
+    sid, (l1,) = _session_with_lines(["one"])
+    _add_take(sid, l1, "chatterbox", 1.0)
+    first = ws.export_session(sid)
+    second = first.with_name("episode-1-later.wav")
+    second.write_bytes(first.read_bytes())
+    os.utime(second, (first.stat().st_mtime + 60,) * 2)
+    exports = ws.list_exports(sid)
+    assert [e["name"] for e in exports] == ["episode-1-later.wav", first.name]
+    assert exports[0]["path"] == f"sessions/{sid}/exports/episode-1-later.wav"
+    assert exports[0]["format"] == "wav" and exports[0]["size"] > 0 and exports[0]["created"]
+    ws.delete_export(sid, "episode-1-later.wav")
+    assert [e["name"] for e in ws.list_exports(sid)] == [first.name]
+    with pytest.raises(ws.WorkspaceError):
+        ws.delete_export(sid, "../session.json")
+
+
+def test_trim_take_adds_a_trimmed_copy(tmp_workspace):
+    import wave
+    sid, (l1,) = _session_with_lines(["one"])
+    original = _add_take(sid, l1, "chatterbox", 2.0, seed=7)
+    rel = ws.load_session(sid)["lines"][0]["takes"][0]["file"]
+    new = ws.trim_take(sid, l1, rel, 0.5, 1.5)
+    line = ws.load_session(sid)["lines"][0]
+    assert len(line["takes"]) == 2 and line["selected"] == new
+    take = line["takes"][1]
+    assert take["trimmed_from"] == rel and take["trim"] == [0.5, 1.5] and take["seed"] == 7
+    assert take["model"] == "chatterbox" and take["duration"] == 1.0
+    with wave.open(str(ws.session_dir(sid) / new)) as w:
+        assert w.getnframes() == 24000
+    assert original.exists()  # the original take is kept
+    with pytest.raises(ws.WorkspaceError):
+        ws.trim_take(sid, l1, rel, 1.5, 1.6)  # shorter than 0.3 s

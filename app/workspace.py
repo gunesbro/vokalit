@@ -727,3 +727,59 @@ def export_session(session_id: str, fmt: str = "wav") -> Path:
         major, subtype = EXPORT_ENCODINGS[fmt]
         sf.write(str(out), samples.astype(np.float32) / 32768, rate, format=major, subtype=subtype)
     return out
+
+
+def list_exports(session_id: str) -> list[dict]:
+    """Exported files of a session, newest first. `path` is relative to workspace/ (as in /files/ URLs)."""
+    folder = session_dir(session_id) / "exports"
+    if not folder.exists():
+        return []
+    files = [p for p in folder.iterdir() if p.is_file() and p.suffix.lstrip(".") in ("wav", *EXPORT_ENCODINGS)]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return [{
+        "name": p.name, "path": p.relative_to(_root).as_posix(), "format": p.suffix.lstrip("."),
+        "size": p.stat().st_size, "created": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(p.stat().st_mtime)),
+    } for p in files]
+
+
+def delete_export(session_id: str, name: str) -> None:
+    folder = (session_dir(session_id) / "exports").resolve()
+    target = (folder / name).resolve()
+    if target.parent != folder or not target.is_file():
+        raise WorkspaceError("That export no longer exists.")
+    target.unlink()
+
+
+MIN_TRIM_SECONDS = 0.3
+
+
+def trim_take(session_id: str, line_id: str, file: str, start: float, end: float) -> str:
+    """Saves the part [start, end] (seconds) of a take as a new take of the same line, selected. The original
+    take is kept. Returns the new take's file (relative to the session)."""
+    data = load_session(session_id)
+    take = next((t for t in _line(data, line_id)["takes"] if t["file"] == file), None)
+    if take is None:
+        raise WorkspaceError("That take no longer exists.")
+    if end - start < MIN_TRIM_SECONDS:
+        raise WorkspaceError(f"Keep at least {MIN_TRIM_SECONDS} seconds.")
+    with wave.open(str(session_dir(session_id) / file), "rb") as w:
+        params = w.getparams()
+        rate = w.getframerate()
+        first = max(0, round(start * rate))
+        last = min(w.getnframes(), round(end * rate))
+        w.setpos(first)
+        frames = w.readframes(last - first)
+    out = new_take_path(session_id, line_id, take["model"])
+    with wave.open(str(out), "wb") as w:
+        w.setparams(params)
+        w.writeframes(frames)
+    # source_recording stays with the original: deleting the trimmed copy must not delete the shared recording.
+    record = {key: value for key, value in take.items() if key not in ("file", "duration", "created", "source_recording")}
+    record.update(file=str(out), trimmed_from=file, trim=[round(start, 2), round(end, 2)],
+                  duration=round((last - first) / rate, 2), created=_now())
+    add_take(session_id, line_id, record)
+    data = load_session(session_id)
+    new = _line(data, line_id)["takes"][-1]["file"]
+    _line(data, line_id)["selected"] = new
+    save_session(session_id, data)
+    return new

@@ -100,3 +100,28 @@ export function sliders(schema, values, base, note, onCommit) {
       el("div", { class: "faint small" }, note(spec, values[spec.key], base[spec.key])));
   }));
 }
+
+// A menu at the mouse position (right-click). Closes on outside click, Escape or scrolling. Returns close().
+export function contextMenu(event, content) {
+  event.preventDefault();
+  document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+  const box = el("div", { class: "popover context-menu" }, content);
+  document.body.append(box);
+  const { innerWidth, innerHeight } = window;
+  const rect = box.getBoundingClientRect();
+  box.style.left = `${Math.min(event.clientX, innerWidth - rect.width - 8)}px`;
+  box.style.top = `${Math.min(event.clientY, innerHeight - rect.height - 8)}px`;
+  const close = () => {
+    box.remove();
+    document.removeEventListener("pointerdown", outside, true);
+    document.removeEventListener("keydown", escape);
+    window.removeEventListener("wheel", close, true);
+  };
+  const outside = (e) => { if (!box.contains(e.target)) close(); };
+  const escape = (e) => { if (e.key === "Escape") close(); };
+  box.addEventListener("close", close);
+  setTimeout(() => document.addEventListener("pointerdown", outside, true));
+  document.addEventListener("keydown", escape);
+  window.addEventListener("wheel", close, true);
+  return close;
+}

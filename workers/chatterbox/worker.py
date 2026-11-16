@@ -76,6 +76,11 @@ def main():
             sf.write(request["out"], wav.squeeze(0).cpu().numpy(), sample_rate, subtype="PCM_16")
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1))
         except Exception as error:
+            # A CUDA error (e.g. "device-side assert triggered") leaves the GPU context unusable for the rest of this
+            # process: every later request would fail too. Report it and exit; the app starts a fresh worker.
+            if "CUDA" in str(error) or "device-side assert" in str(error):
+                send(ok=False, error=str(error), restart=True)
+                sys.exit(1)
             send(ok=False, error=str(error))
 
 

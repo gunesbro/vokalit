@@ -254,6 +254,12 @@ def _ask(name, message):
         stop(name)
         raise
     if not reply["ok"]:
+        if reply.get("restart"):
+            stop(name)  # the worker exited; the next request starts a fresh one
+            raise RuntimeError(
+                f"The GPU stopped with an internal error, so {MODELS[name]['title']} was restarted (the next take "
+                "loads it again). If it keeps happening with these settings, lower Variation or Expressiveness, or "
+                f"try another seed. Details: {reply['error']}")
         raise RuntimeError(reply["error"])
     return reply["seconds"]
 

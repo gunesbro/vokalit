@@ -28,6 +28,8 @@ class ChatterboxMultilingualTTS:
 
     def generate(self, text, language_id, audio_prompt_path=None, exaggeration=0.5, cfg_weight=0.5,
                  temperature=0.8):
+        if text == "CRASH":  # what a CUDA device-side assert looks like from Python
+            raise RuntimeError("CUDA error: device-side assert triggered")
         if audio_prompt_path:
             self.conds = f"CLONE:{audio_prompt_path}"
         return _Wav(f"voice={self.conds}|language={language_id}|seed={torch.last_seed}|exaggeration={exaggeration}"
