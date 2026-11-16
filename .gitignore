@@ -10,5 +10,5 @@ __pycache__/
 *.m4a
 *.webm
 
-# Voice library (personal recordings).
-voices/
+# User data (sessions, characters, recordings).
+workspace/
