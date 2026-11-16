@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.8** (v1.7'ye göre: pencere verisi `.local/webview`, mikrofon izni hatırlanır; download düğmesi kaldırıldı — §5.3).
+> Durum: **v1.9** (v1.8'e göre: ses kütüphanesi — her kayıt/yükleme otomatik kaydedilir, tekrar kullanılır, silinebilir — §7.1; kriter 16).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -100,8 +100,10 @@ Ağ yalnızca kullanıcı "Install" düğmesine basıp onay verdiğinde, paket v
 - Referans ses bileşeninde "share" (sesi Hugging Face'e yükler) ve "download" (gereksiz) düğmeleri kapalıdır.
 - Pencere (pywebview) gizli modda açılmaz, böylece mikrofon izni hatırlanır; pencerenin verisi `.local/webview/` altında tutulur.
 - Tema yazı tipleri sistem fontlarıdır (Gradio'nun varsayılan temasının Google Fonts'tan font çekmesi engellenir).
-- Gradio'nun geçici dosyaları (yüklenen/kaydedilen sesler) `GRADIO_TEMP_DIR=.local/tmp` altına yazılır,
-  uygulama kapanırken silinir. Sistem geçici klasörüne ses bırakılmaz.
+- Gradio'nun geçici dosyaları `GRADIO_TEMP_DIR=.local/tmp` altına yazılır, uygulama kapanırken silinir.
+  Sistem geçici klasörüne ses bırakılmaz.
+- Her kayıt/yükleme **kalıcı olarak** ses kütüphanesine (`voices/`, §7.1) kaydedilir ve kullanıcı silene kadar
+  diskte şifresiz durur. Bu durum arayüzde ("Saved to library") ve README'de açıkça belirtilir.
 
 **İşçi süreçleri (sesi işleyen yer) — teknik olarak zorunlu:**
 
@@ -181,7 +183,7 @@ Boyutlar kodda küçük bir tablodadır ve "yaklaşık" diye etiketlenir.
 Silinecek klasörü ve açılacak alanı gösterir, onay alınca işçiyi durdurur ve `.local/<model>/`
 klasörünü siler.
 
-## 7. Arayüz (tek sayfa)
+## 7. Arayüz
 
 Tüm arayüz metinleri İngilizce (bkz. V2).
 
@@ -214,6 +216,34 @@ Tüm arayüz metinleri İngilizce (bkz. V2).
 - Kurulu olmayan model sonuç bölümünde "not installed" yazar.
 - Sayfanın altında kısa bir not: "Only use your own voice or voices you have permission to use."
 
+### 7.1 Ses kütüphanesi
+
+Tek tür kayıt vardır: **her mikrofon kaydı ve her yüklenen dosya otomatik olarak kütüphaneye eklenir.**
+
+**Depolama** — proje kökünde `voices/` (`.gitignore`'da açıkça listelenir):
+
+```
+voices/<id>/voice.wav     # ses (wav'a çevrilmiş)
+voices/<id>/info.json     # {"name", "created", "duration", "source": "recording"|"upload"}
+```
+
+- `<id>`: oluşturulma zamanından türetilir (ör. `20261116-142530`); dosya adı sorunlarını önler.
+- Ad (otomatik): kayıt için `Recording 2026-11-16 14:25:30`, yükleme için orijinal dosya adı (uzantısız).
+- Yeniden adlandırma v1'de yok.
+
+**Ne zaman kaydedilir:** Gradio'nun `stop_recording` (kayıt bitti) ve `upload` (dosya yüklendi) olaylarında.
+Gradio'nun ✂ aracıyla kırpma yapılırsa, kırpılmış hâl aynı kütüphane kaydının üzerine yazılır
+(**doğrulanacak:** Gradio'nun kırpma sonrası hangi olayı tetiklediği).
+
+**Arayüz:**
+
+- Ana ekran: referans sesin altında **Saved voices** açılır listesi. Bir ses seçmek onu referans olarak yükler.
+  Yeni kayıt/yükleme sonrası kısa bir bildirim: "Saved to library as …". Yanında not:
+  "Only record or upload your own voice or voices you have permission to use."
+- **Voices** sekmesi: kayıtlı sesler listesi (ad, süre, tarih), seçili sesi dinleme, **Delete** düğmesi.
+  - Delete önce onay ister ("Permanently delete …? This cannot be undone."), sonra `voices/<id>/` klasörünü siler
+    (çöp kutusuna gitmez).
+
 ## 8. Planlanan repo yapısı
 
 ```
@@ -235,6 +265,7 @@ vokalit/
 │       ├── requirements.txt
 │       └── worker.py
 ├── samples/                   # örnek Türkçe test metinleri (ses dosyası YOK)
+├── voices/                    # ses kütüphanesi (§7.1) — .gitignore'da
 ├── outputs/                   # .gitignore'da
 └── .local/                    # .gitignore'da
 ```
@@ -256,6 +287,7 @@ vokalit/
 13. Kayıt alanında bilgisayardaki mikrofonlar listeleniyor ve seçilebiliyor; kayıt durdurulunca kayıt pencerede dinlenebiliyor; temizle (✕) düğmesi kaydı/dosyayı kaldırıyor; "share" düğmesi yok; Gradio'nun kendi düğmeleri İngilizce ve düzgün görünüyor.
 14. Kırpma: Gradio'nun ✂ aracıyla kırpılan kayıt, üretimde kırpılmış hâliyle kullanılıyor.
 15. Repoda ses dosyası yok (`git ls-files | grep -iE "\.(wav|mp3|flac|ogg|m4a|webm)$"` boş) ve README'de Privacy ve Responsible use bölümleri var.
+16. Kütüphane: bir kayıt ve bir yükleme sonrası iki giriş `voices/` altında ve Voices sekmesinde görünüyor; uygulama yeniden açılınca hâlâ duruyorlar; Saved voices listesinden seçilen ses referans olarak yükleniyor; Delete onaydan sonra klasörü siliyor; `git status` `voices/` içeriğini göstermiyor.
 
 ## 10. Riskler
 

@@ -9,3 +9,6 @@ __pycache__/
 *.ogg
 *.m4a
 *.webm
+
+# Voice library (personal recordings).
+voices/
