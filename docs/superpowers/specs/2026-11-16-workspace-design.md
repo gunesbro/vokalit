@@ -1,88 +1,88 @@
-# Vokalit Çalışma Alanı — Tasarım
+# Vokalit Workspace — Design
 
-Tarih: 2026-11-16 · Durum: taslak v2, onay bekliyor
+Date: 2026-11-16 · Status: **approved** (v2)
 
-> "*(öneri)*" ile işaretli maddeler kullanıcının değil, tasarımcının kararıdır; düzeltilebilir.
+> Items marked "*(proposal)*" are the designer's calls, not the user's; they can be revised.
 
-## 1. Amaç ve neden
+## 1. Intent
 
-Vokalit şu an tek seferlik bir araç: bir referans ses, bir metin, bir sonuç. Uygulama kapanınca
-kayıt ve sonuçlar gidiyor. Hedef, insanların **geri dönüp devam edebildiği bir çalışma alanı**:
+Vokalit is currently a one-shot tool: one reference voice, one text, one result. Recordings and
+results are gone when the app closes. The goal is a **workspace people can come back to**:
 
-- Bir ses (karakter) bir kez oluşturulup birden fazla oturumda tekrar tekrar kullanılabilmeli.
-- Üretilen her sesin **hangi karakter/örnekle, hangi modelle, hangi metinle** üretildiği kayıt altında olmalı.
-- Her çalışma ayrı bir **oturum** olmalı; eski oturumlara dönülebilmeli.
-- **Podcast tarzı çok karakterli** işler yapılabilmeli.
-- Aynı cümle **birden fazla modelle** üretilip karşılaştırılabilmeli (projenin çıkış noktası).
-- Duygu ve vurgu, modellerin **gerçekten yapabildiği** yollarla kontrol edilebilmeli: karakter başına
-  birden fazla ses örneği (ör. "calm", "excited") ve kullanıcının kendi seslendirdiği repliği karakterin
-  sesine dönüştürme.
+- A voice (character) is created once and reused across sessions.
+- Every generated clip records **which character/sample, which model and which text** produced it.
+- Each piece of work is a separate **session**; old sessions can be reopened.
+- **Podcast-style, multi-character** work is possible.
+- The same line can be generated with **several models** and compared (the project's origin).
+- Emotion and delivery are controlled in ways the models **actually support**: several voice samples
+  per character (e.g. "calm", "excited"), and converting the user's own performance of a line into
+  the character's voice.
 
-Üretilen sesle ne yapıldığı kullanıcının sorumluluğundadır; uygulama kullanım amacına karışmaz.
+What users do with the generated audio is their responsibility; the app does not police use.
 
-## 2. Hedefler / hedef olmayanlar / anti-hedefler
+## 2. Goals / non-goals / anti-goals
 
-**Hedefler (bu sürüm)**
-1. Oturumlar: oluştur, listele, aç, yeniden adlandır, sil.
-2. Karakterler: oturumlardan bağımsız kütüphane; her karakterde bir veya birden fazla etiketli ses örneği.
-3. Oturum kadrosu: kütüphaneden karakterler + oturuma özel karakterler; **Save as character** düğmesiyle kütüphaneye taşıma.
-4. Senaryo: satırlar (karakter, örnek, metin, sonrasında duraklama).
-5. Satır başına üretim; üretim anında model(ler) seçilir; her deneme (take) kaydedilir.
-6. **Ses dönüştürme (Chatterbox VC):** kullanıcı satırı kendisi kaydeder, karakterin sesine dönüştürülür; sonuç o satırın bir denemesi olur.
-7. **Seed:** her deneme kullandığı seed'i kaydeder; aynı seed ile tekrar üretilebilir.
-8. Denemeler arasından seçme (★), tek satırı yeniden üretme, deneme silme.
-9. Dışa aktarma: seçili denemeler + duraklamalar → tek ses dosyası.
+**Goals (this release)**
+1. Sessions: create, list, open, rename, delete.
+2. Characters: a library independent of sessions; each character has one or more labelled voice samples.
+3. Session cast: library characters + session-only characters; a **Save as character** button moves a session-only character into the library.
+4. Script: lines (character, sample, text, pause after).
+5. Per-line generation; model(s) chosen at generation time; every attempt (take) is kept.
+6. **Voice conversion (Chatterbox VC):** the user records the line, it is converted to the character's voice and becomes a take.
+7. **Seed:** each take records its seed; a take can be reproduced with the same seed.
+8. Choose a take (★), regenerate a single line, delete takes.
+9. Export: selected takes + pauses → one audio file.
 
-**Hedef olmayanlar (sonraki sürümler)**
-- OmniVoice ile gelecekler: ses tasarımı (tariften karakter), kayıt hazırlama (gürültü temizleme,
-  normalleştirme, otomatik yazıya dökme). Bu tasarım onları taşıyabilecek şekilde kurulur.
-- Duygu yoğunluğu ayarı, `[laughter]` gibi etiketler, rakamları kelimeye çevirme.
-- Ses efektleri, model eğitimi, dil modeliyle metin önerisi.
-- Satırları sürükle-bırak ile sıralama, klavye kısayolları.
-- Bulut eşitleme klasörü uyarısı (kullanıcı kararı: gerek yok).
+**Non-goals (later releases)**
+- With OmniVoice: voice design (character from a description), recording prep (denoise, normalize,
+  auto-transcribe). This design must accommodate them.
+- Emotion intensity control, tags such as `[laughter]`, reading numbers.
+- Sound effects, fine-tuning, LLM text suggestions.
+- Drag-and-drop line reordering, keyboard shortcuts.
+- Cloud-sync folder warning (user decision: not needed).
 
-**Anti-hedefler (çalışsa bile başarısızlık sayılır)**
-- Ses, metin veya çıktı bilgisayardan çıkar.
-- Kullanıcının emeği kaybolur (kaydedilmemiş senaryo, kaybolan kayıt, kapanınca giden çıktılar).
-- Modelin desteklemediği bir şeyi destekliyormuş gibi gösteren arayüz (ör. çalışmayan serbest "talimat" kutusu).
+**Anti-goals (failure even if it works)**
+- Voice, text or output leaves the computer.
+- User work is lost (unsaved script, lost recordings, outputs gone on close).
+- UI that pretends a model supports something it does not (e.g. a free-text "instruction" box that does nothing).
 
-## 3. Kısıtlar
+## 3. Constraints
 
-- Gradio 6 + pywebview penceresi (mevcut yapı). Açılır pencereler (toast) uygulama penceresinde görünmüyor; mesajlar sayfada gösterilir.
-- Modeller ayrı süreçlerde (işçiler), JSON satır protokolüyle (SPEC §5.2); bu tasarım protokole iki alan ekler (§8).
-- Modeller üretim başına **tek** referans kaydı alır; birden fazla örnek, satır başına hangisinin kullanılacağının seçilmesi demektir (birleştirilmez).
-- Her iki model de 24 kHz mono çıktı verir.
-- Kod ve arayüz İngilizce; kullanıcı verisi (karakter adları, etiketler, metinler) herhangi bir dilde olabilir.
-- Herkese açık repo: kullanıcı verisi hiçbir koşulda git'e girmez.
+- Gradio 6 + pywebview window (current stack). Toasts do not show in the app window; messages are shown on the page.
+- Models run in separate worker processes using the JSON-lines protocol (SPEC §5.2); this design adds two fields (§8).
+- Models take **one** reference recording per generation; several samples means choosing one per line (they are not merged).
+- Both models output 24 kHz mono.
+- Code, UI and repository documents are English. User data (character names, labels, script text) may be in any language.
+- Public repository: user data must never enter git.
 
-## 4. Yaklaşımlar
+## 4. Approaches
 
-| | A) Gradio ile devam (**seçildi**) | B) Kendi web arayüzü |
+| | A) Stay on Gradio (**chosen**) | B) Custom web UI |
 |---|---|---|
-| Nasıl | `@gr.render` ile satır sayısına göre çizilen senaryo editörü | Aynı pencerede HTML/JS arayüz + küçük Python sunucusu |
-| Artı | Mevcut kod üzerine; tek dil; kayıt, kırpma, oynatıcı hazır | Tam kontrol, akıcı editör |
-| Eksi | Gradio tuhaflıkları; sürükle-bırak yok; uzun senaryolarda yavaşlayabilir | Kod 3–4 kat; kayıt/kırpma/dalga görünümü sıfırdan |
+| How | Script editor drawn per line count with `@gr.render` | HTML/JS UI in the same window + small Python server |
+| Pros | Builds on current code; one language; recorder, trim and player included | Full control, smooth editor |
+| Cons | Gradio quirks; no drag-and-drop; may slow down on long scripts | 3–4× more code; recorder/trim/waveform from scratch |
 
-Elenen: Gradio özel bileşeni (JS derleme ortamı gerektirir; B'nin zorluğu + A'nın sınırları).
+Rejected: a Gradio custom component (needs a JS build toolchain; B's difficulty plus A's limits).
 
-**Seçim A**, kullanıcı kararı: "şimdilik Gradio ile ilerleyip nasıl bir sonuç alacağımızı görelim."
-Depolama ve model katmanları arayüzden bağımsız tutulur; gerekirse yalnızca arayüz B'ye taşınır.
+**Choice A**, user decision: "let's go with Gradio for now and see what we get."
+Storage and model layers stay independent of the UI, so only the UI would need rewriting for B.
 
-## 5. Kullanıcının kararları
+## 5. User decisions
 
-- Her üretim kaydedilir; hangi ses, model ve metinle üretildiği hatırlanır.
-- Oturumlar ayrı; eskilerine dönülebilir.
-- Çok karakterli (podcast tarzı) işler kapsamda.
-- Model **üretim anında** seçilir; aynı satır birden fazla modelle üretilebilir; model kaydedilir ve **dosya adında ipucu** olarak bulunur.
-- Arayüz teknolojisi: Gradio.
-- Karakterler oturumlardan ayrı oluşturulabilir; oturum içinde oluşturulan karakter **düğmeyle** kütüphaneye taşınır, taşınmazsa yalnızca o oturumda kalır.
-- Bir karaktere birden fazla ses kaydı verilebilir.
-- Bulut klasörü uyarısı yok.
-- Bu sürüme: ses dönüştürme ve seed. OmniVoice adımına: ses tasarımı ve kayıt hazırlama.
+- Every generation is kept; which voice, model and text produced it is recorded.
+- Sessions are separate; old ones can be reopened.
+- Multi-character (podcast-style) work is in scope.
+- The model is chosen **at generation time**; a line can be generated with several models; the model is recorded and **hinted in the file name**.
+- UI technology: Gradio.
+- Characters can be created outside sessions; a character created inside a session moves to the library **via a button**, otherwise it stays in that session only.
+- A character can have several voice recordings.
+- No cloud-sync folder warning.
+- This release: voice conversion and seed. With the OmniVoice step: voice design and recording prep.
 
-## 6. Veri modeli ve depolama
+## 6. Data model and storage
 
-Tüm kullanıcı verisi proje kökünde `workspace/` altında *(öneri: tek klasör = kolay yedekleme ve tek `.gitignore` satırı)*.
+All user data lives under `workspace/` in the project root *(proposal: one folder = easy backup, one `.gitignore` line)*.
 
 ```
 workspace/
@@ -91,15 +91,15 @@ workspace/
 │   └── samples/<sample-id>.wav
 └── sessions/<session-id>/
     ├── session.json
-    ├── characters/<character-id>/...   # oturuma özel karakterler, aynı yapı
-    ├── recordings/*.wav                # ses dönüştürme için kullanıcının kendi kayıtları
+    ├── characters/<character-id>/...   # session-only characters, same layout
+    ├── recordings/*.wav                # the user's own recordings for voice conversion
     ├── takes/*.wav
     └── exports/*.wav
 ```
 
-- ID'ler oluşturulma zamanından türetilir (`20261116-161400`); çakışırsa `-2`, `-3` eklenir.
-- Oturuma özel karakter, kütüphanedekiyle **aynı yapıdadır**; "Save as character" klasörü `workspace/characters/` altına taşır ve oturumdaki referansı günceller.
-- Dosyalar okunabilir JSON'dur *(öneri: şeffaflık — kullanıcı neyin nerede olduğunu görebilir)*.
+- IDs derive from creation time (`20261116-161400`); collisions get `-2`, `-3`.
+- A session-only character has **the same layout** as a library one; "Save as character" moves the folder to `workspace/characters/` and updates the session's reference.
+- Files are readable JSON *(proposal: transparency — users can see what is stored where)*.
 
 ### character.json
 
@@ -115,7 +115,7 @@ workspace/
 }
 ```
 
-- Karakterin örneği olmayabilir: o zaman **modelin varsayılan sesini** kullanır (OmniVoice'ta bu her üretimde rastgele bir ses demektir; arayüzde not edilir).
+- A character may have no samples: it then uses **the model's default voice** (for OmniVoice that means a random voice per generation; the UI says so).
 
 ### session.json
 
@@ -132,7 +132,7 @@ workspace/
       "id": "l1",
       "character": "20261116-163000",
       "sample": null,
-      "text": "Bugün yerel yapay zekayı konuşuyoruz.",
+      "text": "We're talking about local AI today.",
       "pause_after": 0.3,
       "selected": "takes/01-burak-chatterbox-take2.wav",
       "takes": [
@@ -142,7 +142,7 @@ workspace/
           "model": "chatterbox",
           "character_name": "Burak",
           "sample_label": "calm",
-          "text": "Bugün yerel yapay zekayı konuşuyoruz.",
+          "text": "We're talking about local AI today.",
           "seed": 1234567,
           "created": "2026-11-16T16:20:11",
           "generation_seconds": 2.1,
@@ -163,14 +163,14 @@ workspace/
 }
 ```
 
-- `line.sample`: `null` = karakterin varsayılan örneği; yoksa örnek ID'si.
-- **Deneme kaydı bir anlık görüntüdür:** metin, karakter adı, örnek etiketi, model ve seed deneme anındaki hâliyle saklanır. Satır sonradan düzenlenirse veya karakter/örnek silinirse geçmiş doğru kalır.
-- **Dosya adı** *(öneri)*: `<satır no 2 hane>-<karakter-slug>-<model>-take<n>.wav`. Satır numarası üretim anındaki sıradır; satırlar sonradan yer değiştirirse ad güncellenmez (yalnızca ipucu; doğru bilgi `session.json`'dadır). Slug: küçük harf, ASCII'ye indirgenmiş, harf/rakam dışı `-`.
-- **Otomatik kayıt:** her değişiklikte `session.json` / `character.json` hemen yazılır (önce geçici dosyaya, sonra yeniden adlandırma — yarım yazılmış dosya olmaz). "Save" düğmesi yoktur.
+- `line.sample`: `null` = the character's default sample; otherwise a sample ID.
+- **A take record is a snapshot:** text, character name, sample label, model and seed are stored as they were at generation time. History stays correct if the line is edited or the character/sample is deleted later.
+- **File name** *(proposal)*: `<line no, 2 digits>-<character-slug>-<model>-take<n>.wav`. The line number is the position at generation time and is not updated if lines move (a hint only; `session.json` is authoritative). Slug: lowercase, ASCII-folded, non-alphanumerics → `-`.
+- **Autosave:** `session.json` / `character.json` are written on every change (temp file, then rename — never half-written). There is no Save button.
 
-## 7. Ekranlar
+## 7. Screens
 
-İki sekme: **Studio** ve **Characters**. Models bölümü (kur/kaldır) Studio'nun üstünde, katlanabilir *(öneri)*.
+Two tabs: **Studio** and **Characters**. The Models section (install/remove) sits at the top of Studio, collapsible *(proposal)*.
 
 ### 7.1 Studio
 
@@ -183,9 +183,9 @@ workspace/
 │                   │ │                                                                │
 │ [Delete session]  │ │ Models: [✓] Chatterbox  [ ] OmniVoice     Seed: [random ]      │
 └───────────────────┘ │                                                                │
-                      │ 1 [Burak ▾][calm ▾] [Bugün yerel yapay zekayı...] pause[0.3] ↑↓✕│
+                      │ 1 [Burak ▾][calm ▾] [We're talking about...    ] pause[0.3] ↑↓✕│
                       │   Takes: ▶ chatterbox #1 ▶ chatterbox #2 ★  [Generate] [Convert]│
-                      │ 2 [Guest ▾][—    ] [Kulağa güzel geliyor.       ] pause[0.3] ↑↓✕│
+                      │ 2 [Guest ▾][—    ] [Sounds great.              ] pause[0.3] ↑↓✕│
                       │   Takes: (none)                             [Generate] [Convert]│
                       │ [+ Line]   [Paste script…]                                     │
                       │                                                                │
@@ -193,20 +193,20 @@ workspace/
                       └────────────────────────────────────────────────────────────────┘
 ```
 
-- **Sessions:** liste (en yeni üstte), yeni oturum (varsayılan ad "Session 2026-11-16 16:14"), ad başlıkta düzenlenebilir *(öneri)*, silme (onaylı, kalıcı: klasör silinir; oturuma özel karakterler de gider — onay metni bunu söyler).
+- **Sessions:** list (newest first), new session (default name "Session 2026-11-16 16:14"), name editable in the header *(proposal)*, delete (confirmed, permanent: the folder is removed, including session-only characters — the confirmation says so).
 - **Cast:**
-  - **Add from library:** kütüphanedeki karakteri kadroya ekler (kopyalamaz, referans verir).
-  - **New character in session:** oturuma özel karakter (ad + isteğe bağlı örnek; örnek eklemek Characters sekmesindeki aynı bileşenle, kadro içinde açılan küçük bir panelde).
-  - **Save as character:** oturuma özel karakteri kütüphaneye taşır; diğer oturumlarda kullanılabilir olur.
-  - Satırlarda kullanılan bir karakter kadrodan çıkarılamaz (mesajla açıklanır).
-- **Models:** kurulu modellerin onay kutuları (varsayılan: kurulu ilk model işaretli *(öneri)*); satır üretimi ve toplu üretim seçili modellerin **her biriyle** birer deneme üretir.
-- **Seed:** boş = rastgele (kullanılan değer denemeye kaydedilir); dolu = o değer. Bir denemenin seed'i tek tıkla bu alana kopyalanabilir *(öneri)*.
-- **Satır:** karakter, örnek (karakterin örnekleri; varsayılan "default"), metin, duraklama (sn, varsayılan 0.3 *(öneri)*), yukarı/aşağı, sil.
-- **Takes:** her deneme bir oynatıcı + etiket (model veya "converted", deneme no, örnek etiketi), ★ seç, sil. İlk deneme otomatik seçili olur. Seçili deneme silinirse en yeni kalan seçilir *(öneri)*. Satırın metni denemenin metninden farklıysa denemede "text changed" işareti görünür *(öneri)*.
-- **Convert:** satırın altında kayıt/yükleme alanı açılır; kullanıcı repliği kendisi seslendirir; Chatterbox VC ile satırın karakter/örneğine dönüştürülür. Kullanıcının kaydı `recordings/` altında saklanır (yeniden dönüştürmek için).
-- **Paste script…** *(öneri)*: `Karakter: metin` biçimindeki satırlar yapıştırılır; kadroda olmayan karakterler **oturuma özel** karakter olarak (örneksiz) eklenir, satırlar sona eklenir.
-- **Generate missing lines:** hiç denemesi olmayan satırları sırayla üretir; ilerleme mesaj satırında ("Line 3/12…"). **Stop**, o anki satır bitince durdurur *(öneri)*.
-- **Export:** her satırın seçili denemesi + `pause_after` sessizliği sırayla birleştirilir → `exports/<oturum-slug>-<zaman>.wav`, oynatıcı + indirme ile gösterilir. Denemesi olmayan satır varsa dışa aktarma yapılmaz, mesajda hangi satırlar olduğu yazılır.
+  - **Add from library:** adds a library character to the cast (a reference, not a copy).
+  - **New character in session:** a session-only character (name + optional samples, using the same sample component as the Characters tab, in a small panel inside the cast).
+  - **Save as character:** moves a session-only character to the library so other sessions can use it.
+  - A character used by lines cannot be removed from the cast (explained in the message line).
+- **Models:** checkboxes of installed models (default: first installed model checked *(proposal)*); line and batch generation produce one take **per checked model**.
+- **Seed:** empty = random (the value used is stored in the take); filled = that value. A take's seed can be copied into this field with one click *(proposal)*.
+- **Line:** character, sample (the character's samples; default "default"), text, pause (seconds, default 0.3 *(proposal)*), up/down, delete.
+- **Takes:** each take has a player + label (model or "converted", take no., sample label), ★ select, delete. The first take is selected automatically. If the selected take is deleted, the newest remaining take is selected *(proposal)*. If the line's text differs from the take's text, the take shows "text changed" *(proposal)*.
+- **Convert:** opens a record/upload area under the line; the user performs the line; Chatterbox VC converts it to the line's character/sample. The user's recording is kept in `recordings/` (to convert again).
+- **Paste script…** *(proposal)*: paste `Character: text` lines; characters not in the cast are added as **session-only** characters (without samples); lines are appended.
+- **Generate missing lines:** generates lines that have no takes, in order; progress in the message line ("Line 3/12…"). **Stop** stops after the current line *(proposal)*.
+- **Export:** the selected take of each line + `pause_after` silence, in order → `exports/<session-slug>-<time>.wav`, shown with a player and download. If any line has no takes, nothing is exported and the message lists those lines.
 
 ### 7.2 Characters
 
@@ -223,68 +223,68 @@ workspace/
 └─────────────────────┘ └──────────────────────────────────────────────────────────────┘
 ```
 
-- Yeni kayıt/yükleme bitince **otomatik olarak** örnek olur (kullanıcı kararıyla uyumlu); etiketi varsayılan "sample N", sonradan düzenlenir. ★ varsayılan örneği seçer.
-- Kırpma: Gradio'nun aracıyla, kayıt alanında yapılır. Gradio kırpma sonrası yeni bir olay tetikliyorsa kırpılmış hâl aynı örneğin üzerine yazılır; tetiklemiyorsa *(öneri)* eklenmiş örnek kırpılmaz, yeniden kaydedilir (inşa sırasında doğrulanır).
-- 10 sn'den kısa ses örnek olarak eklenmez (mesajla süre söylenir).
-- **Karakter silme:** onaylı, kalıcı. Kullanıldığı oturumlar onay metninde listelenir; silinince o oturumlarda karakter "deleted character" olarak görünür, satırları kalır ama yeni üretim için başka karakter seçilmesi gerekir *(öneri)*. Eski denemelerin kaydı korunur.
-- **Örnek silme:** onaylı; o örneği kullanan satırlar varsayılan örneğe döner.
+- A finished recording/upload becomes a sample **automatically** (consistent with the user's decision); default label "sample N", editable. ★ sets the default sample.
+- Trimming: with Gradio's tool, in the recording area. If Gradio fires an event after trimming, the trimmed audio overwrites the same sample; if not *(proposal)*, added samples are not trimmed — re-record instead (verified during build).
+- Audio shorter than 10 s is not added as a sample (the message states its length).
+- **Delete character:** confirmed, permanent. Sessions using it are listed in the confirmation; afterwards they show it as "deleted character", lines remain but a different character must be chosen to generate *(proposal)*. Existing take records are kept.
+- **Delete sample:** confirmed; lines using it fall back to the default sample.
 
-## 8. Üretim akışı ve işçi protokolü
+## 8. Generation flow and worker protocol
 
-**Metinden ses (tts):**
-1. Satırın karakteri ve örneği → `ref` (örnek dosyası yolu) veya `None` (örneksiz karakter → model varsayılan sesi).
-2. Seed belirlenir (alan boşsa rastgele).
-3. Seçili her model için işçiye istek; çıktı doğrudan `takes/` altına yazılır.
-4. Deneme `session.json`'a eklenir; satırın seçili denemesi yoksa bu olur.
-5. Bir model hata verirse diğerleri devam eder; hata mesaj satırında gösterilir.
+**Text to speech (tts):**
+1. Line character + sample → `ref` (sample file path) or `None` (character without samples → model default voice).
+2. Seed is chosen (random if the field is empty).
+3. One request per checked model; output is written straight to `takes/`.
+4. The take is added to `session.json`; it becomes the selected take if the line has none.
+5. If one model fails, the others continue; the error is shown in the message line.
 
-**Ses dönüştürme (convert):** kullanıcı kaydı `recordings/` altına kaydedilir → Chatterbox işçisine dönüştürme isteği → deneme (`kind: "convert"`, `model: "chatterbox-vc"`).
+**Voice conversion (convert):** the user's recording is saved to `recordings/` → conversion request to the Chatterbox worker → take (`kind: "convert"`, `model: "chatterbox-vc"`).
 
-**Protokol eklemeleri (SPEC §5.2):**
+**Protocol additions (SPEC §5.2):**
 
 ```
-→ {"text": "...", "ref": "<yol>|null", "out": "<yol>", "seed": 1234567}                   # tts
-→ {"task": "convert", "source": "<yol>", "ref": "<yol>|null", "out": "<yol>"}             # yalnızca Chatterbox
-← {"ok": true, "out": "<yol>", "seconds": 1.2}
+→ {"text": "...", "ref": "<path>|null", "out": "<path>", "seed": 1234567}                 # tts
+→ {"task": "convert", "source": "<path>", "ref": "<path>|null", "out": "<path>"}          # Chatterbox only
+← {"ok": true, "out": "<path>", "seconds": 1.2}
 ```
 
-- `task` yoksa `tts` kabul edilir (geriye uyumlu).
-- Chatterbox işçisi seed'i üretimden önce `torch.manual_seed` (+ CUDA) ile uygular.
-- Dönüştürme modeli (`ChatterboxVC`) ilk dönüştürme isteğinde yüklenir, sonra açık kalır. Varsayılan ses için `ref: null` → VC'nin yerleşik sesi.
-- **Kurulum:** VC model dosyalarının da kurulumda indirilmesi gerekir (`--download` adımı VC'yi de yükler). Mevcut Chatterbox kurulumları yeniden kurulmalı (şu an tek kullanıcı var). Hangi dosyaların ek olarak indiği ve ölçülen boyut inşa sırasında doğrulanır.
+- Missing `task` means `tts` (backward compatible).
+- The Chatterbox worker applies the seed with `torch.manual_seed` (+ CUDA) before generating.
+- The conversion model (`ChatterboxVC`) loads on the first conversion request and stays loaded. `ref: null` → VC's built-in voice.
+- **Install:** the VC model files must also be downloaded at install time (`--download` also loads VC). Existing Chatterbox installs must be reinstalled (currently one user). Which extra files are downloaded and the measured size are verified during the build.
 
-## 9. Gizlilik
+## 9. Privacy
 
-- `workspace/` `.gitignore`'da; kök `voices/` satırı kaldırılır.
-- Geçici klasör (`.local/tmp`) davranışı aynı kalır; karakter örnekleri ve dönüştürme kayıtları `workspace/` altına **kopyalanır**.
-- Ses dönüştürme de işçide, ağ engeli altında çalışır.
+- `workspace/` is in `.gitignore`; the root `voices/` line is removed.
+- The temp folder (`.local/tmp`) behaves as before; samples and conversion recordings are **copied** into `workspace/`.
+- Voice conversion also runs in the worker, under the network block.
 
-## 10. Mevcut kodla ilişkisi
+## 10. Relation to existing code
 
-- `app/models.py`: kurulum/işçi yönetimi aynı; `generate()` seed alır, yeni `convert()` eklenir.
-- `workers/chatterbox/worker.py`: seed, `task: "convert"`, `--download`'da VC.
-- `app/main.py` arayüzü yeniden yazılır; depolama yeni bir `app/workspace.py` modülünde (oturum/karakter okuma-yazma, dışa aktarma) — arayüzden bağımsız, Gradio'suz test edilebilir.
-- `outputs/` klasörü kalkar (yerini `takes/` ve `exports/` alır). Henüz kullanıcı olmadığı için taşıma yok.
-- SPEC.md bu tasarım onaylanınca güncellenir (§7 ve §7.1 yerine bu yapı).
+- `app/models.py`: install/worker management unchanged; `generate()` takes a seed; new `convert()`.
+- `workers/chatterbox/worker.py`: seed, `task: "convert"`, VC in `--download`.
+- `app/main.py` UI is rewritten; storage goes into a new `app/workspace.py` (session/character read-write, export) — independent of the UI, testable without Gradio.
+- The `outputs/` folder goes away (replaced by `takes/` and `exports/`). No migration (no users yet).
+- SPEC.md is updated (translated to English, §7 and §7.1 replaced by this structure).
 
-## 11. Başarı kriterleri
+## 11. Success criteria
 
-1. İki karakterli (biri kütüphaneden, biri oturuma özel), 3 satırlık bir oturum oluşturulur; uygulama kapatılıp açılınca her şey (kadro, satırlar, örnek seçimleri, denemeler, ★) aynen geri gelir.
-2. Bir satır iki modelle üretilince iki deneme oluşur; etiketleri ve dosya adları modeli gösterir.
-3. Bir satır yeniden üretilince yeni deneme eklenir, eskiler kalır; ★ ile seçim değişir.
-4. Aynı metin, örnek, model ve seed ile iki üretim aynı sesi verir (Chatterbox için doğrulanır).
-5. Bir karakterin iki örneğiyle ("calm", "excited") üretilen denemeler kulakla ayırt edilebilir ve kayıtlarında doğru etiket yazar.
-6. Convert: kullanıcının kaydı karakterin sesine dönüşür; deneme `converted` olarak görünür; kaynak kayıt `recordings/` altındadır.
-7. "Save as character" sonrası karakter başka bir oturumun kadrosuna eklenebilir; ilk oturum onu kütüphaneden kullanmaya devam eder.
-8. Export, seçili denemeleri ve duraklamaları doğru sırayla tek dosyada birleştirir (süre = denemeler + duraklamalar).
-9. Satır metni değiştirilince eski denemenin kaydında eski metin kalır ve "text changed" görünür.
-10. Silinen karakter/örnek, eski denemelerin kayıtlarını bozmaz.
-11. `git status` `workspace/` içeriğini hiç göstermez.
-12. `app/workspace.py` için Gradio'suz birim testleri (oturum/karakter oluşturma, kaydet/yükle, Save as character, export birleştirme, silme).
+1. A session with two characters (one from the library, one session-only) and 3 lines is created; after closing and reopening the app, everything (cast, lines, sample choices, takes, ★) is restored.
+2. Generating a line with two models produces two takes whose labels and file names show the model.
+3. Regenerating a line adds a take and keeps the old ones; ★ changes the selection.
+4. Same text, sample, model and seed produce the same audio (verified for Chatterbox).
+5. Takes made with two samples of a character ("calm", "excited") are audibly different and record the right label.
+6. Convert: the user's recording becomes the character's voice; the take shows as "converted"; the source recording is in `recordings/`.
+7. After "Save as character", the character can be added to another session's cast; the first session keeps using it from the library.
+8. Export joins selected takes and pauses in order into one file (duration = takes + pauses).
+9. After editing a line's text, the old take keeps the old text and shows "text changed".
+10. Deleting a character/sample does not break existing take records.
+11. `git status` never shows `workspace/` content.
+12. Unit tests for `app/workspace.py` without Gradio (create session/character, save/load, Save as character, export join, delete).
 
-## 12. İnşa edene bırakılanlar
+## 12. Left to the builder
 
-- Gradio bileşenlerinin tam yerleşimi ve düğme metinleri (taslaklar yön gösterir).
-- Uzun senaryolarda `@gr.render` performansı ölçülür; yavaşsa sayfalama/katlama eklenebilir (kullanıcıya sorularak).
-- Slug ve ID üretiminin ayrıntıları.
-- VC model dosyalarının hangi isimlerle indiği ve kurulum boyutuna etkisi.
+- Exact Gradio layout and button labels (the sketches give direction).
+- `@gr.render` performance on long scripts is measured; paging/collapsing may be added if slow (ask the user first).
+- Slug and ID details.
+- Which files VC downloads and the effect on install size.
