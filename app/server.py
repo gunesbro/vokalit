@@ -3,6 +3,7 @@
 Listens on 127.0.0.1 only. Every API request must carry the per-run token; requests for another
 Host are refused (DNS rebinding); the page may load nothing from outside (CSP). See spec 4.1.
 """
+import functools
 import json
 import random
 import re
@@ -87,7 +88,7 @@ def _model_view(name):
     return {"name": name, "title": info["title"], "summary": info["summary"], "url": info["url"],
             "license": info["license"],
             "disk_gb": info["disk_gb"], "installed": installed,
-            "size_gb": round(models.size_gb(name), 1) if installed else None,
+            "size_gb": round(models.installed_size_gb(name), 1) if installed else None,
             "settings": info["settings"], "supports_convert": info.get("supports_convert", False)}
 
 
@@ -159,6 +160,7 @@ def get_job(req, job_id):
     return _jobs[job_id]
 
 
+@functools.cache  # the GPU does not change while the app runs; nvidia-smi takes a moment on Windows
 def _gpu_name():
     """Name and memory of the first NVIDIA GPU, or None (nvidia-smi ships with the driver)."""
     try:
@@ -205,7 +207,12 @@ def remove_model(req, name):
 
 @route("GET", "/api/characters")
 def list_characters(req):
-    return [{**data, "id": cid, "used_in": ws.sessions_using(cid)} for cid, data in ws.list_characters()]
+    sessions = ws.list_sessions()  # read once, not once per character
+
+    def used(cid):
+        return [d["name"] for _, d in sessions if any(c["character"] == cid and c["scope"] == "library" for c in d["cast"])]
+
+    return [{**data, "id": cid, "used_in": used(cid)} for cid, data in ws.list_characters()]
 
 
 @route("POST", "/api/characters")

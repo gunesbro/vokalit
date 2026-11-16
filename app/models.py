@@ -68,6 +68,19 @@ def is_installed(name):
     return os.path.exists(_marker(name))
 
 
+def installed_size_gb(name):
+    """Disk use of an installed model. Measured once at install and kept in the marker file: walking tens of
+    thousands of files on every request made the Models and Studio screens slow."""
+    try:
+        with open(_marker(name), encoding="utf-8") as f:
+            return float(f.read().strip())
+    except ValueError:  # installed before sizes were stored
+        size = round(size_gb(name), 2)
+        with open(_marker(name), "w", encoding="utf-8") as f:
+            f.write(f"{size:.2f}")
+        return size
+
+
 def size_gb(name):
     seen, total = set(), 0
     for folder, _, files in os.walk(model_dir(name)):
@@ -157,8 +170,10 @@ def install(name):
         remove(name)
         raise
     shutil.rmtree(uv_cache, ignore_errors=True)  # the venv keeps its own (hard-linked) copies
-    open(_marker(name), "w").close()
-    yield "log", f"Done. Disk usage: {size_gb(name):.1f} GB\n"
+    size = round(size_gb(name), 2)
+    with open(_marker(name), "w", encoding="utf-8") as f:
+        f.write(f"{size:.2f}")
+    yield "log", f"Done. Disk usage: {size:.1f} GB\n"
 
 
 def cancel_install(name):
