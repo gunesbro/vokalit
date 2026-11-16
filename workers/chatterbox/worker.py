@@ -27,8 +27,10 @@ def block_network():
 def main():
     if "--download" in sys.argv:
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+        from chatterbox.vc import ChatterboxVC
 
         ChatterboxMultilingualTTS.from_pretrained(device="cpu")
+        ChatterboxVC.from_pretrained(device="cpu")
         return
 
     block_network()  # before any library is imported
@@ -51,14 +53,29 @@ def main():
     default_conds = model.conds
     send(ready=True)
 
+    vc = None  # the conversion model loads on the first convert request
+
     for line in sys.stdin:
         request = json.loads(line)
         try:
             start = time.perf_counter()
-            if not request.get("ref"):
-                model.conds = default_conds  # otherwise the last cloned voice would be used
-            wav = model.generate(request["text"], language_id=LANGUAGE, audio_prompt_path=request.get("ref"))
-            sf.write(request["out"], wav.squeeze(0).cpu().numpy(), model.sr)
+            if request.get("task", "tts") == "convert":
+                if vc is None:
+                    from chatterbox.vc import ChatterboxVC
+
+                    vc = ChatterboxVC.from_pretrained(device="cuda")
+                wav = vc.generate(audio=request["source"], target_voice_path=request.get("ref"))
+                sample_rate = vc.sr
+            else:
+                if request.get("seed") is not None:
+                    torch.manual_seed(request["seed"])
+                if not request.get("ref"):
+                    model.conds = default_conds  # otherwise the last cloned voice would be used
+                wav = model.generate(request["text"], language_id=LANGUAGE, audio_prompt_path=request.get("ref"),
+                                     **request.get("settings", {}))
+                sample_rate = model.sr
+            # 16-bit PCM so the app can join takes with the standard wave module.
+            sf.write(request["out"], wav.squeeze(0).cpu().numpy(), sample_rate, subtype="PCM_16")
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1))
         except Exception as error:
             send(ok=False, error=str(error))

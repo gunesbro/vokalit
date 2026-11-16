@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 import time
 
@@ -143,7 +144,7 @@ def generate(mode, ref, text):
             continue
         out = os.path.join(OUTPUTS_DIR, f"{stamp}-{name}.wav")
         try:
-            seconds = models.generate(name, text, ref, out)
+            seconds = models.generate(name, text, ref, out, seed=random.randint(0, 2**31 - 1), settings={})
         except Exception as error:
             errors.append(f"{info['title']}: {error}")
             results.append(gr.update(value=None, label=f"{info['title']} (failed)"))

@@ -21,6 +21,15 @@ MODELS = {
         "url": "https://huggingface.co/ResembleAI/chatterbox",
         "disk_gb": 11.3,  # measured on Windows (SPEC.md §6.1)
         "license": "MIT",
+        "supports_convert": True,
+        "settings": [
+            {"key": "exaggeration", "label": "Expressiveness", "min": 0.25, "max": 2.0, "step": 0.05, "default": 0.5,
+             "help": "Higher is more emotional and dramatic. Above 1 can get unstable."},
+            {"key": "cfg_weight", "label": "Pace control", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.5,
+             "help": "Lower gives slower, more deliberate speech. Try 0 if the accent drifts."},
+            {"key": "temperature", "label": "Variation", "min": 0.05, "max": 5.0, "step": 0.05, "default": 0.8,
+             "help": "Higher makes each take differ more."},
+        ],
         "pip_steps": [
             ("PyTorch with CUDA", TORCH_CUDA),
             ("Other libraries", ["-r", os.path.join(ROOT, "workers", "chatterbox", "requirements.txt")]),
@@ -191,18 +200,46 @@ class _Worker:
             return self._read()
 
 
-def generate(name, text, ref, out):
-    """Returns the generation time in seconds. The model is loaded on first use and stays loaded."""
+def default_settings(name):
+    return {s["key"]: s["default"] for s in MODELS[name]["settings"]}
+
+
+def validate_settings(name, settings):
+    """Fills in defaults. ValueError on a key the model does not declare or a value out of range."""
+    spec = {s["key"]: s for s in MODELS[name]["settings"]}
+    for key, value in settings.items():
+        if key not in spec:
+            raise ValueError(f"{MODELS[name]['title']} has no setting '{key}'.")
+        if not spec[key]["min"] <= value <= spec[key]["max"]:
+            raise ValueError(f"{spec[key]['label']} must be between {spec[key]['min']} and {spec[key]['max']}.")
+    return {**default_settings(name), **settings}
+
+
+def _ask(name, message):
+    """Sends one request to the model's worker. The model is loaded on first use and stays loaded."""
     try:
         if name not in _workers:
             _workers[name] = _Worker(name)
-        reply = _workers[name].request({"text": text, "ref": ref, "out": out})
+        reply = _workers[name].request(message)
     except Exception:
         stop(name)
         raise
     if not reply["ok"]:
         raise RuntimeError(reply["error"])
     return reply["seconds"]
+
+
+def generate(name, text, ref, out, seed, settings):
+    """Returns the generation time in seconds."""
+    settings = validate_settings(name, settings)
+    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings})
+
+
+def convert(name, source, ref, out):
+    """Speaks `source` (the user's recording) in the voice of `ref` (None = built-in voice)."""
+    if not MODELS[name].get("supports_convert"):
+        raise RuntimeError(f"{MODELS[name]['title']} does not support voice conversion.")
+    return _ask(name, {"task": "convert", "source": source, "ref": ref, "out": out})
 
 
 def stop(name):
