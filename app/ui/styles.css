@@ -345,3 +345,9 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .detail-text { padding: 0 16px 12px 44px; display: flex; flex-direction: column; gap: 4px; }
 .detail-text .line-input { width: 100%; min-height: 64px; line-height: 1.55; }
 .detail-head .select-small { height: 28px; padding: 0 6px; }
+
+@keyframes close-details { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px) scale(.995); } }
+@keyframes row-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.line-details.closing { animation: close-details .18s ease-in forwards; pointer-events: none; }
+.line.reopened { animation: row-in .2s ease-out; }
+@media (prefers-reduced-motion: reduce) { .line.reopened { animation: none; } }

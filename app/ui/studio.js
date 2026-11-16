@@ -38,6 +38,7 @@ export async function renderStudio(root) {
   let library = [];
   let session = null;
   let openLine = null;
+  let justClosed = null; // the row that replaces closed details fades in
   let editing = null; // session-only character whose samples are open
   let seed = "";
   let batch = null;
@@ -359,7 +360,8 @@ export async function renderStudio(root) {
         onclick: () => open(line.id) }, icon(ICON_OPEN, 16)));
 
     const long = line.text.length > LONG_LINE;
-    const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""}`, "data-line": line.id,
+    const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""} ${justClosed === line.id ? "reopened" : ""}`,
+      "data-line": line.id,
       title: "Click to edit the line and its takes" },
     handle(line), speaker(line),
     el("div", { class: "line-body" },
@@ -550,7 +552,19 @@ export async function renderStudio(root) {
       text.rows = textRows(text.value);
     });
 
-    const close = async () => { await pendingText[line.id]?.(); openLine = null; draw(); };
+    // Plays the closing animation, then shows the row again (which fades in).
+    const close = async () => {
+      if (node.classList.contains("closing")) return;
+      await pendingText[line.id]?.();
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        node.classList.add("closing");
+        await new Promise((done) => { node.addEventListener("animationend", done, { once: true }); setTimeout(done, 300); });
+      }
+      openLine = null;
+      justClosed = line.id;
+      draw();
+      justClosed = null;
+    };
     const counter = el("span", { class: "faint small num" }, `${line.text.length} characters`);
     text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
     const head = el("div", { class: "detail-head", title: "Click an empty spot to close" },
