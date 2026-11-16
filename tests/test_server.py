@@ -154,3 +154,15 @@ def test_generate_job_with_fake_model(api, monkeypatch, tmp_path):
     take = view["lines"][0]["takes"][0]
     assert take["model"] == "chatterbox" and take["seed"] == 7 and take["sample_label"] == "sample 1"
     assert view["lines"][0]["selected"] == take["file"]
+
+
+def test_system_reports_gpu(api, monkeypatch):
+    monkeypatch.setattr(server, "_gpu_name", lambda: "NVIDIA GeForce RTX 4070 SUPER, 12282 MiB")
+    status, body, _ = api("GET", "/api/system")
+    assert status == 200 and body["gpu"] == "NVIDIA GeForce RTX 4070 SUPER, 12282 MiB"
+
+
+def test_models_have_summary(api):
+    _, body, _ = api("GET", "/api/models")
+    chatterbox = next(m for m in body if m["name"] == "chatterbox")
+    assert "23 languages" in chatterbox["summary"]

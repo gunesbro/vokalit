@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vokalit</title>
+<link rel="stylesheet" href="/ui/styles.css">
+<script type="module" src="/ui/app.js"></script>
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <div class="logo" aria-hidden="true">V</div>
+    <a href="#/studio" data-screen="studio" aria-label="Studio" title="Studio">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/></svg>
+    </a>
+    <a href="#/characters" data-screen="characters" aria-label="Characters" title="Characters">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/></svg>
+    </a>
+    <a href="#/models" data-screen="models" aria-label="Models" title="Models">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
+    </a>
+    <div class="spacer"></div>
+    <div class="gpu" id="gpu" title="Checking GPU"><span class="dot"></span>GPU</div>
+  </nav>
+  <div id="screen" class="screen"></div>
+</div>
+</body>
+</html>

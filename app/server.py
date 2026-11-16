@@ -7,6 +7,7 @@ import json
 import random
 import re
 import secrets
+import subprocess
 import threading
 import time
 import uuid
@@ -83,7 +84,8 @@ def _session_view(session):
 def _model_view(name):
     info = models.MODELS[name]
     installed = models.is_installed(name)
-    return {"name": name, "title": info["title"], "url": info["url"], "license": info["license"],
+    return {"name": name, "title": info["title"], "summary": info["summary"], "url": info["url"],
+            "license": info["license"],
             "disk_gb": info["disk_gb"], "installed": installed,
             "size_gb": round(models.size_gb(name), 1) if installed else None,
             "settings": info["settings"], "supports_convert": info.get("supports_convert", False)}
@@ -155,6 +157,21 @@ def get_job(req, job_id):
     if job_id not in _jobs:
         raise NotFound()
     return _jobs[job_id]
+
+
+def _gpu_name():
+    """Name and memory of the first NVIDIA GPU, or None (nvidia-smi ships with the driver)."""
+    try:
+        result = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                                capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.strip().splitlines()[0] if result.returncode == 0 and result.stdout.strip() else None
+
+
+@route("GET", "/api/system")
+def system(req):
+    return {"gpu": _gpu_name()}
 
 
 @route("GET", "/api/models")

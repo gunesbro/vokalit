@@ -18,6 +18,7 @@ TORCH_CUDA = ["torch==2.8.0", "torchaudio==2.8.0", "--index-url", "https://downl
 MODELS = {
     "chatterbox": {
         "title": "Chatterbox Multilingual",
+        "summary": "23 languages \u00b7 cloning \u00b7 voice conversion",
         "url": "https://huggingface.co/ResembleAI/chatterbox",
         "disk_gb": 11.3,  # measured on Windows (SPEC.md §6.1)
         "license": "MIT",
