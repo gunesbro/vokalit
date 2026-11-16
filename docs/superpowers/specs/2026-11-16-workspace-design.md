@@ -170,7 +170,14 @@ workspace/
 
 ## 7. Screens
 
-Two tabs: **Studio** and **Characters**. The Models section (install/remove) sits at the top of Studio, collapsible *(proposal)*.
+Three tabs: **Studio**, **Characters** and **Models** (user decision: models get their own screen).
+
+### 7.0 Models
+
+One row per model: name (link to the model page, which lists supported languages), status and disk usage,
+license, Install/Remove with the confirmation box, progress line, Cancel install and the collapsible install
+log — the existing Models section, moved to its own tab. Studio shows checkboxes only for installed models;
+with none installed it shows "Install a model in the Models tab." 
 
 ### 7.1 Studio
 

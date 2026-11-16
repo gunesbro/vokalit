@@ -4,7 +4,7 @@
 
 **Goal:** Turn Vokalit into a workspace with sessions, a character library (multiple samples per character), a line-by-line script with takes, voice conversion, seeds and export.
 
-**Architecture:** A new UI-free storage module `app/workspace.py` owns every file under `workspace/` (JSON + WAV) and is unit-tested without Gradio. `app/models.py` and the Chatterbox worker gain `seed` and a `convert` task. `app/main.py` is rewritten as two tabs (Studio, Characters) whose handlers are thin calls into `workspace` and `models`.
+**Architecture:** A new UI-free storage module `app/workspace.py` owns every file under `workspace/` (JSON + WAV) and is unit-tested without Gradio. `app/models.py` and the Chatterbox worker gain `seed` and a `convert` task. `app/main.py` is rewritten as three tabs (Studio, Characters, Models) whose handlers are thin calls into `workspace` and `models`.
 
 **Tech Stack:** Python 3.11, Gradio 6 (`@gr.render`), pywebview, soundfile, stdlib `wave`/`json`, pytest (dev only), chatterbox-tts 0.1.7 (`ChatterboxMultilingualTTS`, `ChatterboxVC`).
 
@@ -41,7 +41,8 @@
 | `app/workspace.py` (new) | All reads/writes under `workspace/`: characters, samples, sessions, cast, lines, takes, recordings, export, slugs, IDs. No Gradio. |
 | `app/models.py` (modify) | `generate(..., seed)`, new `convert(...)`; install unchanged except VC download. |
 | `workers/chatterbox/worker.py` (modify) | Seed, `task: "convert"` with lazily loaded `ChatterboxVC`, VC in `--download`, PCM_16 output. |
-| `app/main.py` (rewrite) | Two tabs; Models section; thin handlers. |
+| `app/main.py` (rewrite) | Window, theme, three tabs; thin glue only. |
+| `app/ui_models.py` (new) | Models tab: the existing install/remove rows (`build_model_row`) moved out of `main.py`. |
 | `app/ui_characters.py` (new) | Characters tab and the reusable sample panel (also used for session-only characters). |
 | `app/ui_studio.py` (new) | Studio tab: sessions, cast, models/seed, script lines, takes, convert, batch, export. |
 | `tests/conftest.py` (new) | `tmp_workspace` fixture; `soundfile` shim (PCM_16 WAV via `wave` + numpy) used only when real `soundfile` is missing; helper `make_wav(path, seconds, sr=24000)`. |
@@ -178,11 +179,24 @@
 - [ ] **Step 5: Commit** `feat: seed and voice conversion`.
 - [ ] **Step 6 (user, Windows):** remove and reinstall Chatterbox; record the new "Disk usage" and update `disk_gb` in `MODELS`. Same seed + text twice → identical audio.
 
-### Task 5: Characters tab
+### Task 5: Models tab
+
+**Files:**
+- Create: `app/ui_models.py` (move `model_status` and `build_model_row` from `app/main.py` unchanged)
+- Modify: `app/main.py` (wrap the existing single-shot UI in a "Studio" tab and add the "Models" tab; Task 7 replaces the Studio content)
+
+**Interfaces:**
+- Produces: `build_models() -> None` (called inside `gr.Tab("Models")`).
+
+- [ ] **Step 1 (user, Windows):** Models tab shows Chatterbox with its link, size and Remove; install/cancel still work.
+- [ ] **Step 2: Run** `python3 -m pytest tests -q` → PASS; `python3 -m py_compile app/*.py`.
+- [ ] **Step 3: Commit** `refactor: Models tab`.
+
+### Task 6: Characters tab
 
 **Files:**
 - Create: `app/ui_characters.py`
-- Modify: `app/main.py` (add the Characters tab next to the existing single-shot UI; Task 6 replaces that UI)
+- Modify: `app/main.py` (add the Characters tab)
 
 **Interfaces:**
 - Consumes: Task 1.
@@ -196,17 +210,17 @@ Behavior is spec §7.2. Decisions:
 - [ ] **Step 2: Run** `python3 -m pytest tests -q` → PASS.
 - [ ] **Step 3: Commit** `feat: Characters tab`.
 
-### Task 6: Studio tab
+### Task 7: Studio tab
 
 **Files:**
 - Create: `app/ui_studio.py`
-- Modify: `app/main.py` (two tabs; Models section collapsible at the top of Studio; remove `generate()`, `OUTPUTS_DIR` and the single-shot UI)
+- Modify: `app/main.py` (Studio tab content; remove `generate()`, `OUTPUTS_DIR` and the single-shot UI)
 
 **Interfaces:**
-- Consumes: Tasks 1–5; `ui_characters.sample_panel(char_id_state, session_id)` from Task 5 for "New character in session".
+- Consumes: Tasks 1–6; `ui_characters.sample_panel(char_id_state, session_id)` from Task 6 for "New character in session"; `models.is_installed` for the model checkboxes.
 - Produces: `build_studio() -> None` (called inside `gr.Blocks`).
 
-Behavior is spec §7.1. Decisions the spec leaves open:
+Behavior is spec §7.1. With no installed model, the model area shows "Install a model in the Models tab." Decisions the spec leaves open:
 - Session list: `gr.Radio` of session names (value = ID); state `gr.State(session_id)`.
 - Script editor: one `@gr.render(inputs=[session_state, refresh_counter])`; every mutating handler writes through `workspace` and bumps `refresh_counter`.
 - Seed field: `gr.Textbox` (empty = random `random.randint(0, 2**31 - 1)`); each take label shows its seed with a "Use seed" button.
@@ -218,7 +232,7 @@ Behavior is spec §7.1. Decisions the spec leaves open:
 - [ ] **Step 2: Run** `python3 -m pytest tests -q` → PASS (no regressions); `python3 -m py_compile app/*.py`.
 - [ ] **Step 3: Commit** `feat: Studio tab`.
 
-### Task 7: SPEC in English and cleanup
+### Task 8: SPEC in English and cleanup
 
 **Files:**
 - Modify: `SPEC.md` (translate to English; replace §7/§7.1 with a pointer to the design doc and a summary; protocol §5.2 gets `seed`/`task`), `.gitignore` (drop `outputs/`), `app/main.py` (no leftovers)
