@@ -54,7 +54,7 @@ Disk space includes PyTorch with CUDA, which every model installs into its own e
 - **Windows 10/11** (tested) or **Linux** (less tested).
 - An internet connection only while installing. Nothing else needs to be installed beforehand: Vokalit downloads its
   own Python and packages into its folder, and the models are installed later from inside the app.
-- Disk space: about 1 GB for the app itself, plus the models you choose to install (see above).
+- Disk space: a few hundred MB for the app and its Python, plus the models you choose to install (see above).
 
 ## Getting started
 
