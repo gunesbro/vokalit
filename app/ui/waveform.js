@@ -1,6 +1,6 @@
 // Waveform bars, a small player, and a trim range editor.
 import { el, icon, ICONS } from "./app.js";
-import { decode, encodeWav, peaks } from "./audio.js";
+import { decode, peaks } from "./audio.js";
 import { seekTo } from "./script.js";
 
 const peakCache = new Map();
@@ -93,14 +93,68 @@ export function player(url, { buckets = 48, selected = false, label = "Play", sh
   return root;
 }
 
+// Plays [start, end] of a recording with sample accuracy. Same small interface as an <audio> element:
+// paused, currentTime (get/set), play(), pause(); plus close(). onChange runs on play, pause and the natural end.
+function clipPlayer(samples, sampleRate, range, onChange) {
+  const duration = samples.length / sampleRate;
+  let context = null;
+  let buffer = null;
+  let source = null;
+  let startedAt = 0;
+  let offset = 0;
+  const position = () => (source ? offset + (context.currentTime - startedAt) : offset);
+  const stopSource = () => {
+    if (!source) return;
+    source.onended = null;
+    try { source.stop(); } catch { /* already stopped */ }
+    source.disconnect();
+    source = null;
+  };
+  return {
+    get paused() { return !source; },
+    get currentTime() { return Math.min(position(), duration); },
+    set currentTime(t) {
+      const playing = !!source;
+      stopSource();
+      offset = t;
+      if (playing) this.play();
+    },
+    play() {
+      context ||= new AudioContext();
+      if (!buffer) {
+        buffer = context.createBuffer(1, samples.length, sampleRate);
+        buffer.copyToChannel(samples, 0);
+      }
+      const [start, end] = range();
+      if (offset < start || offset >= end - 0.05) offset = start;
+      stopSource();
+      source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.onended = () => { source = null; offset = range()[0]; onChange(); };
+      context.resume();
+      startedAt = context.currentTime;
+      source.start(0, offset, end - offset);
+      onChange();
+    },
+    pause() {
+      if (!source) return;
+      offset = position();
+      stopSource();
+      onChange();
+    },
+    close() { stopSource(); context?.close(); },
+  };
+}
+
 // Lets the user drag start/end handles over a recording and play the selection,
 // with a playhead; clicking the waveform moves the playhead. getRange() → [startSec, endSec].
 export function rangeEditor(samples, sampleRate, onChange = () => {}) {
   const duration = samples.length / sampleRate;
   let start = 0;
   let end = duration;
-  const url = URL.createObjectURL(new Blob([encodeWav(samples, sampleRate)], { type: "audio/wav" }));
-  const audio = new Audio(url);
+  // Web Audio plays exactly start..end (an <audio> element could only be stopped a few hundred ms late).
+  const audio = clipPlayer(samples, sampleRate, () => [start, end], () => { paintButton(); paintHead(); });
   const selection = el("div", { class: "range-selection" });
   const playhead = el("div", { class: "range-playhead" });
   const left = el("div", { class: "range-handle", role: "slider", "aria-label": "Start", tabindex: 0 });
@@ -133,15 +187,8 @@ export function rangeEditor(samples, sampleRate, onChange = () => {}) {
     paintHead();
     onChange(start, end);
   };
-  audio.addEventListener("play", paintButton);
-  audio.addEventListener("pause", paintButton);
-  audio.addEventListener("timeupdate", () => {
-    if (audio.currentTime >= end) { audio.pause(); audio.currentTime = start; }
-    paintHead();
-  });
-  audio.addEventListener("ended", () => { audio.currentTime = start; paintHead(); });
-  // Playhead follows smoothly while playing (timeupdate fires only a few times per second).
-  const follow = () => { if (!audio.paused) paintHead(); if (track.isConnected) requestAnimationFrame(follow); else { audio.pause(); URL.revokeObjectURL(url); } };
+  // Playhead follows while playing; the player is closed when the editor leaves the page.
+  const follow = () => { if (!audio.paused) paintHead(); if (track.isConnected) requestAnimationFrame(follow); else audio.close(); };
 
   track.addEventListener("click", (e) => {
     if (e.target === left || e.target === right) return;
@@ -152,6 +199,7 @@ export function rangeEditor(samples, sampleRate, onChange = () => {}) {
   const drag = (which) => (event) => {
     event.preventDefault();
     event.stopPropagation();
+    audio.pause(); // moving a handle while playing would play past the new end
     const box = track.getBoundingClientRect();
     const move = (e) => {
       const t = seekTo((e.clientX - box.left) / box.width, duration);
@@ -167,6 +215,7 @@ export function rangeEditor(samples, sampleRate, onChange = () => {}) {
     const step = e.shiftKey ? 1 : 0.1;
     const delta = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
     if (!delta) return;
+    audio.pause();
     if (which === "start") start = Math.max(0, Math.min(end - 0.5, start + delta));
     else end = Math.min(duration, Math.max(start + 0.5, end + delta));
     paint();
