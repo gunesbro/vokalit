@@ -336,8 +336,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 /* Line details: one header row, then the text across the full width */
 .detail-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 16px 10px 8px; cursor: default; }
 .detail-head .handle { margin-right: -8px; }
-.detail-speaker { gap: 8px; font-weight: 600; }
-.detail-speaker .select { font-weight: 600; }
 .field { gap: 6px; color: var(--muted); font-size: 12px; }
 .field .select-small, .field .input { font-size: 13px; }
 .field .language-select.select-small { max-width: 180px; }
@@ -351,3 +349,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line-details.closing { animation: close-details .18s ease-in forwards; pointer-events: none; }
 .line.reopened { animation: row-in .2s ease-out; }
 @media (prefers-reduced-motion: reduce) { .line.reopened { animation: none; } }
+.field[title], .muted[title] { cursor: help; }
+.field .select, .field .input { cursor: pointer; }
+.field .input { cursor: text; }

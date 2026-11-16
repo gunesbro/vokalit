@@ -182,12 +182,13 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
   function sampleRow(character, sample) {
     const isDefault = sample.id === character.default_sample;
     const row = el("div", { class: "table-row sample-grid" });
-    const label = el("input", { class: "input", value: sample.label, "aria-label": "Sample label", onchange: () => {
+    const label = el("input", { class: "input", value: sample.label, "aria-label": "Sample label",
+      title: "A name for this sample, e.g. calm or excited. Lines pick samples by this name.", onchange: () => {
       const value = label.value.trim();
       if (!value) { label.value = sample.label; return; }
       api("PATCH", path(`/samples/${sample.id}`), { label: value }).then(refresh, fail);
     } });
-    const language = el("select", { class: "select", "aria-label": "Sample language", title: "The language spoken in this sample",
+    const language = el("select", { class: "select", "aria-label": "Sample language", title: "The language spoken in this sample. When a line is in another language, the Studio warns about accent.",
       onchange: () => api("PATCH", path(`/samples/${sample.id}`), { language: language.value || null }).then(refresh, fail) },
     el("option", { value: "" }, "Not set"));
     languages().then((list) => {
@@ -198,7 +199,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     const wave = player(url, { buckets: 140, showTime: false });
     const play = wave.querySelector(".play");
     row.append(
-      el("button", { class: `star ${isDefault ? "on" : ""}`, title: isDefault ? "Default sample" : "Make default",
+      el("button", { class: `star ${isDefault ? "on" : ""}`,
+        title: isDefault ? "Default sample: used by lines that do not choose a sample" : "Make this the default sample",
         "aria-label": isDefault ? "Default sample" : "Make default", "aria-pressed": isDefault ? "true" : "false",
         onclick: () => isDefault || api("PATCH", path(`/samples/${sample.id}`), { default: true }).then(refresh, fail) },
       icon(["M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"], 16)),

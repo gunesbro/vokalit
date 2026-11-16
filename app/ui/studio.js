@@ -11,6 +11,8 @@ const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
 
 // Lines longer than this get a note and a "Split" action: models work best with sentence-sized lines.
 const LONG_LINE = 300;
+const TIP_MODELS = "Models to generate with: each one makes its own take, so you can compare them.";
+const TIP_SEED = "The same seed, text, sample and settings give the same audio. Leave empty for a new random seed each time.";
 const SPLIT_SIZE = 250;
 const ICON_OPEN = ["M6 9l6 6 6-6"]; // chevron down: open the line
 const ICON_CLOSE = ["M6 15l6-6 6 6"]; // chevron up: close it
@@ -162,27 +164,31 @@ export async function renderStudio(root) {
       } catch (error) { fail(error); }
     } });
     const language = el("div", { class: "pop-holder" });
+    language.title = "The language lines are read in, unless a line chooses its own. Only languages every selected model supports are listed.";
     const paintLanguage = () => language.replaceChildren(languageSelect(session.models, session.language, (code) =>
       api("PATCH", `/api/sessions/${sid()}`, { language: code }).then(apply, fail)));
     const picker = modelPicker(installed(), session.models, (names) =>
       api("PATCH", `/api/sessions/${sid()}`, { models: names }).then((data) => { session = data; paintLanguage(); }, fail));
     paintLanguage();
-    const settingsButton = el("button", { class: "btn", "aria-haspopup": "dialog" }, icon(ICON_SLIDERS), "Settings");
+    const settingsButton = el("button", { class: "btn", "aria-haspopup": "dialog",
+      title: "Generation settings for this session, per model. Lines can override them." }, icon(ICON_SLIDERS), "Settings");
     settingsButton.onclick = () => popover(settingsButton, sessionSettings(), { align: "right" });
     const seedInput = el("input", { class: "input seed", placeholder: "Random", value: seed, inputmode: "numeric",
-      "aria-label": "Seed", oninput: () => { seed = seedInput.value.replace(/\D/g, ""); seedInput.value = seed; } });
+      "aria-label": "Seed", title: TIP_SEED, oninput: () => { seed = seedInput.value.replace(/\D/g, ""); seedInput.value = seed; } });
     const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More session actions", title: "More" }, icon(ICON_MORE));
     more.onclick = () => popover(more, el("div", { class: "menu" },
       el("button", { class: "menu-item danger", onclick: () => confirmDeleteSession(more) }, "Delete session")), { align: "right" });
     return el("header", { class: "main-head" },
       editableTitle(name), el("div", { class: "spacer" }),
-      el("div", { class: "muted generate-label" }, "Generate with"), picker.element, language,
+      el("div", { class: "muted generate-label", title: TIP_MODELS }, "Generate with"), picker.element, language,
       el("div", { class: "pop-holder" }, settingsButton),
-      el("label", { class: "row muted" }, "Seed", seedInput),
-      el("button", { class: "btn", onclick: exportSession }, "Export"),
+      el("label", { class: "row muted", title: TIP_SEED }, "Seed", seedInput),
+      el("button", { class: "btn", onclick: exportSession,
+        title: "Joins the selected take of every line, with its pause, into one WAV file." }, "Export"),
       batch
         ? el("button", { class: "btn btn-primary", onclick: () => api("POST", `/api/sessions/${sid()}/stop`, {}).catch(fail) }, "Stop")
-        : el("button", { class: "btn btn-primary", onclick: generateMissing }, "Generate missing"),
+        : el("button", { class: "btn btn-primary", onclick: generateMissing,
+          title: "Generates every line that has no take yet, top to bottom." }, "Generate missing"),
       el("div", { class: "pop-holder" }, more));
   }
 
@@ -254,7 +260,7 @@ export async function renderStudio(root) {
       sessionOnly && el("button", { class: "btn btn-small chip-action", onclick: () =>
         api("POST", `/api/sessions/${sid()}/cast/${entry.character}/save`, {}).then((data) => {
           apply(data); setMessage(message, `${entry.name} is now in your character library.`);
-        }, fail) }, "Save to library"),
+        }, fail), title: "Move this character to your library so other sessions can use it too." }, "Save to library"),
       el("button", { class: "chip-x", "aria-label": `Remove ${label} from cast`, title: "Remove from cast", onclick: () =>
         api("DELETE", `/api/sessions/${sid()}/cast/${entry.character}`).then(apply, fail) }, icon(ICONS.close, 12)));
   }
@@ -503,6 +509,7 @@ export async function renderStudio(root) {
     const patch = (fields) => api("PATCH", `/api/sessions/${sid()}/lines/${line.id}`, fields).then(apply, fail);
     const entry = castEntry(line.character);
     const characterSelect = el("select", { class: "select select-small", "aria-label": "Character",
+      title: "Who speaks this line. Only characters in the cast are listed.",
       onchange: () => patch({ character: characterSelect.value, sample: null }) },
     !entry?.name && el("option", { value: line.character, disabled: true }, "Deleted character"),
     session.cast.filter((c) => c.name).map((c) => el("option", { value: c.character }, c.name)));
@@ -569,11 +576,14 @@ export async function renderStudio(root) {
     text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
     const head = el("div", { class: "detail-head", title: "Click an empty spot to close" },
       handle(line),
-      el("div", { class: "row detail-speaker" }, dot(characterColors(line.character)[0], 8), characterSelect),
-      el("label", { class: "row field" }, "Sample", sampleSelect),
-      el("label", { class: "row field" }, "Language",
+      el("label", { class: "row field", title: "Who speaks this line. Only characters in the cast are listed." },
+        dot(characterColors(line.character)[0], 8), "Character", characterSelect),
+      el("label", { class: "row field", title: "Which recording of the voice to clone. Samples recorded in different moods steer "
+        + "the delivery. Without samples the model's default voice is used." }, "Sample", sampleSelect),
+      el("label", { class: "row field", title: "The language the text is read in. \u201cSession\u201d follows the session's "
+        + "language; only languages every selected model supports are listed." }, "Language",
         languageSelect(picker.get(), line.language, (code) => patch({ language: code }), session.language, true)),
-      el("label", { class: "row field" }, "Pause", pause, "s"),
+      el("label", { class: "row field", title: "Silence after this line in the export, in seconds." }, "Pause", pause, "s"),
       el("div", { class: "spacer" }),
       el("div", { class: "pop-holder" }, deleteButton),
       el("button", { class: "btn btn-ghost icon-btn close-details", "aria-label": "Close details", title: "Close (Esc)", onclick: close },
@@ -584,8 +594,8 @@ export async function renderStudio(root) {
       head,
       el("div", { class: "detail-text" }, text, el("div", { class: "row" }, el("div", { class: "spacer" }), counter)),
       el("div", { class: "detail-row row wrap" },
-        el("div", { class: "muted" }, "Generate with"), picker.element,
-        el("label", { class: "row muted" }, "Seed", lineSeed),
+        el("div", { class: "muted", title: TIP_MODELS }, "Generate with"), picker.element,
+        el("label", { class: "row muted", title: TIP_SEED }, "Seed", lineSeed),
         generateButton,
         el("div", { class: "faint small" }, "One take per selected model, so you can compare them.")),
       longNote(line),
@@ -663,7 +673,8 @@ export async function renderStudio(root) {
           changes ? `${plural(changes, "change")} from session settings` : "Same as session settings"),
         el("div", { class: "spacer" }),
         el("button", { class: "btn btn-small", disabled: !Object.keys(line.settings).length, onclick: () =>
-          api("DELETE", `/api/sessions/${sid()}/lines/${line.id}/settings`).then(apply, fail) }, "Reset to session settings")),
+          api("DELETE", `/api/sessions/${sid()}/lines/${line.id}/settings`).then(apply, fail),
+          title: "Forget this line's own settings and use the session's." }, "Reset to session settings")),
       modelTabs(names, titles(), (name) => {
         const base = sessionValues(name);
         const values = { ...base, ...(line.settings[name] || {}) };
@@ -695,14 +706,15 @@ export async function renderStudio(root) {
         .filter(Boolean).join(" \u00b7 ");
     const rowNode = el("div", { class: "take" },
       el("input", { type: "radio", name: `take-${line.id}`, checked: isSelected, "aria-label": `Use take ${takeNumber(take.file)}`,
+        title: "The selected take is the one used in the export.",
         onchange: () => api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/select`, { file: take.file }).then(apply, fail) }),
       player(`/files/sessions/${sid()}/${take.file}`, { buckets: 60, showTime: false, selected: isSelected }),
       el("div", { class: "take-info" },
         el("div", { class: "row" }, dot(modelColor(take.model)), el("span", {}, model),
           el("span", { class: "muted" }, `· take ${takeNumber(take.file) ?? "?"}`)),
         el("div", { class: "faint small" }, meta,
-          take.custom_settings && [" · ", el("span", { class: "accent" }, "custom settings")],
-          take.text_changed && [" · ", el("span", { class: "warn", title: take.text }, "text changed")])),
+          take.custom_settings && [" · ", el("span", { class: "accent", title: "Generated with settings that differ from the session's current ones." }, "custom settings")],
+          take.text_changed && [" · ", el("span", { class: "warn", title: `The line's text changed after this take. The take says: \u201c${take.text}\u201d` }, "text changed")])),
       !converted && take.settings && el("button", { class: "btn btn-small btn-ghost", title: "Copy this take's seed and settings to the line",
         onclick: () => useSettings(line, take) }, "Use these settings") || el("span"),
       revealButton(`sessions/${sid()}/${take.file}`),
@@ -736,7 +748,8 @@ export async function renderStudio(root) {
     const status = el("div", { class: "muted small grow" }, "Ready to record");
     const meter = el("div", { class: "meter" }, el("div"));
     const mic = el("select", { class: "select select-small", "aria-label": "Microphone" });
-    const button = el("button", { class: "record-round", "aria-label": "Record", title: "Record" }, el("span", { class: "rec-dot" }));
+    const button = el("button", { class: "record-round", "aria-label": "Record",
+      title: "Record yourself reading the line; it is converted to this character's voice as a new take." }, el("span", { class: "rec-dot" }));
     const fileInput = el("input", { type: "file", accept: "audio/*", class: "sr-only", onchange: async () => {
       const file = fileInput.files[0];
       fileInput.value = "";
