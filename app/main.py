@@ -27,13 +27,22 @@ def _windows_app_id():
 
 
 def _windows_window_icon(window):
-    """Puts the Vokalit icon on the title bar and taskbar button (pywebview's own icon option is Linux-only)."""
+    """Puts the Vokalit icon on the title bar and taskbar button. Built from the PNG (System.Drawing.Icon refuses
+    PNG files and some .ico variants), and every error is caught here: an exception on the window's thread would
+    otherwise close the app."""
+    def apply():
+        try:
+            from System.Drawing import Bitmap, Icon
+
+            form.Icon = Icon.FromHandle(Bitmap(str(UI_DIR / "icon.png")).GetHicon())
+        except Exception as error:  # cosmetic only
+            print(f"Could not set the window icon: {error}")
+
     try:
         from System import Action
-        from System.Drawing import Icon
 
         form = window.native
-        form.Invoke(Action(lambda: setattr(form, "Icon", Icon(str(UI_DIR / "icon.ico")))))
+        form.Invoke(Action(apply))
     except Exception as error:  # cosmetic only
         print(f"Could not set the window icon: {error}")
 
@@ -47,10 +56,16 @@ def main():
     if sys.platform == "win32":
         window.events.shown += lambda: _windows_window_icon(window)
     # Not private mode, so the microphone permission is remembered between launches.
+    options = {"private_mode": False, "storage_path": WEBVIEW_DIR}
+    if sys.platform != "win32":
+        # Linux (GTK/Qt) takes a PNG. On Windows, pywebview would load it with System.Drawing.Icon, which refuses
+        # PNG files and stops the app, so the Windows icon is set by _windows_window_icon instead.
+        options["icon"] = str(UI_DIR / "icon.png")
     try:
-        webview.start(private_mode=False, storage_path=WEBVIEW_DIR, icon=str(UI_DIR / "icon.png"))
+        webview.start(**options)
     except TypeError:  # older pywebview without the icon option
-        webview.start(private_mode=False, storage_path=WEBVIEW_DIR)
+        options.pop("icon", None)
+        webview.start(**options)
     server.stop()
     models.stop_all()
     shutil.rmtree(workspace.workspace_root() / ".tmp", ignore_errors=True)
