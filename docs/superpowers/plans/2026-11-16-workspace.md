@@ -53,6 +53,14 @@
 
 ---
 
+### Task 0: Spike — drag-and-drop reordering in Gradio (throwaway)
+
+**Question:** can rows drawn with `@gr.render` be reordered by dragging, reliably, in the pywebview window?
+
+- [ ] **Step 1:** In a scratch file outside `app/` (not committed), render 5 rows with `@gr.render`; inject a small script with `gr.Blocks(head=...)` that makes each row draggable (HTML5 drag events on a handle) and on drop writes the new ID order into a hidden `gr.Textbox`, then dispatches an `input` event; a `.change` handler prints the order and re-renders.
+- [ ] **Step 2 (user, Windows):** drag rows 10 times, including after adding/removing rows (re-render). Pass = order always correct, no stuck state, no console errors.
+- [ ] **Step 3:** Report to the user. Pass → Task 7 implements dragging the same way and keeps ↑↓ as a fallback. Fail → Task 7 ships ↑↓ only; record the outcome in the design doc. Delete the scratch file either way.
+
 ### Task 1: Characters and samples storage
 
 **Files:**
@@ -106,7 +114,8 @@
   - `add_to_cast(session_id, char_id, scope: "library" | "session")`, `remove_from_cast(session_id, char_id)` → `WorkspaceError("Burak is used by lines 1, 3. Change those lines first.")` when used
   - `save_as_character(session_id, char_id) -> None` — moves the folder to the library, sets scope `"library"`
   - `cast_character(session, char_id) -> dict | None` — loads from the right scope; `None` if deleted
-  - `add_line(session_id, char_id, text="", pause_after=DEFAULT_PAUSE) -> str`
+  - `add_line(session_id, char_id, text="", pause_after=DEFAULT_PAUSE, after: str | None = None) -> str` (`after` = insert after that line ID; `None` = append)
+  - `reorder_lines(session_id, line_ids: list[str]) -> None` (must be a permutation of the current IDs, else `WorkspaceError`)
   - `update_line(session_id, line_id, **fields)` — allowed: `character`, `sample`, `text`, `pause_after`
   - `move_line(session_id, line_id, delta: int)`, `delete_line(session_id, line_id)` (deletes its take files)
   - `paste_script(session_id, text: str) -> int` (lines added)
@@ -118,6 +127,8 @@
   - `test_remove_used_character_is_refused`: message names the character and the line numbers.
   - `test_save_as_character_moves_folder`: folder now under `workspace/characters/`, cast scope `"library"`, and a second session can `add_to_cast` it.
   - `test_move_and_delete_line`: order changes; deleting removes the line's take files.
+  - `test_insert_line_after`: lines l1, l2; `add_line(..., after="l1")` → order l1, l3, l2.
+  - `test_reorder_lines_requires_permutation`: `reorder_lines` with a missing or extra ID raises `WorkspaceError`; a valid permutation is saved.
   - `test_paste_script_edge_cases`: input `"Host: Hello\n\nGuest: It's 10:30\nand still going\nHost: Bye"` → 3 lines; line 2 text `"It's 10:30 and still going"`; new `Guest` is session-only with no samples; `Host` matched case-insensitively to an existing cast member.
   - `test_deleted_character_keeps_sessions_loadable`: delete a library character used in a session → `load_session` works, `cast_character(...) is None`, takes unchanged.
 - [ ] **Step 2: Run** `python3 -m pytest tests/test_sessions.py -q` → FAIL.
@@ -223,6 +234,8 @@ Behavior is spec §7.2. Decisions:
 Behavior is spec §7.1. With no installed model, the model area shows "Install a model in the Models tab." Decisions the spec leaves open:
 - Session list: `gr.Radio` of session names (value = ID); state `gr.State(session_id)`.
 - Script editor: one `@gr.render(inputs=[session_state, refresh_counter])`; every mutating handler writes through `workspace` and bumps `refresh_counter`.
+- "+ Insert line" between lines calls `add_line(..., after=<previous line id>)` with the previous line's character.
+- Dragging (only if Task 0 passed): the Task 0 mechanism calls `reorder_lines`.
 - Seed field: `gr.Textbox` (empty = random `random.randint(0, 2**31 - 1)`); each take label shows its seed with a "Use seed" button.
 - Batch generation is a generator handler that yields the message line ("Line 3/12…"); Stop sets a module-level `threading.Event` checked between lines.
 - A line whose character is missing (`cast_character` is `None`) shows "deleted character" and its Generate/Convert are refused with a message.

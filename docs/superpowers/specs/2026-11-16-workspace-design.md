@@ -26,7 +26,7 @@ What users do with the generated audio is their responsibility; the app does not
 1. Sessions: create, list, open, rename, delete.
 2. Characters: a library independent of sessions; each character has one or more labelled voice samples.
 3. Session cast: library characters + session-only characters; a **Save as character** button moves a session-only character into the library.
-4. Script: lines (character, sample, text, pause after).
+4. Script: lines (character, sample, text, pause after); insert a line between any two lines; **drag-and-drop reordering** if the spike in the plan (Task 0) shows it works reliably in Gradio, otherwise up/down buttons.
 5. Per-line generation; model(s) chosen at generation time; every attempt (take) is kept.
 6. **Voice conversion (Chatterbox VC):** the user records the line, it is converted to the character's voice and becomes a take.
 7. **Seed:** each take records its seed; a take can be reproduced with the same seed.
@@ -38,7 +38,8 @@ What users do with the generated audio is their responsibility; the app does not
   auto-transcribe). This design must accommodate them.
 - Emotion intensity control, tags such as `[laughter]`, reading numbers.
 - Sound effects, fine-tuning, LLM text suggestions.
-- Drag-and-drop line reordering, keyboard shortcuts.
+- Keyboard shortcuts.
+- Transcript import (SRT/VTT, timestamps, screenplay format). User decision: later, possibly with a local language model. The simple `Character: text` paste stays.
 - Cloud-sync folder warning (user decision: not needed).
 
 **Anti-goals (failure even if it works)**
@@ -79,6 +80,8 @@ Storage and model layers stay independent of the UI, so only the UI would need r
 - A character can have several voice recordings.
 - No cloud-sync folder warning.
 - This release: voice conversion and seed. With the OmniVoice step: voice design and recording prep.
+- Lines can be inserted between lines and reordered by dragging.
+- Transcript import is postponed.
 
 ## 6. Data model and storage
 
@@ -208,7 +211,7 @@ with none installed it shows "Install a model in the Models tab."
   - A character used by lines cannot be removed from the cast (explained in the message line).
 - **Models:** checkboxes of installed models (default: first installed model checked *(proposal)*); line and batch generation produce one take **per checked model**.
 - **Seed:** empty = random (the value used is stored in the take); filled = that value. A take's seed can be copied into this field with one click *(proposal)*.
-- **Line:** character, sample (the character's samples; default "default"), text, pause (seconds, default 0.3 *(proposal)*), up/down, delete.
+- **Line:** drag handle, character, sample (the character's samples; default "default"), text, pause (seconds, default 0.3 *(proposal)*), up/down, delete. Between lines (and after the last) a "+ Insert line" control adds an empty line at that position, with the previous line's character.
 - **Takes:** each take has a player + label (model or "converted", take no., sample label), ★ select, delete. The first take is selected automatically. If the selected take is deleted, the newest remaining take is selected *(proposal)*. If the line's text differs from the take's text, the take shows "text changed" *(proposal)*.
 - **Convert:** opens a record/upload area under the line; the user performs the line; Chatterbox VC converts it to the line's character/sample. The user's recording is kept in `recordings/` (to convert again).
 - **Paste script…** *(proposal)*: paste `Character: text` lines; characters not in the cast are added as **session-only** characters (without samples); lines are appended.
