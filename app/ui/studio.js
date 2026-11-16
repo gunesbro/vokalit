@@ -14,7 +14,7 @@ const LONG_LINE = 300;
 const SPLIT_SIZE = 250;
 const ICON_EDIT = ["M9 6l6 6-6 6"];
 
-const textRows = (text) => Math.min(10, Math.max(2, Math.ceil(text.length / 90) + (text.match(/\n/g) || []).length));
+const textRows = (text) => Math.min(10, Math.max(2, Math.ceil(text.length / 140) + (text.match(/\n/g) || []).length));
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const when = (created) => created.slice(0, 16).replace("T", " ");
 
@@ -548,19 +548,25 @@ export async function renderStudio(root) {
       text.rows = textRows(text.value);
     });
 
-    const node = el("div", { class: "line-details", "data-line": line.id },
-      el("div", { class: "line detail-top" },
-        handle(line),
-        el("div", { class: "speaker" },
-          el("div", { class: "row speaker-name" }, dot(characterColors(line.character)[0], 8), characterSelect),
-          el("label", { class: "row faint small speaker-sample" }, "Sample", sampleSelect),
-          el("label", { class: "row faint small speaker-sample" }, "Language",
-            languageSelect(picker.get(), line.language, (code) => patch({ language: code }), session.language, true))),
-        text,
-        el("div", { class: "row line-right" },
-          el("label", { class: "row muted" }, "Pause", pause, "s"),
-          el("div", { class: "pop-holder" }, deleteButton),
-          el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close details", title: "Close", onclick: () => { openLine = null; draw(); } }, icon(ICONS.close)))),
+    const close = async () => { await pendingText[line.id]?.(); openLine = null; draw(); };
+    const counter = el("span", { class: "faint small num" }, `${line.text.length} characters`);
+    text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
+    const head = el("div", { class: "detail-head", title: "Click an empty spot to close" },
+      handle(line),
+      el("div", { class: "row detail-speaker" }, dot(characterColors(line.character)[0], 8), characterSelect),
+      el("label", { class: "row field" }, "Sample", sampleSelect),
+      el("label", { class: "row field" }, "Language",
+        languageSelect(picker.get(), line.language, (code) => patch({ language: code }), session.language, true)),
+      el("label", { class: "row field" }, "Pause", pause, "s"),
+      el("div", { class: "spacer" }),
+      el("div", { class: "pop-holder" }, deleteButton),
+      el("button", { class: "btn btn-small close-details", "aria-label": "Close details", onclick: close },
+        icon(["M6 15l6-6 6 6"], 12), "Close"));
+    head.addEventListener("click", (e) => { if (e.target === head || e.target.classList.contains("spacer")) close(); });
+    const node = el("div", { class: "line-details", "data-line": line.id,
+      onkeydown: (e) => { if (e.key === "Escape" && !e.target.closest(".popover")) { e.preventDefault(); close(); } } },
+      head,
+      el("div", { class: "detail-text" }, text, el("div", { class: "row" }, el("div", { class: "spacer" }), counter)),
       el("div", { class: "detail-row row wrap" },
         el("div", { class: "muted" }, "Generate with"), picker.element,
         el("label", { class: "row muted" }, "Seed", lineSeed),

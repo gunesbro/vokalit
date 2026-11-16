@@ -227,7 +227,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .cast-editor .samples { padding: 12px 0 16px; }
 .cast-editor .add-sample { margin-top: 16px; }
 .script-wrap { padding: 12px 24px 24px; }
-.script { max-width: 1120px; }
+.script { max-width: 1400px; }
 .script-empty { padding: 24px 8px; }
 .line { display: grid; grid-template-columns: 20px 160px minmax(0, 1fr) 380px; gap: 16px; align-items: center; padding: 14px 8px;
   border-radius: 8px; cursor: pointer; position: relative; }
@@ -332,3 +332,17 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .handle:hover, .handle:focus-visible { color: var(--text); background: var(--hover); outline: none; }
 .handle:active { cursor: grabbing; }
 .gap { padding-left: 52px; }
+
+/* Line details: one header row, then the text across the full width */
+.detail-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 16px 10px 8px; cursor: default; }
+.detail-head .handle { margin-right: -8px; }
+.detail-speaker { gap: 8px; font-weight: 600; }
+.detail-speaker .select { font-weight: 600; }
+.field { gap: 6px; color: var(--muted); font-size: 12px; }
+.field .select-small, .field .input { font-size: 13px; }
+.field .language-select.select-small { max-width: 180px; }
+.detail-head .pause { width: 56px; height: 28px; }
+.close-details { gap: 6px; }
+.detail-text { padding: 0 16px 12px 44px; display: flex; flex-direction: column; gap: 4px; }
+.detail-text .line-input { width: 100%; min-height: 64px; line-height: 1.55; }
+.detail-head .select-small { height: 28px; padding: 0 6px; }
