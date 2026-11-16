@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.7** (v1.6'ya göre: kendi kırpma aracımız denendi, geri alındı; Gradio'nun yerleşik kırpma aracı kullanılır — §7).
+> Durum: **v1.8** (v1.7'ye göre: pencere verisi `.local/webview`, mikrofon izni hatırlanır; download düğmesi kaldırıldı — §5.3).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -97,7 +97,8 @@ Ağ yalnızca kullanıcı "Install" düğmesine basıp onay verdiğinde, paket v
 
 - Gradio yalnızca `127.0.0.1`'e bağlanır, `share=False`.
 - `GRADIO_ANALYTICS_ENABLED=False`, `HF_HUB_DISABLE_TELEMETRY=1`.
-- Gradio bileşenlerinde "share" düğmesi kapalıdır (sesi Hugging Face'e yükler).
+- Referans ses bileşeninde "share" (sesi Hugging Face'e yükler) ve "download" (gereksiz) düğmeleri kapalıdır.
+- Pencere (pywebview) gizli modda açılmaz, böylece mikrofon izni hatırlanır; pencerenin verisi `.local/webview/` altında tutulur.
 - Tema yazı tipleri sistem fontlarıdır (Gradio'nun varsayılan temasının Google Fonts'tan font çekmesi engellenir).
 - Gradio'nun geçici dosyaları (yüklenen/kaydedilen sesler) `GRADIO_TEMP_DIR=.local/tmp` altına yazılır,
   uygulama kapanırken silinir. Sistem geçici klasörüne ses bırakılmaz.
@@ -141,6 +142,7 @@ Repo GitHub'da herkese açıktır. Bu yüzden:
 .local/uv-cache/          # UV_CACHE_DIR
 .local/python/            # UV_PYTHON_INSTALL_DIR (uv'nin indirdiği Python)
 .local/app/venv/          # arayüz ortamı
+.local/webview/           # pencere verisi (mikrofon izni vb.)
 .local/<model>/venv/      # model ortamı
 .local/<model>/cache/     # HF_HOME, TORCH_HOME
 ```
