@@ -68,6 +68,7 @@ export const ICONS = {
   play: ["M7 4.5l12 7.5-12 7.5z"],
   pause: ["M8 5v14M16 5v14"],
   chevron: ["M6 9l6 6 6-6"],
+  folder: ["M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"],
   pencil: ["M4 20h4L19 9l-4-4L4 16v4z", "M13.5 6.5l4 4"],
 };
 
@@ -75,6 +76,18 @@ export const ICONS = {
 export function editableTitle(input) {
   return el("label", { class: "editable-title", title: "Click to rename" }, input,
     el("span", { class: "pencil", "aria-hidden": "true" }, icon(ICONS.pencil, 13)));
+}
+
+let platform = "";
+const revealLabel = () => (platform === "win32" ? "Show in File Explorer" : platform === "darwin" ? "Show in Finder" : "Open containing folder");
+
+// Opens the system file manager at an audio file. `path` is relative to workspace/ (as in /files/ URLs).
+export function revealButton(path, { text = false } = {}) {
+  const button = el("button", { class: text ? "btn btn-small btn-ghost" : "btn btn-ghost icon-btn", title: revealLabel(),
+    "aria-label": revealLabel(), onclick: () => api("POST", "/api/reveal", { path }).catch((error) => {
+      button.title = error.message;
+    }) }, icon(ICONS.folder), text && revealLabel());
+  return button;
 }
 
 // One message line per screen: setMessage(node, text, "error" | "warn" | "info").
@@ -109,7 +122,8 @@ function route() {
 async function showGpu() {
   const node = document.getElementById("gpu");
   try {
-    const { gpu } = await api("GET", "/api/system");
+    const { gpu, platform: name } = await api("GET", "/api/system");
+    platform = name;
     node.classList.add(gpu ? "ok" : "missing");
     node.title = gpu || "No NVIDIA GPU found";
   } catch {

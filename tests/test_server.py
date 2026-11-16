@@ -209,3 +209,24 @@ def test_generation_with_unsupported_language_reports_model(api, monkeypatch):
     _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{line['id']}/generate", {"models": ["chatterbox"]})
     done = _wait(api, job["id"])
     assert done["state"] == "failed" and "Chatterbox Multilingual does not support Testish" in done["error"]
+
+
+def test_reveal_opens_file_manager_for_workspace_audio(api, monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr(server, "_show_in_file_manager", lambda path: opened.append(path))
+    _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
+    cid = character["id"]
+    api("POST", f"/api/characters/{cid}/samples?source=upload", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
+        content_type="audio/wav")
+    status, _, _ = api("POST", "/api/reveal", {"path": f"characters/{cid}/samples/s1.wav"})
+    assert status == 200
+    assert opened == [(ws.character_dir(cid) / "samples" / "s1.wav").resolve()]
+    for bad in ("../outside.wav", f"characters/{cid}/character.json", "characters/nope.wav"):
+        status, _, _ = api("POST", "/api/reveal", {"path": bad})
+        assert status == 404, bad
+    assert len(opened) == 1
+
+
+def test_system_reports_platform(api):
+    _, body, _ = api("GET", "/api/system")
+    assert body["platform"] in ("win32", "linux", "darwin")

@@ -9,6 +9,7 @@ import random
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -188,7 +189,28 @@ def _gpu_name():
 
 @route("GET", "/api/system")
 def system(req):
-    return {"gpu": _gpu_name()}
+    return {"gpu": _gpu_name(), "platform": sys.platform}
+
+
+def _show_in_file_manager(path):
+    """Opens the folder with the file selected (Windows) or the folder (Linux/macOS). No shell is involved."""
+    if sys.platform == "win32":
+        subprocess.Popen(["explorer", "/select,", str(path)])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path.parent)])
+
+
+@route("POST", "/api/reveal")
+def reveal(req):
+    """Shows an audio file of the workspace in the system file manager."""
+    root = ws.workspace_root().resolve()
+    target = (root / str(req["json"].get("path", ""))).resolve()
+    if not target.is_relative_to(root) or not target.is_file() or target.suffix != ".wav":
+        raise NotFound()
+    _show_in_file_manager(target)
+    return {}
 
 
 @route("GET", "/api/models")

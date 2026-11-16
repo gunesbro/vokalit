@@ -1,5 +1,5 @@
 // Studio screen: sessions, cast, script lines with takes, generation, export.
-import { api, editableTitle, el, icon, ICONS, setMessage, waitForJob } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { commonLanguages, formatTime, moveLine, settingsChanges, takeNumber } from "./script.js";
@@ -596,7 +596,8 @@ export async function renderStudio(root) {
           take.custom_settings && [" · ", el("span", { class: "accent" }, "custom settings")],
           take.text_changed && [" · ", el("span", { class: "warn", title: take.text }, "text changed")])),
       !converted && take.settings && el("button", { class: "btn btn-small btn-ghost", title: "Copy this take's seed and settings to the line",
-        onclick: () => useSettings(line, take) }, "Use these settings"),
+        onclick: () => useSettings(line, take) }, "Use these settings") || el("span"),
+      revealButton(`sessions/${sid()}/${take.file}`),
       el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Delete take", title: "Delete take", onclick: () => {
         rowNode.querySelector(".confirm")?.remove();
         rowNode.append(el("div", { class: "confirm" },
@@ -735,7 +736,8 @@ export async function renderStudio(root) {
       setMessage(message, "");
       exportInfo.replaceChildren(el("span", { class: "muted" }, `Last export: ${name}`),
         player(url, { buckets: 40 }),
-        el("a", { href: url, download: name }, "Download"));
+        el("a", { href: url, download: name }, "Download"),
+        revealButton(file, { text: true }));
     } catch (error) { setMessage(message, error.message, "warn"); }
   }
 

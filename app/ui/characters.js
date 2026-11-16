@@ -1,5 +1,5 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
-import { api, editableTitle, el, icon, ICONS, setMessage } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, revealButton, setMessage } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
 import { player, rangeEditor, stopAudio } from "./waveform.js";
 
@@ -204,7 +204,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       icon(["M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"], 16)),
       play, label, language, wave,
       el("div", { class: "muted num" }, `${sample.duration.toFixed(1)} s · ${sample.source === "recording" ? "recorded" : "uploaded"}`),
-      el("div", { class: "row end" }, el("button", { class: "btn btn-ghost icon-btn", title: "Delete sample", "aria-label": "Delete sample",
+      el("div", { class: "row end" }, revealButton(url.slice("/files/".length)),
+        el("button", { class: "btn btn-ghost icon-btn", title: "Delete sample", "aria-label": "Delete sample",
         onclick: () => confirmDeleteSample(row, sample) }, icon(ICONS.trash))));
     return row;
   }
