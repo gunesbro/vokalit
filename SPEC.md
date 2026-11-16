@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.12** (v1.11'e göre: kurulum iptali, kurulum sırasında Install gizli, katlanabilir log, ölçülen boyut 11.3 GB ve yüzde — §6.1).
+> Durum: **v1.13** (v1.12'ye göre: mesajlar açılır pencere yerine sayfada — §7).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -235,7 +235,8 @@ Tüm arayüz metinleri İngilizce (bkz. V2).
   hata verdi ve görsel olarak daha kötüydü, geri alındı (v1.7).
   - Bilinen görsel sorun (Gradio kaynaklı, kabul edildi): kırpmadan sonra turuncu seçim görünmeye devam edebilir.
   - README'de not: ↺ kaydı kırpılmamış hâline döndürür.
-- Clone voice modunda referans yoksa veya 10 sn'den kısaysa "Generate" tıklandığında hata mesajı gösterilir (düğmeyi devre dışı bırakmak yerine — daha az kod, aynı sonuç).
+- Clone voice modunda referans yoksa veya 10 sn'den kısaysa "Generate" tıklandığında hata mesajı gösterilir (düğmeyi devre dışı bırakmak yerine — daha az kod, aynı sonuç). Mesaj ölçülen süreyi içerir (Gradio süreyi yuvarlar; 9.6 sn "0:10" görünebilir).
+- **Mesajlar sayfada gösterilir, Gradio'nun açılır pencereleri (toast) kullanılmaz:** uygulama penceresinde görünmüyorlar (v1.13). Üretim mesajları Generate'in altında, kurulum hata/iptal mesajları ilerleme satırında. Bir model hata verirse diğer modeller yine çalışır.
 - Default voice modunda referans alanları gizlenir, 10 sn kontrolü uygulanmaz.
 - Kurulu olmayan model sonuç bölümünde "not installed" yazar.
 - Sayfanın altında kısa bir not: "Only use your own voice or voices you have permission to use."

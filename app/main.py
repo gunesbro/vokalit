@@ -97,10 +97,13 @@ def build_model_row(name):
                     log_text += text
                     yield {log: log_text}
         except models.Cancelled:
-            gr.Info("Install cancelled. Nothing was kept.")
+            # Messages go on the page: Gradio's pop-ups do not show in the app window.
+            yield {**finished(), progress: gr.update(visible=True, value="Install cancelled. Nothing was kept.")}
+            return
         except Exception as error:
-            yield finished()
-            raise gr.Error(f"Install failed: {error}. See the install log.")
+            message = f"Install failed: {error}. See the install log."
+            yield {**finished(), progress: gr.update(visible=True, value=message)}
+            return
         yield finished()
 
     install_btn.click(ask_install, None, [action, confirm_text, confirm_box])
@@ -113,20 +116,27 @@ def build_model_row(name):
 
 
 def generate(mode, ref, text):
+    """Returns a message and one audio per model. Problems go in the message: Gradio's pop-ups do not
+    show in the app window."""
+    unchanged = [gr.update() for _ in models.MODELS]
     if not text.strip():
-        raise gr.Error("Enter some text to read.")
+        return "Enter some text to read.", *unchanged
     if mode == CLONE:
         if ref is None:
-            raise gr.Error("Record or upload a reference voice first.")
-        if sf.info(ref).duration < MIN_REF_SECONDS:
-            raise gr.Error(f"The reference voice must be at least {MIN_REF_SECONDS} seconds long.")
+            return "Record or upload a reference voice first.", *unchanged
+        duration = sf.info(ref).duration
+        if duration < MIN_REF_SECONDS:
+            return (
+                f"The reference voice is {duration:.1f} seconds long. It must be at least {MIN_REF_SECONDS} seconds.",
+                *unchanged,
+            )
     else:
         ref = None
     if not any(models.is_installed(name) for name in models.MODELS):
-        raise gr.Error("Install a model first.")
+        return "Install a model first.", *unchanged
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    results = []
+    results, errors = [], []
     for name, info in models.MODELS.items():
         if not models.is_installed(name):
             results.append(gr.update(value=None, label=f"{info['title']} (not installed)"))
@@ -135,9 +145,11 @@ def generate(mode, ref, text):
         try:
             seconds = models.generate(name, text, ref, out)
         except Exception as error:
-            raise gr.Error(f"{info['title']}: {error}")
+            errors.append(f"{info['title']}: {error}")
+            results.append(gr.update(value=None, label=f"{info['title']} (failed)"))
+            continue
         results.append(gr.update(value=out, label=f"{info['title']} (generated in {seconds} s)"))
-    return results
+    return "\n\n".join(errors), *results
 
 
 def build_ui():
@@ -153,13 +165,14 @@ def build_ui():
         ref = gr.Audio(label="Reference voice", sources=["upload", "microphone"], type="filepath", buttons=[])
         text = gr.Textbox(label="Text", lines=4)
         generate_btn = gr.Button("Generate", variant="primary")
+        message = gr.Markdown()
         results = [
             gr.Audio(label=info["title"], interactive=False, buttons=["download"]) for info in models.MODELS.values()
         ]
         gr.Markdown("Only use your own voice or voices you have permission to use.")
 
         mode.change(lambda m: gr.update(visible=m == CLONE), mode, ref)
-        generate_btn.click(generate, [mode, ref, text], results)
+        generate_btn.click(generate, [mode, ref, text], [message, *results])
     return demo
 
 
