@@ -15,12 +15,13 @@ export const dot = (color, size = 6) => el("span", { class: "dot", "aria-hidden"
   style: { width: `${size}px`, height: `${size}px`, background: color } });
 
 // Opens `content` under `anchor`; closes on outside click or Escape. Returns close().
-export function popover(anchor, content, { align = "left" } = {}) {
+export function popover(anchor, content, { align = "left", up = false } = {}) {
   document.querySelector(".popover")?.dispatchEvent(new Event("close"));
   const box = el("div", { class: "popover" }, content);
   const holder = anchor.parentElement;
   holder.classList.add("pop-holder");
   box.style[align] = "0";
+  if (up) Object.assign(box.style, { top: "auto", bottom: "calc(100% + 6px)" }); // opens above (e.g. from the footer)
   holder.append(box);
   const close = () => {
     box.remove();

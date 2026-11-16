@@ -331,7 +331,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line:hover .handle, .line-details .handle { color: var(--text); }
 .handle:hover, .handle:focus-visible { color: var(--text); background: var(--hover); outline: none; }
 .handle:active { cursor: grabbing; }
-.gap { padding-left: 52px; }
 
 /* Line details: one header row, then the text across the full width */
 .detail-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 16px 10px 8px; cursor: default; }
@@ -363,3 +362,13 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line.now-playing, .line-details.now-playing { box-shadow: inset 3px 0 0 var(--accent); background: #1b1813; }
 .paste-option { gap: 8px; cursor: pointer; }
 .paste-option input { accent-color: var(--accent); margin: 0; }
+
+/* Selecting lines */
+.line { grid-template-columns: 18px 28px 160px minmax(0, 1fr) 380px; }
+.line .pick { margin: 0; accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; opacity: 0;
+  transition: opacity .15s ease; }
+.line:hover .pick, .script.picking .pick, .pick:focus-visible { opacity: 1; }
+.line:has(.pick:checked) { background: #1a1d24; box-shadow: inset 0 0 0 1px #2c3240; }
+.gap { padding-left: 86px; }
+.selection-bar { display: flex; align-items: center; gap: 6px; margin-right: 8px; }
+.selection-count { color: var(--text); font-weight: 600; margin-right: 6px; white-space: nowrap; }

@@ -197,3 +197,24 @@ def test_locked_file_keeps_all_names(tmp_workspace, monkeypatch):
     assert [l["id"] for l in data["lines"]] == [l2, l1]  # the new order is kept
     assert _files(sid) == before
     assert all((ws.session_dir(sid) / t["file"]).exists() for l in data["lines"] for t in l["takes"])
+
+
+def test_delete_lines_removes_several_and_renumbers(tmp_workspace):
+    sid, (l1, l2, l3, l4) = _session_with_lines(["one", "two", "three", "four"])
+    _add_take(sid, l2, "chatterbox", 1)
+    _add_take(sid, l4, "chatterbox", 1)
+    assert ws.delete_lines(sid, [l1, l2]) is True
+    data = ws.load_session(sid)
+    assert [l["id"] for l in data["lines"]] == [l3, l4]
+    assert _files(sid) == ["takes/02-burak-chatterbox-take1.wav"]
+
+
+def test_update_lines_sets_fields_on_several(tmp_workspace):
+    sid, (l1, l2, l3) = _session_with_lines(["one", "two", "three"])
+    other = ws.create_character("Guest")
+    ws.add_to_cast(sid, other, "library")
+    ws.update_lines(sid, [l1, l3], character=other, sample=None)
+    data = ws.load_session(sid)
+    assert [l["character"] for l in data["lines"]] == [other, data["lines"][1]["character"], other]
+    with pytest.raises(ValueError):
+        ws.update_lines(sid, [l1], takes=[])

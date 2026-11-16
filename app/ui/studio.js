@@ -42,6 +42,8 @@ export async function renderStudio(root) {
   let library = [];
   let session = null;
   let openLine = null;
+  const picked = new Set(); // lines ticked for bulk actions
+  let lastPicked = null; // anchor for Shift+click ranges
   let justClosed = null; // the row that replaces closed details fades in
   let editing = null; // session-only character whose samples are open
   let seed = "";
@@ -53,6 +55,7 @@ export async function renderStudio(root) {
   // Elapsed time next to every spinner; one ticker for the whole screen.
   const ticker = setInterval(() => {
     if (!main.isConnected) { stopAll(); clearInterval(ticker); document.removeEventListener("keydown", spaceToggle);
+      document.removeEventListener("keydown", selectionKeys);
       document.removeEventListener("vokalit-player-play", onPlayerPlay); return; }
     paintClock();
     for (const node of main.querySelectorAll(".elapsed[data-start]")) {
@@ -111,7 +114,7 @@ export async function renderStudio(root) {
         el("button", { class: "btn btn-primary", onclick: newSession }, "New session")));
       return;
     }
-    if (session?.id !== id) { stopAll(); openLine = null; editing = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
+    if (session?.id !== id) { stopAll(); picked.clear(); lastPicked = null; openLine = null; editing = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
     try {
       session = await api("GET", `/api/sessions/${id}`);
     } catch {
@@ -183,6 +186,12 @@ export async function renderStudio(root) {
       "aria-label": "Seed", title: TIP_SEED, oninput: () => { seed = seedInput.value.replace(/\D/g, ""); seedInput.value = seed; } });
     const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More session actions", title: "More" }, icon(ICON_MORE));
     more.onclick = () => popover(more, el("div", { class: "menu" },
+      el("button", { class: "menu-item", disabled: !session.lines.some((l) => !l.text.trim()),
+        title: "Remove every line that has no text", onclick: () => {
+          const empty = session.lines.filter((l) => !l.text.trim()).map((l) => l.id);
+          confirmBulkDelete(more, empty, "empty");
+        } }, "Delete empty lines\u2026"),
+      el("div", { class: "menu-sep" }),
       el("button", { class: "menu-item danger", onclick: () => confirmDeleteSession(more) }, "Delete session")), { align: "right" });
     return el("header", { class: "main-head" },
       editableTitle(name), el("div", { class: "spacer" }),
@@ -320,7 +329,7 @@ export async function renderStudio(root) {
   // --- Script --------------------------------------------------------------------------------
 
   function script() {
-    const rows = el("div", { class: "script" });
+    const rows = el("div", { class: `script ${picked.size ? "picking" : ""}` });
     if (!session.lines.length) {
       rows.append(el("div", { class: "script-empty muted" }, session.cast.length
         ? "No lines yet. Add a line or paste a script."
@@ -376,7 +385,7 @@ export async function renderStudio(root) {
       + `${playback.lineId === line.id ? "now-playing" : ""}`,
       "data-line": line.id,
       title: "Click to edit the line and its takes" },
-    handle(line), speaker(line),
+    pickBox(line), handle(line), speaker(line),
     el("div", { class: "line-body" },
       el("div", { class: `line-text ${line.text ? "" : "faint"}` }, line.text || "Empty line \u2014 click to write it"),
       long && el("div", { class: "faint small" }, `${line.text.length} characters \u00b7 click to see all or split it`)),
@@ -855,8 +864,20 @@ export async function renderStudio(root) {
     if (!session.lines.some((l) => !l.takes.length && l.text.trim())) {
       return setMessage(message, session.lines.some((l) => !l.takes.length) ? "The lines without takes are empty." : "Every line already has a take.");
     }
+    return runBatch("generate-missing", {});
+  }
+
+  async function generatePicked() {
+    if (!session.models.length) return setMessage(message, installed().length ? "Choose a model in “Generate with”." : "Install a model in the Models tab.", "warn");
+    const ids = session.lines.filter((l) => picked.has(l.id)).map((l) => l.id);
+    if (!ids.some((id) => session.lines.find((l) => l.id === id).text.trim())) return setMessage(message, "The selected lines are empty.", "warn");
+    return runBatch("generate-lines", { lines: ids });
+  }
+
+  async function runBatch(endpoint, body) {
     try {
-      const { id } = await api("POST", `/api/sessions/${sid()}/generate-missing`, { seed: seed || null });
+      for (const id of pendingTextIds()) await pendingText[id]();
+      const { id } = await api("POST", `/api/sessions/${sid()}/${endpoint}`, { ...body, seed: seed || null });
       batch = id;
       draw();
       let last = "";
@@ -873,6 +894,8 @@ export async function renderStudio(root) {
     batch = null;
     await refresh();
   }
+
+  const pendingTextIds = () => Object.keys(pendingText);
 
   async function exportSession() {
     setMessage(message, "Exporting…");
@@ -891,8 +914,101 @@ export async function renderStudio(root) {
 
   function footer() {
     return el("footer", { class: "main-foot" },
-      transport, batch && el("span", { class: "spinner", "aria-hidden": "true" }), message, el("div", { class: "spacer" }), exportInfo);
+      picked.size ? selectionBar() : transport,
+      batch && el("span", { class: "spinner", "aria-hidden": "true" }), message, el("div", { class: "spacer" }), exportInfo);
   }
+
+  // --- Selecting lines for bulk actions -----------------------------------------------------
+
+  // The tick box left of each row. Shift+click ticks every line between this one and the last one ticked.
+  function pickBox(line) {
+    return el("input", { type: "checkbox", class: "pick", checked: picked.has(line.id), "aria-label": "Select line",
+      title: "Select for bulk actions (Shift+click selects a range, Ctrl+A selects all)",
+      onclick: (e) => {
+        const ids = session.lines.map((l) => l.id);
+        const on = e.target.checked;
+        if (e.shiftKey && lastPicked && ids.includes(lastPicked)) {
+          const [a, b] = [ids.indexOf(lastPicked), ids.indexOf(line.id)].sort((x, y) => x - y);
+          for (const id of ids.slice(a, b + 1)) on ? picked.add(id) : picked.delete(id);
+        } else {
+          on ? picked.add(line.id) : picked.delete(line.id);
+        }
+        lastPicked = line.id;
+        draw();
+      } });
+  }
+
+  function clearPicked() { picked.clear(); lastPicked = null; draw(); }
+
+  function selectionBar() {
+    const ids = session.lines.filter((l) => picked.has(l.id)).map((l) => l.id);
+    const lines = session.lines.filter((l) => picked.has(l.id));
+    const characters = new Set(lines.map((l) => l.character));
+    const shared = characters.size === 1 ? castEntry([...characters][0]) : null;
+    const characterButton = el("button", { class: "btn btn-small", "aria-haspopup": "menu",
+      title: "Give the selected lines another speaker" }, "Character", icon(ICONS.chevron, 12));
+    characterButton.onclick = () => popover(characterButton, el("div", { class: "menu" },
+      session.cast.filter((c) => c.name).map((c) => el("button", { class: "menu-item", onclick: () => bulkUpdate(ids,
+        { character: c.character, sample: null }, `${plural(ids.length, "line")} now spoken by ${c.name}.`) },
+      avatar(c.character, c.name, 20), c.name))), { up: true });
+    const sampleButton = el("button", { class: "btn btn-small", "aria-haspopup": "menu", disabled: !shared?.samples.length,
+      title: shared ? "Use another sample of this character for the selected lines" : "Select lines of one character to change their sample" },
+    "Sample", icon(ICONS.chevron, 12));
+    sampleButton.onclick = () => popover(sampleButton, el("div", { class: "menu" },
+      shared.samples.map((sample) => el("button", { class: "menu-item", onclick: () => bulkUpdate(ids,
+        { sample: sample.id }, `${plural(ids.length, "line")} now use \u201c${sample.label}\u201d.`) },
+      sample.label, sample.id === shared.default_sample && el("span", { class: "faint small" }, "default")))), { up: true });
+    const deleteButton = el("button", { class: "btn btn-small btn-danger", title: "Delete the selected lines and their takes" }, "Delete");
+    deleteButton.onclick = () => confirmBulkDelete(deleteButton, ids, "selected");
+    return el("div", { class: "selection-bar" },
+      el("span", { class: "small selection-count" }, `${plural(ids.length, "line")} selected`),
+      el("button", { class: "btn btn-small", disabled: !!batch, onclick: generatePicked,
+        title: "Generate a take for each selected line with the models in \u201cGenerate with\u201d" }, "Generate"),
+      el("div", { class: "pop-holder" }, characterButton),
+      el("div", { class: "pop-holder" }, sampleButton),
+      el("div", { class: "pop-holder" }, deleteButton),
+      el("button", { class: "btn btn-ghost btn-small", onclick: clearPicked, title: "Clear the selection (Esc)" }, "Clear"));
+  }
+
+  async function bulkUpdate(ids, fields, done) {
+    document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+    try {
+      apply(await api("POST", `/api/sessions/${sid()}/lines/update`, { lines: ids, fields }));
+      setMessage(message, done);
+    } catch (error) { fail(error); }
+  }
+
+  function confirmBulkDelete(anchor, ids, kind) {
+    const lines = session.lines.filter((l) => ids.includes(l.id));
+    const takes = lines.reduce((n, l) => n + l.takes.length, 0);
+    popover(anchor, el("div", { class: "menu confirm-menu" },
+      el("strong", {}, `Delete ${plural(lines.length, kind === "empty" ? "empty line" : "line")}?`),
+      el("div", { class: "muted small" }, takes
+        ? `Their ${plural(takes, "take")} are removed permanently. This cannot be undone.` : "They have no takes."),
+      el("button", { class: "btn btn-danger", onclick: async () => {
+        document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+        if (ids.includes(openLine)) openLine = null;
+        try {
+          const data = await api("POST", `/api/sessions/${sid()}/lines/delete`, { lines: ids });
+          for (const id of ids) picked.delete(id);
+          apply(data);
+          if (!data.notice) setMessage(message, `Deleted ${plural(lines.length, "line")}.`);
+        } catch (error) { fail(error); }
+      } }, `Delete ${plural(lines.length, "line")}`)), { align: "left", up: anchor.closest("footer") !== null });
+  }
+
+  // Ctrl+A selects every line and Esc clears the selection, unless you are typing.
+  function selectionKeys(e) {
+    if (e.target.closest?.("input:not([type=checkbox]), textarea, select, [contenteditable]") || !session) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      for (const line of session.lines) picked.add(line.id);
+      draw();
+    } else if (e.key === "Escape" && picked.size && !e.defaultPrevented && !document.querySelector(".popover")) {
+      clearPicked();
+    }
+  }
+  document.addEventListener("keydown", selectionKeys);
 
   // --- Play all: the selected takes in order, with each line's pause between them ------------
 

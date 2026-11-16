@@ -267,3 +267,34 @@ def test_generate_missing_skips_empty_lines(api, monkeypatch):
     done = _wait(api, job["id"])
     assert done["state"] == "done" and generated == ["Hello"]
     assert done["result"] == {"generated": 1, "skipped_empty": 1}
+
+
+def test_generate_selected_lines(api, monkeypatch):
+    generated = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language):
+        generated.append(text)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, l1, cid = _session_with_line(api, "one")
+    _, l2, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "two"})
+    _, l3, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": ""})
+    _, job, _ = api("POST", f"/api/sessions/{sid}/generate-lines",
+                    {"lines": [l2["id"], l3["id"]], "models": ["chatterbox"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done" and generated == ["two"]
+    assert done["result"] == {"generated": 1, "skipped_empty": 1}
+
+
+def test_bulk_line_endpoints(api):
+    sid, l1, cid = _session_with_line(api, "one")
+    _, l2, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "two"})
+    status, body, _ = api("POST", f"/api/sessions/{sid}/lines/update", {"lines": [l1, l2["id"]], "fields": {"pause_after": 1.0}})
+    assert status == 200 and [l["pause_after"] for l in body["lines"]] == [1.0, 1.0]
+    status, body, _ = api("POST", f"/api/sessions/{sid}/lines/update", {"lines": [l1], "fields": {"language": "xx"}})
+    assert status == 400
+    status, body, _ = api("POST", f"/api/sessions/{sid}/lines/delete", {"lines": [l1]})
+    assert status == 200 and [l["id"] for l in body["lines"]] == [l2["id"]]

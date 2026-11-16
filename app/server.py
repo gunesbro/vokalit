@@ -481,8 +481,9 @@ def delete_take(req, sid, lid):
     return get_session(req, sid)
 
 
-@route("POST", "/api/sessions/(?P<sid>[0-9-]+)/generate-missing")
-def generate_missing(req, sid):
+def _batch_job(req, sid, pick):
+    """Generates the lines `pick(session)` returns, in script order, skipping empty ones; Stop ends it after the
+    current line."""
     body = req["json"]
     model_names = body.get("models") or ws.load_session(sid)["models"]
     if not model_names:
@@ -492,9 +493,9 @@ def generate_missing(req, sid):
     stop.clear()
 
     def work(job):
-        missing = [line for line in ws.load_session(sid)["lines"] if not line["takes"]]
-        todo = [line["id"] for line in missing if line["text"].strip()]
-        skipped = len(missing) - len(todo)
+        chosen = pick(ws.load_session(sid))
+        todo = [line["id"] for line in chosen if line["text"].strip()]
+        skipped = len(chosen) - len(todo)
         for number, line_id in enumerate(todo, 1):
             if stop.is_set():
                 job["progress"] = f"Stopped after {number - 1} of {len(todo)} lines."
@@ -503,6 +504,32 @@ def generate_missing(req, sid):
             _generate_line(sid, line_id, model_names, _random_seed() if seed in (None, "") else int(seed))
         return {"generated": len(todo), "skipped_empty": skipped}
     return _start_job(work)
+
+
+@route("POST", "/api/sessions/(?P<sid>[0-9-]+)/generate-missing")
+def generate_missing(req, sid):
+    return _batch_job(req, sid, lambda session: [line for line in session["lines"] if not line["takes"]])
+
+
+@route("POST", "/api/sessions/(?P<sid>[0-9-]+)/generate-lines")
+def generate_lines(req, sid):
+    wanted = set(req["json"].get("lines", []))
+    return _batch_job(req, sid, lambda session: [line for line in session["lines"] if line["id"] in wanted])
+
+
+@route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/update")
+def update_lines(req, sid):
+    fields = req["json"].get("fields", {})
+    if "language" in fields:
+        _check_language(fields["language"], allow_none=True)
+    ws.update_lines(sid, req["json"]["lines"], **fields)
+    return get_session(req, sid)
+
+
+@route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/delete")
+def delete_lines(req, sid):
+    renamed = ws.delete_lines(sid, req["json"]["lines"])
+    return {**get_session(req, sid), **({} if renamed else {"notice": RENAME_NOTICE})}
 
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/stop")

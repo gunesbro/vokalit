@@ -201,6 +201,8 @@ All interface text is English. The visual design is the design canvas; behaviour
   takes (select, play, "custom settings", "text changed", "Use these settings", delete) and "Perform this line";
   "Paste script" (`Name: text` lines); "Play all" in the footer plays the selected takes in order with each line's
   pause (previous/next, Space to pause, "Play from here" in the line menu; lines without takes are skipped).
+  Lines can be ticked (Shift+click for a range, Ctrl+A for all, Esc to clear) for bulk Generate, Character, Sample
+  and Delete; the session menu has "Delete empty lines".
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample". Note: "Only use your own voice or voices you have

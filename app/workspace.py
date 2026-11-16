@@ -367,6 +367,17 @@ def add_line(session_id: str, char_id: str, text: str = "", pause_after: float =
     return line_id
 
 
+def update_lines(session_id: str, line_ids: list[str], **fields) -> None:
+    """Sets the same fields on several lines (one save)."""
+    unknown = set(fields) - _LINE_FIELDS
+    if unknown:
+        raise ValueError(f"Unknown line fields: {sorted(unknown)}")
+    data = load_session(session_id)
+    for line_id in line_ids:
+        data["lines"][_line_index(data, line_id)].update(fields)
+    save_session(session_id, data)
+
+
 def update_line(session_id: str, line_id: str, **fields) -> None:
     unknown = set(fields) - _LINE_FIELDS
     if unknown:
@@ -391,6 +402,21 @@ def reorder_lines(session_id: str, line_ids: list[str]) -> bool:
     if sorted(line_ids) != sorted(by_id):
         raise WorkspaceError("The script changed while reordering. Try again.")
     data["lines"] = [by_id[line_id] for line_id in line_ids]
+    save_session(session_id, data)
+    return sync_file_names(session_id)
+
+
+def delete_lines(session_id: str, line_ids: list[str]) -> bool:
+    """Deletes several lines and their take and recording files; renumbers the rest. Returns sync_file_names()."""
+    data = load_session(session_id)
+    doomed = set(line_ids)
+    for line in data["lines"]:
+        if line["id"] in doomed:
+            for take in line["takes"]:
+                for key in ("file", "source_recording"):
+                    if take.get(key):
+                        (session_dir(session_id) / take[key]).unlink(missing_ok=True)
+    data["lines"] = [line for line in data["lines"] if line["id"] not in doomed]
     save_session(session_id, data)
     return sync_file_names(session_id)
 
