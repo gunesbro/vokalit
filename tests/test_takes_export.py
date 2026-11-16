@@ -136,3 +136,64 @@ def test_text_changed_flag(tmp_workspace):
     line = _line(sid, lid)
     assert ws.take_text_changed(line, tts)
     assert not ws.take_text_changed(line, convert)
+
+
+def _files(sid):
+    return sorted(p.relative_to(ws.session_dir(sid)).as_posix()
+                  for p in ws.session_dir(sid).rglob("*.wav"))
+
+
+def test_reorder_renumbers_take_files(tmp_workspace):
+    sid, (l1, l2) = _session_with_lines(["one", "two"])
+    _add_take(sid, l1, "chatterbox", 1)
+    _add_take(sid, l2, "chatterbox", 1)
+    assert _files(sid) == ["takes/01-burak-chatterbox-take1.wav", "takes/02-burak-chatterbox-take1.wav"]
+    first = (ws.session_dir(sid) / "takes/01-burak-chatterbox-take1.wav").read_bytes()
+    assert ws.reorder_lines(sid, [l2, l1]) is True
+    data = ws.load_session(sid)
+    assert [l["id"] for l in data["lines"]] == [l2, l1]
+    assert data["lines"][1]["takes"][0]["file"] == "takes/02-burak-chatterbox-take1.wav"
+    assert data["lines"][1]["selected"] == "takes/02-burak-chatterbox-take1.wav"
+    assert data["lines"][0]["selected"] == "takes/01-burak-chatterbox-take1.wav"
+    assert (ws.session_dir(sid) / "takes/02-burak-chatterbox-take1.wav").read_bytes() == first  # the swap kept content
+    assert _files(sid) == ["takes/01-burak-chatterbox-take1.wav", "takes/02-burak-chatterbox-take1.wav"]
+
+
+def test_delete_and_insert_renumber_recordings_too(tmp_workspace):
+    sid, (l1, l2, l3) = _session_with_lines(["one", "two", "three"])
+    _add_take(sid, l3, "chatterbox", 1)
+    recording = ws.new_recording_path(sid, l3)
+    make_wav(recording, 1)
+    out = ws.new_take_path(sid, l3, "chatterbox-vc")
+    make_wav(out, 1)
+    ws.add_take(sid, l3, {"file": str(out), "kind": "convert", "model": "chatterbox-vc", "source_recording": str(recording)})
+    assert ws.delete_line(sid, l1) is True
+    assert _files(sid) == ["recordings/02-take2.wav", "takes/02-burak-chatterbox-take1.wav",
+                           "takes/02-burak-chatterbox-vc-take2.wav"]
+    ws.add_line(sid, ws.load_session(sid)["lines"][0]["character"], "new", after=l2)
+    assert _files(sid) == ["recordings/03-take2.wav", "takes/03-burak-chatterbox-take1.wav",
+                           "takes/03-burak-chatterbox-vc-take2.wav"]
+    take = ws.load_session(sid)["lines"][2]["takes"][1]
+    assert take["source_recording"] == "recordings/03-take2.wav"
+
+
+def test_locked_file_keeps_all_names(tmp_workspace, monkeypatch):
+    sid, (l1, l2) = _session_with_lines(["one", "two"])
+    _add_take(sid, l1, "chatterbox", 1)
+    _add_take(sid, l2, "chatterbox", 1)
+    before = _files(sid)
+    real, calls = ws.os.replace, []
+
+    def flaky(src, dst):
+        calls.append(1)
+        if len(calls) == 3:  # fails half way, e.g. a file open in another program on Windows
+            raise PermissionError("in use")
+        return real(src, dst)
+
+    monkeypatch.setattr(ws.os, "replace", flaky)
+    assert ws.reorder_lines(sid, [l2, l1]) is False
+    monkeypatch.setattr(ws.os, "replace", real)
+    data = ws.load_session(sid)
+    assert [l["id"] for l in data["lines"]] == [l2, l1]  # the new order is kept
+    assert _files(sid) == before
+    assert all((ws.session_dir(sid) / t["file"]).exists() for l in data["lines"] for t in l["takes"])

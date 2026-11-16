@@ -362,6 +362,8 @@ def add_line(session_id: str, char_id: str, text: str = "", pause_after: float =
     position = len(data["lines"]) if after is None else _line_index(data, after) + 1
     data["lines"].insert(position, line)
     save_session(session_id, data)
+    if after is not None:
+        sync_file_names(session_id)  # lines below moved down one place
     return line_id
 
 
@@ -380,18 +382,20 @@ def move_line(session_id: str, line_id: str, delta: int) -> None:
     line = data["lines"].pop(index)
     data["lines"].insert(max(0, min(len(data["lines"]), index + delta)), line)
     save_session(session_id, data)
+    sync_file_names(session_id)
 
 
-def reorder_lines(session_id: str, line_ids: list[str]) -> None:
+def reorder_lines(session_id: str, line_ids: list[str]) -> bool:
     data = load_session(session_id)
     by_id = {line["id"]: line for line in data["lines"]}
     if sorted(line_ids) != sorted(by_id):
         raise WorkspaceError("The script changed while reordering. Try again.")
     data["lines"] = [by_id[line_id] for line_id in line_ids]
     save_session(session_id, data)
+    return sync_file_names(session_id)
 
 
-def delete_line(session_id: str, line_id: str) -> None:
+def delete_line(session_id: str, line_id: str) -> bool:
     data = load_session(session_id)
     line = data["lines"].pop(_line_index(data, line_id))
     for take in line["takes"]:
@@ -399,6 +403,52 @@ def delete_line(session_id: str, line_id: str) -> None:
             if take.get(key):
                 (session_dir(session_id) / take[key]).unlink(missing_ok=True)
     save_session(session_id, data)
+    return sync_file_names(session_id)
+
+
+_NUMBER = re.compile(r"^\d+-")
+
+
+def sync_file_names(session_id: str) -> bool:
+    """Renames take and recording files so their NN- prefix matches the line's position again.
+    All or nothing: if a file cannot be renamed (e.g. open in another program on Windows), every file keeps
+    its old name and False is returned; the next change of order tries again."""
+    data = load_session(session_id)
+    folder = session_dir(session_id)
+    plan = []  # (take, key, old, new)
+    for number, line in enumerate(data["lines"], 1):
+        for take in line["takes"]:
+            for key in ("file", "source_recording"):
+                old = take.get(key)
+                if not old or not _NUMBER.match(Path(old).name) or not (folder / old).exists():
+                    continue
+                new = Path(old).with_name(_NUMBER.sub(f"{number:02d}-", Path(old).name, count=1)).as_posix()
+                if new != old:
+                    plan.append((line, take, key, old, new))
+    if not plan:
+        return True
+    done = []  # (src, dst) in the order they happened, to undo
+    try:
+        # Two steps through temporary names, so swapping two lines never overwrites a file.
+        for _, _, _, old, _ in plan:
+            os.replace(folder / old, folder / f"{old}.renaming")
+            done.append((old, f"{old}.renaming"))
+        for _, _, _, old, new in plan:
+            os.replace(folder / f"{old}.renaming", folder / new)
+            done.append((f"{old}.renaming", new))
+    except OSError:
+        for src, dst in reversed(done):
+            try:
+                os.replace(folder / dst, folder / src)
+            except OSError:
+                pass
+        return False
+    for line, take, key, old, new in plan:
+        take[key] = new
+        if key == "file" and line["selected"] == old:
+            line["selected"] = new
+    save_session(session_id, data)
+    return True
 
 
 _SPEAKER = re.compile(r"^\s*([^:]{1,40}?)\s*:\s*(.*)$")

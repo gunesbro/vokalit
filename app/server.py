@@ -160,6 +160,9 @@ def _random_seed():
 
 _routes = []
 
+RENAME_NOTICE = ("Some take files are open in another program, so their 01-, 02- numbers were not updated. "
+                 "They will be on the next change.")
+
 
 def route(method, pattern):
     def register(fn):
@@ -393,14 +396,14 @@ def update_line(req, sid, lid):
 
 @route("DELETE", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)")
 def delete_line(req, sid, lid):
-    ws.delete_line(sid, lid)
-    return get_session(req, sid)
+    renamed = ws.delete_line(sid, lid)
+    return {**get_session(req, sid), **({} if renamed else {"notice": RENAME_NOTICE})}
 
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/order")
 def reorder_lines(req, sid):
-    ws.reorder_lines(sid, req["json"]["order"])
-    return get_session(req, sid)
+    renamed = ws.reorder_lines(sid, req["json"]["order"])
+    return {**get_session(req, sid), **({} if renamed else {"notice": RENAME_NOTICE})}
 
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/paste")

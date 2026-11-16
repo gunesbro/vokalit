@@ -118,7 +118,12 @@ export async function renderStudio(root) {
   }
 
   // Applies a session returned by the API and redraws.
-  const apply = (data) => { session = data.session || data; draw(); return data; };
+  const apply = (data) => {
+    session = data.session || data;
+    draw();
+    if (data.notice) setMessage(message, data.notice, "warn");
+    return data;
+  };
 
   function drawList() {
     const term = search.value.trim().toLowerCase();
