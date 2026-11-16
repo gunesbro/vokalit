@@ -1,0 +1,5 @@
+outputs/
+.local/
+__pycache__/
+*.wav
+*.mp3
