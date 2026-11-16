@@ -1,10 +1,12 @@
 """Model install/remove and worker processes. See SPEC.md §5 and §6."""
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
 import threading
+import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOCAL = os.path.join(ROOT, ".local")
@@ -15,13 +17,13 @@ TORCH_CUDA = ["torch==2.8.0", "torchaudio==2.8.0", "--index-url", "https://downl
 MODELS = {
     "chatterbox": {
         "title": "Chatterbox Multilingual",
-        "source": "ResembleAI/chatterbox (Hugging Face)",
+        "url": "https://huggingface.co/ResembleAI/chatterbox",
         "approx_download": "~6-8 GB (PyTorch with CUDA ~4-5 GB, other libraries, model ~2 GB)",
         "license": "MIT",
         "pip_steps": [
-            TORCH_CUDA,
-            ["-r", os.path.join(ROOT, "workers", "chatterbox", "requirements.txt")],
-            ["--no-deps", "chatterbox-tts==0.1.7"],
+            ("PyTorch with CUDA", TORCH_CUDA),
+            ("Other libraries", ["-r", os.path.join(ROOT, "workers", "chatterbox", "requirements.txt")]),
+            ("Chatterbox", ["--no-deps", "chatterbox-tts==0.1.7"]),
         ],
     },
 }
@@ -51,12 +53,16 @@ def is_installed(name):
 
 
 def size_gb(name):
-    total = 0
+    seen, total = set(), 0
     for folder, _, files in os.walk(model_dir(name)):
         for file in files:
-            path = os.path.join(folder, file)
-            if not os.path.islink(path):
-                total += os.path.getsize(path)
+            try:
+                stat = os.lstat(os.path.join(folder, file))
+            except FileNotFoundError:  # a temporary file removed during an install
+                continue
+            if (stat.st_dev, stat.st_ino) not in seen:  # hard links count once
+                seen.add((stat.st_dev, stat.st_ino))
+                total += stat.st_size
     return total / 1e9
 
 
@@ -69,30 +75,62 @@ def _env(name, offline):
 
 
 def _run(command, env):
-    """Runs a command and yields its output lines."""
+    """Runs a command. Yields its output lines, and None every few seconds while it is silent."""
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, encoding="utf-8", errors="replace"
     )
-    yield from process.stdout
+    lines = queue.Queue()
+
+    def read():
+        for line in process.stdout:
+            lines.put(line)
+        lines.put(None)
+
+    threading.Thread(target=read, daemon=True).start()
+    while True:
+        try:
+            line = lines.get(timeout=3)
+        except queue.Empty:
+            yield None
+            continue
+        if line is None:
+            break
+        yield line
     if process.wait() != 0:
         raise RuntimeError(f"Command failed: {' '.join(command)}")
 
 
 def install(name):
-    """Yields log lines. On failure removes the half-installed model and raises."""
+    """Yields ("log", line) and ("status", text). On failure removes the half-installed model and raises."""
     env = _env(name, offline=False)
+    # A per-model uv cache: its growth shows download progress, and it is deleted after the install.
+    uv_cache = os.path.join(model_dir(name), "uv-cache")
+    env["UV_CACHE_DIR"] = uv_cache
+    steps = [("Python environment", [UV, "venv", "--python", "3.11", os.path.join(model_dir(name), "venv")])]
+    for label, args in MODELS[name]["pip_steps"]:
+        steps.append((label, [UV, "pip", "install", "--python", _python(name), *args]))
+    steps.append(("Model weights", [_python(name), _worker_script(name), "--download"]))
+    started = last_status = time.monotonic()
     try:
-        yield from _run([UV, "venv", "--python", "3.11", os.path.join(model_dir(name), "venv")], env)
-        for step in MODELS[name]["pip_steps"]:
-            # --no-cache: nothing stays in the shared uv cache, so Remove frees all the space.
-            yield from _run([UV, "pip", "install", "--no-cache", "--python", _python(name), *step], env)
-        yield "Downloading model weights...\n"
-        yield from _run([_python(name), _worker_script(name), "--download"], env)
+        for number, (label, command) in enumerate(steps, 1):
+            yield "log", f"--- Step {number}/{len(steps)}: {label}\n"
+            for line in _run(command, env):
+                if line:
+                    yield "log", line
+                now = time.monotonic()
+                if now - last_status >= 3:
+                    last_status = now
+                    elapsed = int(now - started)
+                    yield "status", (
+                        f"Step {number}/{len(steps)}: {label} · {size_gb(name):.2f} GB downloaded · "
+                        f"{elapsed // 60}m {elapsed % 60:02d}s"
+                    )
     except Exception:
         remove(name)
         raise
+    shutil.rmtree(uv_cache, ignore_errors=True)  # the venv keeps its own (hard-linked) copies
     open(_marker(name), "w").close()
-    yield f"Done. Disk usage: {size_gb(name):.1f} GB\n"
+    yield "log", f"Done. Disk usage: {size_gb(name):.1f} GB\n"
 
 
 def remove(name):

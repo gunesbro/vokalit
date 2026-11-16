@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.10** (v1.9'a göre: model kurulum ayrıntıları — PyTorch cu128, `--no-deps`, `--no-cache` — §6.1; işçi hazır/hata mesajı §5.2; Generate kontrolü §7).
+> Durum: **v1.11** (v1.10'a göre: model sayfası bağlantısı; kurulum ilerleme satırı; `--no-cache` yerine model başına uv önbelleği — §6, §6.1).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -169,7 +169,7 @@ ortamını kurar (yoksa), uygulamayı açar.
 
 1. Onay kutusu gösterir:
    ```
-   Chatterbox Multilingual (ResembleAI/chatterbox)
+   Chatterbox Multilingual (https://huggingface.co/ResembleAI/chatterbox)
    Yaklaşık indirme: ~5–7 GB (kütüphaneler ~3–5 GB + model ~2 GB)
    Konum: .local/chatterbox/
    Lisans: MIT
@@ -187,8 +187,13 @@ Boyutlar kodda küçük bir tablodadır ve "yaklaşık" diye etiketlenir.
   RTX 50 serisi (Blackwell, sm_120) dahil destekler. NVIDIA sürücüsü CUDA 12.8'i desteklemelidir (README'de yazılır).
 - **Chatterbox:** `chatterbox-tts==0.1.7` `--no-deps` ile kurulur, çünkü `torch==2.6.0` sabitlemesi RTX 50 serisini
   desteklemez. Diğer bağımlılıkları `workers/chatterbox/requirements.txt` içinde, upstream sabitlemeleriyle listelenir.
-- **`--no-cache`:** Model paketleri ortak uv önbelleğinde tutulmaz; böylece "Remove" diskteki alanın tamamını boşaltır.
-  Bedeli: yeniden kurulumda paketler tekrar iner.
+- **Model başına uv önbelleği:** Kurulum sırasında `UV_CACHE_DIR=.local/<model>/uv-cache` kullanılır ve kurulum
+  bitince silinir (venv kendi hard-link'li kopyalarını tutar). Ortak önbellekte bir şey kalmaz, "Remove" alanın
+  tamamını boşaltır. Bedeli: yeniden kurulumda paketler tekrar iner.
+- **İlerleme:** uv terminal dışında indirme yüzdesi vermez. Bu yüzden kurulum logunun üstünde 3 sn'de bir
+  güncellenen bir satır gösterilir: `Step 2/5: PyTorch with CUDA · 1.42 GB downloaded · 3m 12s`.
+  "Downloaded" değeri `.local/<model>/` klasörünün büyüklüğüdür (hard link'ler bir kez sayılır).
+  Gerçek toplam boyut ölçüldükten sonra (plan adım 6) yüzde eklenebilir.
 - Kurulum yarıda kalırsa `.local/<model>/` silinir ve hata gösterilir. Başarılı kurulumun sonunda
   `.local/<model>/installed` işaret dosyası yazılır; "kurulu mu?" kontrolü buna bakar.
 
@@ -203,7 +208,7 @@ Tüm arayüz metinleri İngilizce (bkz. V2).
 
 ```
 ┌ Models ─────────────────────────────────────────────┐
-│ Chatterbox  ● installed (5.8 GB)   [Remove]          │
+│ Chatterbox  ● installed (5.8 GB)   [Remove]          │  ← model adı model sayfasına bağlantıdır (desteklenen diller)
 │ OmniVoice   ○ not installed        [Install]         │
 │ [log box — visible during install]                   │
 └─────────────────────────────────────────────────────┘

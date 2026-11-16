@@ -21,7 +21,8 @@ THEME = gr.themes.Default(font=["system-ui", "sans-serif"], font_mono=["ui-monos
 
 
 def model_status(name):
-    title = models.MODELS[name]["title"]
+    # The model page lists the supported languages.
+    title = f"[{models.MODELS[name]['title']}]({models.MODELS[name]['url']})"
     if models.is_installed(name):
         return f"**{title}**: installed ({models.size_gb(name):.1f} GB)"
     return f"**{title}**: not installed"
@@ -41,12 +42,13 @@ def build_model_row(name):
         with gr.Row():
             confirm_btn = gr.Button("Confirm", variant="primary")
             cancel_btn = gr.Button("Cancel")
+    progress = gr.Markdown(visible=False)
     log = gr.Textbox(label="Install log", lines=10, max_lines=10, autoscroll=True, visible=False)
 
     def ask_install():
         text = (
             f"**Install {info['title']}?**\n\n"
-            f"- Source: {info['source']}\n"
+            f"- Source: {info['url']}\n"
             f"- Approximate download: {info['approx_download']}\n"
             f"- Location: `.local/{name}/`\n"
             f"- License: {info['license']}"
@@ -62,13 +64,13 @@ def build_model_row(name):
 
     def finished():
         installed = models.is_installed(name)
-        return (
-            gr.update(visible=False),
-            gr.update(),
-            model_status(name),
-            gr.update(visible=not installed),
-            gr.update(visible=installed),
-        )
+        return {
+            confirm_box: gr.update(visible=False),
+            progress: gr.update(visible=False),
+            status: model_status(name),
+            install_btn: gr.update(visible=not installed),
+            remove_btn: gr.update(visible=installed),
+        }
 
     def run(action):
         if action == "remove":
@@ -76,11 +78,18 @@ def build_model_row(name):
             yield finished()
             return
         log_text = ""
-        yield gr.update(visible=False), gr.update(visible=True, value=""), gr.update(), gr.update(), gr.update()
+        yield {
+            confirm_box: gr.update(visible=False),
+            progress: gr.update(visible=True, value="Starting..."),
+            log: gr.update(visible=True, value=""),
+        }
         try:
-            for line in models.install(name):
-                log_text += line
-                yield gr.update(), log_text, gr.update(), gr.update(), gr.update()
+            for kind, text in models.install(name):
+                if kind == "status":
+                    yield {progress: text}
+                else:
+                    log_text += text
+                    yield {log: log_text}
         except Exception as error:
             raise gr.Error(f"Install failed: {error}. See the install log.")
         yield finished()
@@ -88,7 +97,7 @@ def build_model_row(name):
     install_btn.click(ask_install, None, [action, confirm_text, confirm_box])
     remove_btn.click(ask_remove, None, [action, confirm_text, confirm_box])
     cancel_btn.click(lambda: gr.update(visible=False), None, confirm_box)
-    confirm_btn.click(run, action, [confirm_box, log, status, install_btn, remove_btn])
+    confirm_btn.click(run, action, [confirm_box, progress, log, status, install_btn, remove_btn])
 
 
 def generate(mode, ref, text):
