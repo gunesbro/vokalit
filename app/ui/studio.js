@@ -598,7 +598,7 @@ export async function renderStudio(root) {
         el("label", { class: "row muted", title: TIP_SEED }, "Seed", lineSeed),
         generateButton,
         el("div", { class: "faint small" }, "One take per selected model, so you can compare them.")),
-      longNote(line),
+      longNote(line, text),
       languageNotes(line, picker.get()),
       lineSettings(line, picker.get()),
       el("div", { class: "detail-bottom" }, takesList(line), perform(line)));
@@ -606,14 +606,25 @@ export async function renderStudio(root) {
     return node;
   }
 
-  function longNote(line) {
-    if (line.text.length <= LONG_LINE) return null;
-    const parts = splitSentences(line.text, SPLIT_SIZE);
-    return el("div", { class: "detail-row row wrap small" },
-      el("span", { class: "warn" }, `This line is long (${line.text.length} characters). Models work best with a sentence or two; `
-        + "very long lines can be cut off or drift."),
-      parts.length > 1 && el("button", { class: "btn btn-small", onclick: () => splitLine(line, parts) },
-        `Split into ${parts.length} lines`));
+  // Follows the text box as you type: appears past LONG_LINE characters, disappears below it.
+  function longNote(line, textBox) {
+    const box = el("div", { class: "detail-row row wrap small long-note" });
+    const update = () => {
+      const value = textBox.value;
+      box.hidden = value.length <= LONG_LINE;
+      if (box.hidden) return box.replaceChildren();
+      const parts = splitSentences(value, SPLIT_SIZE);
+      box.replaceChildren(
+        el("span", { class: "warn" }, `This line is long (${value.length} characters). Models work best with a sentence or two; `
+          + "very long lines can be cut off or drift."),
+        parts.length > 1 && el("button", { class: "btn btn-small", onclick: async () => {
+          await pendingText[line.id]?.();
+          splitLine(line, splitSentences(textBox.value, SPLIT_SIZE));
+        } }, `Split into ${parts.length} lines`));
+    };
+    textBox.addEventListener("input", update);
+    update();
+    return box;
   }
 
   // Keeps the first part in this line and adds the rest after it, with the same character, sample and language.

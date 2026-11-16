@@ -352,3 +352,4 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .field[title], .muted[title] { cursor: help; }
 .field .select, .field .input { cursor: pointer; }
 .field .input { cursor: text; }
+[hidden] { display: none !important; }
