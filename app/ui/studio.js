@@ -4,7 +4,7 @@ import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { commonLanguages, formatTime, moveLine, settingsChanges, takeNumber } from "./script.js";
 import { dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
-import { player } from "./waveform.js";
+import { player, stopAudio } from "./waveform.js";
 
 const ICON_GRIP = ["M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"];
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
@@ -602,8 +602,10 @@ export async function renderStudio(root) {
         rowNode.append(el("div", { class: "confirm" },
           el("span", {}, `Delete take ${takeNumber(take.file) ?? ""}? The file is removed.`),
           el("div", { class: "row" },
-            el("button", { class: "btn btn-danger btn-small", onclick: () =>
-              api("DELETE", `/api/sessions/${sid()}/lines/${line.id}/takes`, { file: take.file }).then(apply, fail) }, "Delete"),
+            el("button", { class: "btn btn-danger btn-small", onclick: () => {
+              stopAudio(`/files/sessions/${sid()}/${take.file}`);
+              api("DELETE", `/api/sessions/${sid()}/lines/${line.id}/takes`, { file: take.file }).then(apply, fail);
+            } }, "Delete"),
             el("button", { class: "btn btn-ghost btn-small", onclick: (e) => e.target.closest(".confirm").remove() }, "Cancel"))));
       } }, icon(ICONS.trash)));
     return rowNode;

@@ -18,27 +18,62 @@ export function bars(values, className = "") {
 
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
+// One Audio per file, shared by every player showing it, so a redraw keeps playback going. When no player
+// for a file is on the page any more (its take or sample was deleted, or the screen changed), it stops.
+const live = new Map(); // url -> { audio, owners: Map<Element, AbortController> }
+
+function audioFor(url, owner) {
+  let entry = live.get(url);
+  if (!entry) {
+    entry = { audio: new Audio(url), owners: new Map() };
+    live.set(url, entry);
+  }
+  const controller = new AbortController();
+  entry.owners.set(owner, controller);
+  return { audio: entry.audio, signal: controller.signal };
+}
+
+function sweep() {
+  for (const [url, entry] of live) {
+    for (const [owner, controller] of entry.owners) {
+      if (!owner.isConnected) { controller.abort(); entry.owners.delete(owner); }
+    }
+    if (!entry.owners.size) { entry.audio.pause(); entry.audio.removeAttribute("src"); live.delete(url); }
+  }
+}
+setInterval(sweep, 250);
+
+// Stops a file right away (before deleting it).
+export function stopAudio(url) {
+  const entry = live.get(url);
+  if (entry) { entry.audio.pause(); entry.audio.currentTime = 0; }
+}
+
 // A play button + waveform that fills as it plays. `selected` uses the accent color.
 export function player(url, { buckets = 48, selected = false, label = "Play", showTime = true } = {}) {
-  const audio = new Audio(url);
   const wave = el("div", { class: `wave ${selected ? "selected" : ""}`, "aria-hidden": "true" });
-  const button = el("button", { class: "play", "aria-label": label, title: label, onclick: () => (audio.paused ? audio.play() : audio.pause()) },
-    icon(ICONS.play, 12));
+  const button = el("button", { class: "play", "aria-label": label, title: label, onclick: () => (audio.paused ? audio.play() : audio.pause()) });
+  // The button is the owner: Characters moves it out of the player into its own column.
+  const { audio, signal } = audioFor(url, button);
+  const paintButton = () => button.replaceChildren(icon(audio.paused ? ICONS.play : ICONS.pause, 12));
+  paintButton();
   const time = el("span", { class: "time num" });
   const root = el("div", { class: "player" }, button, wave, showTime && time);
   urlPeaks(url, buckets).then((values) => {
     wave.replaceChildren(...values.map((v) => el("span", { style: { height: `${Math.max(12, Math.round(v * 100))}%` } })));
+    paint();
   }).catch(() => wave.replaceChildren(el("span", { class: "faint small" }, "Cannot read audio")));
   const paint = () => {
     const played = audio.duration ? audio.currentTime / audio.duration : 0;
     [...wave.children].forEach((bar, i, all) => bar.classList.toggle("played", i / all.length < played));
     time.textContent = fmt(audio.paused && !audio.currentTime ? audio.duration || 0 : audio.currentTime);
   };
-  audio.addEventListener("loadedmetadata", paint);
-  audio.addEventListener("timeupdate", paint);
-  audio.addEventListener("play", () => button.replaceChildren(icon(ICONS.pause, 12)));
-  audio.addEventListener("pause", () => button.replaceChildren(icon(ICONS.play, 12)));
-  audio.addEventListener("ended", () => { audio.currentTime = 0; paint(); });
+  audio.addEventListener("loadedmetadata", paint, { signal });
+  audio.addEventListener("timeupdate", paint, { signal });
+  audio.addEventListener("play", paintButton, { signal });
+  audio.addEventListener("pause", paintButton, { signal });
+  audio.addEventListener("ended", () => { audio.currentTime = 0; paint(); }, { signal });
+  paint();
   // Clicking the waveform jumps there and plays from that point.
   wave.style.cursor = "pointer";
   wave.addEventListener("click", (e) => {

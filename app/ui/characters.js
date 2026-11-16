@@ -1,7 +1,7 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
 import { api, editableTitle, el, icon, ICONS, setMessage } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
-import { player, rangeEditor } from "./waveform.js";
+import { player, rangeEditor, stopAudio } from "./waveform.js";
 
 const MIN_SECONDS = 10;
 const COLORS = [["#7aa2f7", "#1b2436"], ["#bb9af7", "#2a2038"], ["#e5c07b", "#2e2716"], ["#6fbf8a", "#17291f"],
@@ -214,7 +214,10 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     const box = el("div", { class: "confirm" },
       el("span", {}, `Delete “${sample.label}”? Lines using it switch to the default sample.`),
       el("div", { class: "row" },
-        el("button", { class: "btn btn-danger", onclick: () => api("DELETE", path(`/samples/${sample.id}`)).then(refresh, fail) }, "Delete"),
+        el("button", { class: "btn btn-danger", onclick: () => {
+          stopAudio(sampleUrl(charId, sample.file, sessionId));
+          api("DELETE", path(`/samples/${sample.id}`)).then(refresh, fail);
+        } }, "Delete"),
         el("button", { class: "btn btn-ghost", onclick: () => box.remove() }, "Cancel")));
     row.append(box);
   }
