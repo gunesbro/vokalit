@@ -148,7 +148,10 @@
 - Produces:
   - `new_take_path(session_id, line_id, model: str) -> Path` — name rule from Global Constraints; `n` = number of existing takes of the line + 1.
   - `new_recording_path(session_id, line_id) -> Path` — `recordings/<line no 2 digits>-take<n>.wav`
-  - `set_session_models(session_id, models: list[str])`, `set_session_settings(session_id, model: str, settings: dict)` (stored in `session.json`, spec §6)
+  - `set_session_models(session_id, models: list[str])`, `set_session_settings(session_id, model: str, settings: dict)`, `reset_session_settings(session_id, model)` (stored in `session.json`, spec §6)
+  - `set_line_settings(session_id, line_id, model: str, overrides: dict)`, `reset_line_settings(session_id, line_id)`
+  - `effective_settings(session: dict, line: dict, model: str, defaults: dict) -> dict` (defaults ← session ← line)
+  - `take_has_custom_settings(session: dict, take: dict) -> bool`
   - `add_take(session_id, line_id, take: dict) -> None` — `take` holds the §6 fields (including `seed` and `settings` for tts); `file` is stored relative to the session folder; becomes `selected` if the line has none.
   - `select_take(session_id, line_id, file)`, `delete_take(session_id, line_id, file)` (removes the file; selects the newest remaining)
   - `take_text_changed(line: dict, take: dict) -> bool` (only for `kind == "tts"`)
@@ -160,6 +163,8 @@
   - `test_export_refuses_lines_without_takes`: message `"Lines 2, 3 have no takes yet."`; no file created.
   - `test_export_reports_missing_take_file`: selected file removed from disk → `WorkspaceError` naming line 1.
   - `test_export_refuses_mixed_sample_rates`: 24000 vs 16000 → `WorkspaceError` mentioning both rates.
+  - `test_effective_settings_layers`: defaults `{a:1,b:2}`, session `{a:3}`, line `{b:4}` → `{a:3,b:4}`; `reset_line_settings` → `{a:3,b:2}`; `reset_session_settings` → `{a:1,b:2}`.
+  - `test_custom_settings_flag`: a take whose settings differ from the session's → true; equal → false.
   - `test_text_changed_flag`: edit the line text → `take_text_changed` true for the old tts take, false for a convert take.
 - [ ] **Step 2: Run** `python3 -m pytest tests/test_takes_export.py -q` → FAIL.
 - [ ] **Step 3: Implement** using stdlib `wave` and numpy for silence (`int16` zeros, `round(pause * sr)` frames).
@@ -244,7 +249,8 @@ Behavior is spec §7.1. With no installed model, the model area shows "Install a
 - Dragging (only if Task 0 passed): the Task 0 mechanism calls `reorder_lines`.
 - Seed field: `gr.Textbox` (empty = random `random.randint(0, 2**31 - 1)`); "Use these settings" on a take copies its seed and settings into the session.
 - Generate with: `gr.Dropdown(choices=installed models, multiselect=True)` bound to `session.models`; the same dropdown in the line details.
-- Settings: header button toggles a panel with one `gr.Tab` per selected model, sliders built from `models.MODELS[name]["settings"]`, "Reset to defaults".
+- Session settings: header button toggles a panel with one `gr.Tab` per selected model, sliders built from `models.MODELS[name]["settings"]`, "Reset to model defaults".
+- Line settings: the same sliders in the line details, initialized from `effective_settings`; changes store only differing keys via `set_line_settings`; "Reset to session settings".
 - Layout follows the canvas: collapsed rows + one opened details panel at a time (`gr.State(open_line_id)`).
 - Batch generation is a generator handler that yields the message line ("Line 3/12…"); Stop sets a module-level `threading.Event` checked between lines.
 - A line whose character is missing (`cast_character` is `None`) shows "deleted character" and its Generate/Convert are refused with a message.

@@ -31,7 +31,7 @@ What users do with the generated audio is their responsibility; the app does not
 4. Script: lines (character, sample, text, pause after); insert a line between any two lines; **drag-and-drop reordering** if the spike in the plan (Task 0) shows it works reliably in Gradio, otherwise up/down buttons.
 5. Per-line generation; model(s) chosen at generation time; every attempt (take) is kept.
 6. **Voice conversion (Chatterbox VC):** the user records the line, it is converted to the character's voice and becomes a take.
-7. **Seed and generation settings:** per-session, per-model settings (e.g. Chatterbox expressiveness, pace control, variation); each take records its seed and settings; a take's seed and settings can be loaded back into the session.
+7. **Seed and generation settings, three levels:** model defaults → session settings (per model) → line settings (per model, overriding the session for that line's next takes). Each level resets to the one above ("Reset to model defaults", "Reset to session settings"). Each take records the seed and the settings it was generated with and shows "custom settings" when they differed from the session.
 8. Choose a take (★), regenerate a single line, delete takes.
 9. Export: selected takes + pauses → one audio file.
 
@@ -85,7 +85,7 @@ Storage and model layers stay independent of the UI, so only the UI would need r
 - This release: voice conversion and seed. With the OmniVoice step: voice design and recording prep.
 - Lines can be inserted between lines and reordered by dragging.
 - Transcript import is postponed.
-- Generation settings in this release; fine-tuning later on the Characters screen, and the structure must allow it.
+- Generation settings in this release, at session level (header Settings button) and line level (line details), each resettable to the level above; fine-tuning later on the Characters screen, and the structure must allow it.
 - The model choice must scale to many models (a multi-select dropdown, not side-by-side checkboxes).
 
 ## 6. Data model and storage
@@ -145,6 +145,7 @@ workspace/
       "sample": null,
       "text": "We're talking about local AI today.",
       "pause_after": 0.3,
+      "settings": {"chatterbox": {"exaggeration": 1.1}},
       "selected": "takes/01-burak-chatterbox-take2.wav",
       "takes": [
         {
@@ -176,6 +177,7 @@ workspace/
 ```
 
 - `line.sample`: `null` = the character's default sample; otherwise a sample ID.
+- `line.settings`: only the keys that override the session, per model; `{}` = follow the session. Effective settings = model defaults ← session ← line.
 - **A take record is a snapshot:** text, character name, sample label, model and seed are stored as they were at generation time. History stays correct if the line is edited or the character/sample is deleted later.
 - **File name** *(proposal)*: `<line no, 2 digits>-<character-slug>-<model>-take<n>.wav`. The line number is the position at generation time and is not updated if lines move (a hint only; `session.json` is authoritative). Slug: lowercase, ASCII-folded, non-alphanumerics → `-`.
 - **Autosave:** `session.json` / `character.json` are written on every change (temp file, then rename — never half-written). There is no Save button.
@@ -219,10 +221,11 @@ with none installed it shows "Install a model in the Models tab."
   - **Save as character:** moves a session-only character to the library so other sessions can use it.
   - A character used by lines cannot be removed from the cast (explained in the message line).
 - **Generate with:** a multi-select dropdown of installed models (`gr.Dropdown(multiselect=True)`); closed it shows the selected names ("3 models" when long). Stored as `session.models` (default: first installed model *(proposal)*). Line and batch generation produce one take **per selected model**. The line details panel has the same dropdown for that generation.
-- **Settings:** a header button opens per-model tabs with that model's settings (sliders with defaults and help text) and "Reset to defaults"; stored in `session.settings`; used by every generation in the session; recorded in each take. Settings are declared per model in `models.MODELS[name]["settings"]` (key, label, min, max, step, default, help), so a new model brings its own.
-- **Seed:** empty = random (the value used is stored in the take); filled = that value. "Use these settings" on a take copies its seed and settings into the session *(proposal)*.
+- **Session settings:** the header Settings button opens a panel under it with one tab per selected model (sliders with help text) and "Reset to model defaults"; stored in `session.settings`.
+- **Line settings:** in the line details, "Settings for this line" shows the same sliders per model; changed values are highlighted with the session value next to them ("Session: 0.70") and a count ("1 change from session settings"); "Reset to session settings" clears `line.settings`. Settings are declared per model in `models.MODELS[name]["settings"]` (key, label, min, max, step, default, help), so a new model brings its own.
+- **Seed:** empty = random (the value used is stored in the take); filled = that value. "Use these settings" on a take copies its seed into the seed field and its settings into that line's settings *(proposal)*.
 - **Line (collapsed, see canvas):** speaker (color dot, name, sample label under it), text, and on the right the selected take's player with "<model> · N takes" — or a Generate button when there are none. Drag handle and ⋯ menu (Convert, Delete, Move up/down) appear on hover. Pause shows on the divider between lines ("0.3 s pause"); "+ Insert line" appears there on hover, adding an empty line with the previous line's character.
-- **Line details (opened by clicking a line):** edit text, sample and pause; "Generate with" dropdown + seed + "Generate N takes"; the takes list (select, play, model, seed, settings summary, delete); "Perform this line" (voice conversion).
+- **Line details (opened by clicking a line):** edit text, sample and pause; "Generate with" dropdown + seed + "Generate N takes"; line settings (above); the takes list (select, play, model, seed, "custom settings" mark, "Use these settings", delete); "Perform this line" (voice conversion).
 - **Takes:** each take has a player + label (model or "converted", take no., sample label), ★ select, delete. The first take is selected automatically. If the selected take is deleted, the newest remaining take is selected *(proposal)*. If the line's text differs from the take's text, the take shows "text changed" *(proposal)*.
 - **Convert:** opens a record/upload area under the line; the user performs the line; Chatterbox VC converts it to the line's character/sample. The user's recording is kept in `recordings/` (to convert again).
 - **Paste script…** *(proposal)*: paste `Character: text` lines; characters not in the cast are added as **session-only** characters (without samples); lines are appended.
