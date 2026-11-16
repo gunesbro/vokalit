@@ -1,4 +1,5 @@
 // App shell: API client, DOM helper, message line, job polling, screen router.
+import { renderCharacters } from "./characters.js";
 import { renderModels } from "./models.js";
 
 const TOKEN = document.querySelector('meta[name="vokalit-token"]').content;
@@ -41,7 +42,7 @@ export function el(tag, attrs = {}, ...children) {
     if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
     else if (key === "class") node.setAttribute("class", value);
     else if (key === "style" && typeof value === "object") Object.assign(node.style, value);
-    else if (key in node && typeof value !== "string") node[key] = value;
+    else if (key in node && typeof value !== "string" && !(node instanceof SVGElement)) node[key] = value;
     else node.setAttribute(key, value === true ? "" : value);
   }
   for (const child of children.flat()) {
@@ -77,15 +78,20 @@ export function setMessage(node, text = "", kind = "info") {
 const SCREENS = {
   models: renderModels,
   studio: (root) => placeholder(root, "Studio", "The Studio screen comes in the next step."),
-  characters: (root) => placeholder(root, "Characters", "The Characters screen comes in the next step."),
+  characters: renderCharacters,
 };
 
 function placeholder(root, title, text) {
   root.append(el("div", { class: "empty" }, el("h1", {}, title), el("p", {}, text)));
 }
 
+let current = null;
+
+// Screens handle their own sub-paths (#/characters/<id>), so only a change of screen re-renders.
 function route() {
   const name = (location.hash.match(/^#\/(\w+)/) || [])[1] || "studio";
+  if (name === current) return;
+  current = name;
   const screen = document.getElementById("screen");
   screen.replaceChildren();
   for (const link of document.querySelectorAll(".rail a")) {
