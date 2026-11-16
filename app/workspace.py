@@ -29,6 +29,17 @@ def init(root: Path) -> None:
     _root = Path(root)
 
 
+def workspace_root() -> Path:
+    return _root
+
+
+def workspace_temp_file(suffix: str) -> Path:
+    """A fresh path for a short-lived file (e.g. an upload before it is converted)."""
+    folder = _root / ".tmp"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"{time.time_ns()}{suffix}"
+
+
 def slugify(text: str) -> str:
     text = text.replace("\u0131", "i")  # dotless i has no ASCII decomposition
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()

@@ -34,9 +34,7 @@ set "VOKALIT_UV=%UV%"
 rem Keep everything inside the project folder.
 set "UV_CACHE_DIR=%CD%\.local\uv-cache"
 set "UV_PYTHON_INSTALL_DIR=%CD%\.local\python"
-set "GRADIO_ANALYTICS_ENABLED=False"
 set "HF_HUB_DISABLE_TELEMETRY=1"
-set "GRADIO_TEMP_DIR=%CD%\.local\tmp"
 
 set "VENV=.local\app\venv"
 if not exist "%VENV%" (

@@ -25,9 +25,7 @@ export VOKALIT_UV="$UV"
 # Keep everything inside the project folder.
 export UV_CACHE_DIR="$PWD/.local/uv-cache"
 export UV_PYTHON_INSTALL_DIR="$PWD/.local/python"
-export GRADIO_ANALYTICS_ENABLED=False
 export HF_HUB_DISABLE_TELEMETRY=1
-export GRADIO_TEMP_DIR="$PWD/.local/tmp"
 
 VENV=".local/app/venv"
 [ -d "$VENV" ] || "$UV" venv --python 3.11 "$VENV"
