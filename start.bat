@@ -29,6 +29,7 @@ if not exist "%UV%" (
     goto :fail
 )
 :have_uv
+set "VOKALIT_UV=%UV%"
 
 rem Keep everything inside the project folder.
 set "UV_CACHE_DIR=%CD%\.local\uv-cache"

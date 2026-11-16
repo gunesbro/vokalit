@@ -20,6 +20,8 @@ if [ ! -x "$UV" ]; then
     fi
 fi
 
+export VOKALIT_UV="$UV"
+
 # Keep everything inside the project folder.
 export UV_CACHE_DIR="$PWD/.local/uv-cache"
 export UV_PYTHON_INSTALL_DIR="$PWD/.local/python"

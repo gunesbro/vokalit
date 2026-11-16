@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.9** (v1.8'e göre: ses kütüphanesi — her kayıt/yükleme otomatik kaydedilir, tekrar kullanılır, silinebilir — §7.1; kriter 16).
+> Durum: **v1.10** (v1.9'a göre: model kurulum ayrıntıları — PyTorch cu128, `--no-deps`, `--no-cache` — §6.1; işçi hazır/hata mesajı §5.2; Generate kontrolü §7).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -85,7 +85,10 @@ Log/progress çıktıları stderr'e gider.
 ← {"ok": false, "error": "mesaj"}
 ```
 
-- Açılışta işçi bir kez `{"ready": true}` yazar (model yüklendi).
+- Açılışta işçi bir kez `{"ready": true}` yazar (model yüklendi) ya da `{"ready": false, "error": "..."}` (ör. GPU yok).
+- İşçi `--download` argümanıyla çağrılırsa yalnızca model ağırlıklarını indirip çıkar (kurulumda kullanılır, ağ açık).
+- Kütüphanelerin stdout'a yazdıkları stderr'e yönlendirilir; stdout yalnızca protokol içindir. Metin UTF-8'dir (`PYTHONUTF8=1`).
+- Dil v1'de sabit: Türkçe (`tr`).
 - Ağ portu açılmaz. Uygulama kapanınca işçiler sonlandırılır.
 
 ### 5.3 Gizlilik ve şeffaflık
@@ -178,6 +181,17 @@ ortamını kurar (yoksa), uygulamayı açar.
 
 Boyutlar kodda küçük bir tablodadır ve "yaklaşık" diye etiketlenir.
 
+### 6.1 Model kurulum ayrıntıları
+
+- **PyTorch:** `torch==2.8.0` + `torchaudio==2.8.0`, CUDA 12.8 derlemesi (`download.pytorch.org/whl/cu128`).
+  RTX 50 serisi (Blackwell, sm_120) dahil destekler. NVIDIA sürücüsü CUDA 12.8'i desteklemelidir (README'de yazılır).
+- **Chatterbox:** `chatterbox-tts==0.1.7` `--no-deps` ile kurulur, çünkü `torch==2.6.0` sabitlemesi RTX 50 serisini
+  desteklemez. Diğer bağımlılıkları `workers/chatterbox/requirements.txt` içinde, upstream sabitlemeleriyle listelenir.
+- **`--no-cache`:** Model paketleri ortak uv önbelleğinde tutulmaz; böylece "Remove" diskteki alanın tamamını boşaltır.
+  Bedeli: yeniden kurulumda paketler tekrar iner.
+- Kurulum yarıda kalırsa `.local/<model>/` silinir ve hata gösterilir. Başarılı kurulumun sonunda
+  `.local/<model>/installed` işaret dosyası yazılır; "kurulu mu?" kontrolü buna bakar.
+
 ### "Kaldır" düğmesi
 
 Silinecek klasörü ve açılacak alanı gösterir, onay alınca işçiyi durdurur ve `.local/<model>/`
@@ -211,7 +225,7 @@ Tüm arayüz metinleri İngilizce (bkz. V2).
   hata verdi ve görsel olarak daha kötüydü, geri alındı (v1.7).
   - Bilinen görsel sorun (Gradio kaynaklı, kabul edildi): kırpmadan sonra turuncu seçim görünmeye devam edebilir.
   - README'de not: ↺ kaydı kırpılmamış hâline döndürür.
-- Clone voice modunda referans 10 sn'den kısaysa "Generate" devre dışı ve uyarı gösterilir.
+- Clone voice modunda referans yoksa veya 10 sn'den kısaysa "Generate" tıklandığında hata mesajı gösterilir (düğmeyi devre dışı bırakmak yerine — daha az kod, aynı sonuç).
 - Default voice modunda referans alanları gizlenir, 10 sn kontrolü uygulanmaz.
 - Kurulu olmayan model sonuç bölümünde "not installed" yazar.
 - Sayfanın altında kısa bir not: "Only use your own voice or voices you have permission to use."
@@ -275,7 +289,7 @@ vokalit/
 1. Temiz bir Windows veya Linux + NVIDIA makinede (uv ve Python kurulu değil): `start` çalıştır → uv indirme onayı → pencere açılır.
 2. "Kur" onay kutusu model adı, yaklaşık boyut, konum ve lisansı gösteriyor; onay olmadan hiçbir şey indirilmiyor.
 3. Dosyadan yüklenen ve mikrofondan kaydedilen ≥10 sn'lik referansla iki model de Türkçe `.wav` üretiyor ve pencerede dinlenebiliyor.
-4. <10 sn referansta "Üret" çalışmıyor ve uyarı görünüyor.
+4. <10 sn referansta "Generate" üretim yapmıyor ve hata mesajı görünüyor.
 5. Türkçe karakterli metin (ç, ğ, ı, İ, ö, ş, ü) doğru okunuyor — örnek metinle elle dinlenerek doğrulanır.
 6. "Kaldır" sonrası `.local/<model>/` yok; ev dizininde (`~/.cache/huggingface`, `~/.cache/torch`, `~/.cache/pip`, `~/.cache/uv`) kurulum sırasında yeni dosya oluşmamış — öncesi/sonrası boyut karşılaştırmasıyla doğrulanır.
 7. İkinci "Üret" çağrısı modeli yeniden yüklemiyor (ilkinden belirgin şekilde hızlı).
