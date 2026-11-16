@@ -78,13 +78,17 @@ The app starts a worker per installed model on first use. The worker loads the m
 object per line from stdin and writes one per line to stdout. Logs go to stderr.
 
 ```
-→ {"text": "...", "ref": "<path>|null", "out": "<path>", "seed": 1234567, "settings": {...}}   # text to speech
+→ {"text": "...", "ref": "<path>|null", "out": "<path>", "seed": 1234567, "settings": {...}, "language": "en"}  # text to speech
 → {"task": "convert", "source": "<path>", "ref": "<path>|null", "out": "<path>"}          # Chatterbox only
 ← {"ok": true, "out": "<path>", "seconds": 1.2}
 ← {"ok": false, "error": "message"}
 ```
 
 - On start the worker writes `{"ready": true}` once (model loaded) or `{"ready": false, "error": "..."}`.
+- `language` is an ISO 639-1 code from the model's `languages` list (`app/models.py`); the app refuses other codes
+  before asking the worker. Sessions have a language, a line can override it, and samples can be tagged with the
+  language they are spoken in: when it differs from the line's, the line details warn about accent carry-over and
+  offer the model's `accent_setting` (Chatterbox: Pace control 0). Takes record their language.
 - A missing `task` means text to speech. `ref: null` uses the model's default voice. `settings` keys must be declared
   in that model's settings schema (`app/models.py`); unknown keys are rejected.
 - The seed is applied with `torch.manual_seed` (and CUDA) before generating.

@@ -89,7 +89,17 @@ def _model_view(name):
             "license": info["license"],
             "disk_gb": info["disk_gb"], "installed": installed,
             "size_gb": round(models.installed_size_gb(name), 1) if installed else None,
-            "settings": info["settings"], "supports_convert": info.get("supports_convert", False)}
+            "settings": info["settings"], "supports_convert": info.get("supports_convert", False),
+            "languages": [{"code": c, "name": models.LANGUAGE_NAMES[c]} for c in info.get("languages", [])],
+            "accent_setting": info.get("accent_setting")}
+
+
+def _check_language(code, allow_none=False):
+    if code is None and allow_none:
+        return None
+    if code not in models.LANGUAGE_NAMES:
+        raise ws.WorkspaceError(f"Unknown language: {code}.")
+    return code
 
 
 # --- Generation ---------------------------------------------------------------------------------
@@ -112,21 +122,26 @@ def _line_context(session_id, line_id):
 
 def _generate_line(session_id, line_id, model_names, seed):
     session, line, character, ref, sample_label = _line_context(session_id, line_id)
+    language = ws.effective_language(session, line)
     errors = []
     for name in model_names:
         if not models.is_installed(name):
             errors.append(f"{models.MODELS[name]['title']} is not installed.")
             continue
+        if language not in models.MODELS[name].get("languages", []):
+            errors.append(f"{models.MODELS[name]['title']} does not support "
+                          f"{models.LANGUAGE_NAMES.get(language, language)}.")
+            continue
         settings = ws.effective_settings(session, line, name, models.default_settings(name))
         out = ws.new_take_path(session_id, line_id, name)
         try:
-            seconds = models.generate(name, line["text"], str(ref) if ref else None, str(out), seed, settings)
+            seconds = models.generate(name, line["text"], str(ref) if ref else None, str(out), seed, settings, language)
         except Exception as error:
             errors.append(f"{models.MODELS[name]['title']}: {error}")
             continue
         ws.add_take(session_id, line_id, {
             "file": str(out), "kind": "tts", "model": name, "character_name": character["name"],
-            "sample_label": sample_label, "text": line["text"], "seed": seed, "settings": settings,
+            "sample_label": sample_label, "text": line["text"], "seed": seed, "settings": settings, "language": language,
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "generation_seconds": seconds,
             "duration": round(ws.wav_duration(out), 2)})
     if errors:
@@ -259,6 +274,9 @@ def add_sample(req, cid):
 def update_sample(req, cid, sample_id):
     if "label" in req["json"]:
         ws.set_sample_label(cid, sample_id, req["json"]["label"], _session_arg(req))
+    if "language" in req["json"]:
+        ws.set_sample_language(cid, sample_id, _check_language(req["json"]["language"], allow_none=True),
+                               _session_arg(req))
     if req["json"].get("default"):
         ws.set_default_sample(cid, sample_id, _session_arg(req))
     return get_character(req, cid)
@@ -303,6 +321,8 @@ def update_session(req, sid):
         ws.rename_session(sid, req["json"]["name"])
     if "models" in req["json"]:
         ws.set_session_models(sid, req["json"]["models"])
+    if "language" in req["json"]:
+        ws.set_session_language(sid, _check_language(req["json"]["language"]))
     return get_session(req, sid)
 
 
@@ -340,6 +360,8 @@ def add_line(req, sid):
 
 @route("PATCH", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)")
 def update_line(req, sid, lid):
+    if "language" in req["json"]:
+        _check_language(req["json"]["language"], allow_none=True)
     ws.update_line(sid, lid, **req["json"])
     return get_session(req, sid)
 

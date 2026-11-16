@@ -130,8 +130,8 @@ def test_sample_upload_wav(api, tmp_path):
 def test_generate_job_with_fake_model(api, monkeypatch, tmp_path):
     calls = []
 
-    def fake_generate(name, text, ref, out, seed, settings):
-        calls.append((name, text, ref, seed, settings))
+    def fake_generate(name, text, ref, out, seed, settings, language):
+        calls.append((name, text, ref, seed, settings, language))
         make_wav(out, 1)
         return 0.5
 
@@ -150,9 +150,11 @@ def test_generate_job_with_fake_model(api, monkeypatch, tmp_path):
     assert done["state"] == "done", done
     assert calls[0][1] == "Hello" and calls[0][3] == 7 and calls[0][2].endswith("s1.wav")
     assert calls[0][4] == models.default_settings("chatterbox")
+    assert calls[0][5] == "en"
     _, view, _ = api("GET", f"/api/sessions/{sid}")
     take = view["lines"][0]["takes"][0]
     assert take["model"] == "chatterbox" and take["seed"] == 7 and take["sample_label"] == "sample 1"
+    assert take["language"] == "en"
     assert view["lines"][0]["selected"] == take["file"]
 
 
@@ -166,3 +168,44 @@ def test_models_have_summary(api):
     _, body, _ = api("GET", "/api/models")
     chatterbox = next(m for m in body if m["name"] == "chatterbox")
     assert "23 languages" in chatterbox["summary"]
+
+
+def test_models_list_their_languages(api):
+    _, body, _ = api("GET", "/api/models")
+    chatterbox = next(m for m in body if m["name"] == "chatterbox")
+    codes = [l["code"] for l in chatterbox["languages"]]
+    assert len(codes) == 23 and "tr" in codes and "en" in codes
+    assert {"code": "tr", "name": "Turkish"} in chatterbox["languages"]
+
+
+def test_language_endpoints_validate_codes(api, tmp_path):
+    _, session, _ = api("POST", "/api/sessions", {"name": "E"})
+    sid = session["id"]
+    status, body, _ = api("PATCH", f"/api/sessions/{sid}", {"language": "tr"})
+    assert status == 200 and body["language"] == "tr"
+    status, body, _ = api("PATCH", f"/api/sessions/{sid}", {"language": "klingon"})
+    assert status == 400 and "Unknown language" in body["error"]
+    _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
+    cid = character["id"]
+    api("POST", f"/api/characters/{cid}/samples?source=upload", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
+        content_type="audio/wav")
+    status, body, _ = api("PATCH", f"/api/characters/{cid}/samples/s1", {"language": "en"})
+    assert status == 200 and body["samples"][0]["language"] == "en"
+    api("POST", f"/api/sessions/{sid}/cast", {"character": cid, "scope": "library"})
+    _, line, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "Hi"})
+    status, body, _ = api("PATCH", f"/api/sessions/{sid}/lines/{line['id']}", {"language": "xx"})
+    assert status == 400
+
+
+def test_generation_with_unsupported_language_reports_model(api, monkeypatch):
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    _, session, _ = api("POST", "/api/sessions", {"name": "E"})
+    sid = session["id"]
+    _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
+    api("POST", f"/api/sessions/{sid}/cast", {"character": character["id"], "scope": "library"})
+    _, line, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": character["id"], "text": "Hi"})
+    monkeypatch.setitem(models.LANGUAGE_NAMES, "xx", "Testish")
+    api("PATCH", f"/api/sessions/{sid}", {"language": "xx"})
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{line['id']}/generate", {"models": ["chatterbox"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Chatterbox Multilingual does not support Testish" in done["error"]

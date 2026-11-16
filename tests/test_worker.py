@@ -46,7 +46,7 @@ def test_download_loads_vc(installed):
 def test_seed_is_applied(installed):
     _, local = installed
     out = _out(local, "seed.wav")
-    models.generate("chatterbox", "hello", None, out, seed=42, settings={})
+    models.generate("chatterbox", "hello", None, out, seed=42, settings={}, language="tr")
     assert "seed=42" in _read(out)
     assert "subtype=PCM_16" in _read(out)
 
@@ -54,7 +54,7 @@ def test_seed_is_applied(installed):
 def test_settings_are_passed_to_generate(installed):
     _, local = installed
     out = _out(local, "settings.wav")
-    models.generate("chatterbox", "hello", None, out, seed=1, settings={"exaggeration": 0.7})
+    models.generate("chatterbox", "hello", None, out, seed=1, settings={"exaggeration": 0.7}, language="tr")
     text = _read(out)
     assert "exaggeration=0.7" in text and "cfg_weight=0.5" in text and "temperature=0.8" in text
 
@@ -71,8 +71,8 @@ def test_unknown_setting_is_rejected():
 def test_default_voice_restored_after_clone(installed):
     _, local = installed
     clone, default = _out(local, "clone.wav"), _out(local, "default.wav")
-    models.generate("chatterbox", "a", "/refs/me.wav", clone, seed=1, settings={})
-    models.generate("chatterbox", "b", None, default, seed=1, settings={})
+    models.generate("chatterbox", "a", "/refs/me.wav", clone, seed=1, settings={}, language="tr")
+    models.generate("chatterbox", "b", None, default, seed=1, settings={}, language="tr")
     assert "voice=CLONE:/refs/me.wav" in _read(clone)
     assert "voice=BUILTIN" in _read(default)
 
@@ -99,3 +99,15 @@ def test_convert_unsupported_model_is_refused():
             models.convert("fake", "/rec/a.wav", None, "/tmp/x.wav")
     finally:
         del models.MODELS["fake"]
+
+
+def test_language_is_passed(installed):
+    _, local = installed
+    out = _out(local, "language.wav")
+    models.generate("chatterbox", "hello", None, out, seed=1, settings={}, language="en")
+    assert "language=en" in _read(out)
+
+
+def test_unsupported_language_is_refused():
+    with pytest.raises(ValueError, match="does not support"):
+        models.generate("chatterbox", "hello", None, "/x.wav", seed=1, settings={}, language="xx")

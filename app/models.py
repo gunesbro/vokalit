@@ -15,6 +15,14 @@ UV = os.environ["VOKALIT_UV"]  # set by the start scripts
 
 TORCH_CUDA = ["torch==2.8.0", "torchaudio==2.8.0", "--index-url", "https://download.pytorch.org/whl/cu128"]
 
+# Display names for language codes (ISO 639-1). A model lists the codes it supports in MODELS[name]["languages"].
+LANGUAGE_NAMES = {
+    "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek", "en": "English", "es": "Spanish",
+    "fi": "Finnish", "fr": "French", "he": "Hebrew", "hi": "Hindi", "it": "Italian", "ja": "Japanese",
+    "ko": "Korean", "ms": "Malay", "nl": "Dutch", "no": "Norwegian", "pl": "Polish", "pt": "Portuguese",
+    "ru": "Russian", "sv": "Swedish", "sw": "Swahili", "tr": "Turkish", "zh": "Chinese",
+}
+
 MODELS = {
     "chatterbox": {
         "title": "Chatterbox Multilingual",
@@ -23,6 +31,11 @@ MODELS = {
         "disk_gb": 11.3,  # measured on Windows (SPEC.md §6.1)
         "license": "MIT",
         "supports_convert": True,
+        "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
+                      "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
+        # When the sample's language differs from the line's, this setting value reduces the carried-over accent
+        # (Chatterbox's own advice: cfg_weight 0).
+        "accent_setting": {"key": "cfg_weight", "value": 0.0},
         "settings": [
             {"key": "exaggeration", "label": "Expressiveness", "min": 0.25, "max": 2.0, "step": 0.05, "default": 0.5,
              "help": "Higher is more emotional and dramatic. Above 1 can get unstable."},
@@ -245,10 +258,12 @@ def _ask(name, message):
     return reply["seconds"]
 
 
-def generate(name, text, ref, out, seed, settings):
+def generate(name, text, ref, out, seed, settings, language):
     """Returns the generation time in seconds."""
+    if language not in MODELS[name].get("languages", []):
+        raise ValueError(f"{MODELS[name]['title']} does not support {LANGUAGE_NAMES.get(language, language)}.")
     settings = validate_settings(name, settings)
-    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings})
+    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings, "language": language})
 
 
 def convert(name, source, ref, out):

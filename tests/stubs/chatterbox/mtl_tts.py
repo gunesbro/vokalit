@@ -30,5 +30,5 @@ class ChatterboxMultilingualTTS:
                  temperature=0.8):
         if audio_prompt_path:
             self.conds = f"CLONE:{audio_prompt_path}"
-        return _Wav(f"voice={self.conds}|seed={torch.last_seed}|exaggeration={exaggeration}"
+        return _Wav(f"voice={self.conds}|language={language_id}|seed={torch.last_seed}|exaggeration={exaggeration}"
                     f"|cfg_weight={cfg_weight}|temperature={temperature}|text={text}")

@@ -164,3 +164,44 @@ def test_session_file_is_readable_json(tmp_workspace):
     sid = ws.create_session("E")
     raw = json.loads((tmp_workspace / "sessions" / sid / "session.json").read_text(encoding="utf-8"))
     assert raw["name"] == "E" and raw["lines"] == [] and raw["cast"] == []
+
+
+def test_session_language_defaults(tmp_workspace):
+    first = ws.create_session("A")
+    assert ws.load_session(first)["language"] == "en"
+    ws.set_session_language(first, "tr")
+    second = ws.create_session("B")
+    assert ws.load_session(second)["language"] == "tr"  # follows the newest session
+
+
+def test_old_session_without_language_reads_as_turkish(tmp_workspace):
+    sid = ws.create_session("Old")
+    data = ws.load_session(sid)
+    del data["language"]
+    ws.save_session(sid, data)
+    assert ws.load_session(sid)["language"] == "tr"
+
+
+def test_line_language_overrides_session(tmp_workspace):
+    sid = ws.create_session("A")
+    burak = ws.create_character("Burak")
+    ws.add_to_cast(sid, burak, "library")
+    lid = ws.add_line(sid, burak, "Hello")
+    data = ws.load_session(sid)
+    assert ws.effective_language(data, data["lines"][0]) == "en"
+    ws.update_line(sid, lid, language="de")
+    data = ws.load_session(sid)
+    assert ws.effective_language(data, data["lines"][0]) == "de"
+    ws.update_line(sid, lid, language=None)
+    data = ws.load_session(sid)
+    assert ws.effective_language(data, data["lines"][0]) == "en"
+
+
+def test_sample_language_tag(tmp_workspace, tmp_path):
+    cid = ws.create_character("Burak")
+    sample = ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "upload")
+    assert ws.load_character(cid)["samples"][0].get("language") is None
+    ws.set_sample_language(cid, sample, "tr")
+    assert ws.load_character(cid)["samples"][0]["language"] == "tr"
+    ws.set_sample_language(cid, sample, None)
+    assert ws.load_character(cid)["samples"][0]["language"] is None

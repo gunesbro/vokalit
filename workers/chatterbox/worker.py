@@ -8,9 +8,6 @@ import socket
 import sys
 import time
 
-LANGUAGE = "tr"
-
-
 def block_network():
     """Blocks connections, sends and name lookups. The socket class itself stays, since libraries
     (e.g. ssl) subclass it when they are imported."""
@@ -71,7 +68,8 @@ def main():
                     torch.manual_seed(request["seed"])
                 if not request.get("ref"):
                     model.conds = default_conds  # otherwise the last cloned voice would be used
-                wav = model.generate(request["text"], language_id=LANGUAGE, audio_prompt_path=request.get("ref"),
+                wav = model.generate(request["text"], language_id=request.get("language", "tr"),
+                                     audio_prompt_path=request.get("ref"),
                                      **request.get("settings", {}))
                 sample_rate = model.sr
             # 16-bit PCM so the app can join takes with the standard wave module.

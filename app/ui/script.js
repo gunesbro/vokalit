@@ -32,3 +32,13 @@ export function formatTime(seconds) {
 export function seekTo(fraction, duration, start = 0, end = duration) {
   return Math.min(end, Math.max(start, fraction * duration));
 }
+
+// Languages that every chosen model supports (no choice: every installed model), sorted by name.
+export function commonLanguages(models, names) {
+  const chosen = models.filter((m) => names.includes(m.name));
+  const pool = chosen.length ? chosen : models.filter((m) => m.installed);
+  if (!pool.length) return [];
+  const shared = pool.slice(1).reduce((list, m) => list.filter((l) => m.languages.some((x) => x.code === l.code)),
+    pool[0].languages);
+  return [...shared].sort((a, b) => a.name.localeCompare(b.name));
+}

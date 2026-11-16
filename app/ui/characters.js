@@ -19,6 +19,16 @@ export function avatar(id, name, size = 28) {
     (name.trim()[0] || "?").toUpperCase());
 }
 
+// Every language any model supports, for tagging samples (fetched once).
+let allLanguages = null;
+function languages() {
+  allLanguages ||= api("GET", "/api/models").then((list) => {
+    const byCode = new Map(list.flatMap((m) => m.languages).map((l) => [l.code, l]));
+    return [...byCode.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }).catch(() => []);
+  return allLanguages;
+}
+
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const query = (sessionId) => (sessionId ? `?session=${encodeURIComponent(sessionId)}` : "");
 
@@ -163,7 +173,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       return;
     }
     table.replaceChildren(
-      el("div", { class: "table-head sample-grid" }, el("div"), el("div"), el("div", {}, "Label"), el("div", {}, "Waveform"),
+      el("div", { class: "table-head sample-grid" }, el("div"), el("div"), el("div", {}, "Label"), el("div", {}, "Language"),
+        el("div", {}, "Waveform"),
         el("div", {}, "Length"), el("div")),
       ...character.samples.map((sample) => sampleRow(character, sample)));
   }
@@ -176,6 +187,13 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       if (!value) { label.value = sample.label; return; }
       api("PATCH", path(`/samples/${sample.id}`), { label: value }).then(refresh, fail);
     } });
+    const language = el("select", { class: "select", "aria-label": "Sample language", title: "The language spoken in this sample",
+      onchange: () => api("PATCH", path(`/samples/${sample.id}`), { language: language.value || null }).then(refresh, fail) },
+    el("option", { value: "" }, "Not set"));
+    languages().then((list) => {
+      language.append(...list.map((l) => el("option", { value: l.code }, l.name)));
+      language.value = sample.language || "";
+    });
     const url = sampleUrl(charId, sample.file, sessionId);
     const wave = player(url, { buckets: 140, showTime: false });
     const play = wave.querySelector(".play");
@@ -184,7 +202,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
         "aria-label": isDefault ? "Default sample" : "Make default", "aria-pressed": isDefault ? "true" : "false",
         onclick: () => isDefault || api("PATCH", path(`/samples/${sample.id}`), { default: true }).then(refresh, fail) },
       icon(["M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"], 16)),
-      play, label, wave,
+      play, label, language, wave,
       el("div", { class: "muted num" }, `${sample.duration.toFixed(1)} s · ${sample.source === "recording" ? "recorded" : "uploaded"}`),
       el("div", { class: "row end" }, el("button", { class: "btn btn-ghost icon-btn", title: "Delete sample", "aria-label": "Delete sample",
         onclick: () => confirmDeleteSample(row, sample) }, icon(ICONS.trash))));

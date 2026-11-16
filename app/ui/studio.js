@@ -2,7 +2,7 @@
 import { api, editableTitle, el, icon, ICONS, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
-import { formatTime, moveLine, settingsChanges, takeNumber } from "./script.js";
+import { commonLanguages, formatTime, moveLine, settingsChanges, takeNumber } from "./script.js";
 import { dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
 import { player } from "./waveform.js";
 
@@ -37,7 +37,16 @@ export async function renderStudio(root) {
   let batch = null;
   let pasting = false;
   let dragging = null;
-  const generating = new Set();
+  const generating = new Map(); // line id -> start time, for the spinner and elapsed seconds
+  const pendingText = {}; // line id -> saves typed text not yet sent (the Generate button waits for it)
+  // Elapsed time next to every spinner; one ticker for the whole screen.
+  setInterval(() => {
+    for (const node of main.querySelectorAll(".elapsed[data-start]")) {
+      node.textContent = `${Math.floor((Date.now() - Number(node.dataset.start)) / 1000)} s`;
+    }
+  }, 250);
+  const busyLabel = (lineId, text) => el("span", { class: "busy" }, el("span", { class: "spinner", "aria-hidden": "true" }), text,
+    el("span", { class: "elapsed num", "data-start": generating.get(lineId) }, "0 s"));
   const lineModels = {}; // line id -> models chosen in its details
   const lineSeeds = {};
 
@@ -47,6 +56,9 @@ export async function renderStudio(root) {
   const modelInfo = (name) => models.find((m) => m.name === name);
   const defaults = (name) => Object.fromEntries((modelInfo(name)?.settings || []).map((s) => [s.key, s.default]));
   const sessionValues = (name) => ({ ...defaults(name), ...(session.settings[name] || {}) });
+  const languageName = (code) =>
+    models.flatMap((m) => m.languages).find((l) => l.code === code)?.name || code;
+  const lineLanguage = (line) => line.language || session.language;
   const castEntry = (id) => session.cast.find((c) => c.character === id);
   const fail = (error) => setMessage(message, error.message, "error");
   const sid = () => session.id;
@@ -56,6 +68,19 @@ export async function renderStudio(root) {
     const entry = castEntry(line.character);
     if (!entry || !entry.samples.length) return null;
     return entry.samples.find((s) => s.id === line.sample) || entry.samples.find((s) => s.id === entry.default_sample);
+  }
+
+  // Language choices are the languages every chosen model supports. `inherit` adds a "Session (...)" option.
+  function languageSelect(names, value, onChange, inherit = null, small = false) {
+    const options = commonLanguages(models, names);
+    const select = el("select", { class: `select language-select ${small ? "select-small" : ""}`, "aria-label": "Language", onchange: () => onChange(select.value || null) },
+      inherit && el("option", { value: "" }, `Session (${languageName(inherit)})`),
+      options.map((l) => el("option", { value: l.code }, l.name)));
+    if (value && !options.some((l) => l.code === value)) {
+      select.append(el("option", { value }, `${languageName(value)} (not supported)`));
+    }
+    select.value = value || "";
+    return select;
   }
 
   // --- Loading -------------------------------------------------------------------------------
@@ -124,8 +149,12 @@ export async function renderStudio(root) {
         drawList();
       } catch (error) { fail(error); }
     } });
+    const language = el("div", { class: "pop-holder" });
+    const paintLanguage = () => language.replaceChildren(languageSelect(session.models, session.language, (code) =>
+      api("PATCH", `/api/sessions/${sid()}`, { language: code }).then(apply, fail)));
     const picker = modelPicker(installed(), session.models, (names) =>
-      api("PATCH", `/api/sessions/${sid()}`, { models: names }).then((data) => { session = data; }, fail));
+      api("PATCH", `/api/sessions/${sid()}`, { models: names }).then((data) => { session = data; paintLanguage(); }, fail));
+    paintLanguage();
     const settingsButton = el("button", { class: "btn", "aria-haspopup": "dialog" }, icon(ICON_SLIDERS), "Settings");
     settingsButton.onclick = () => popover(settingsButton, sessionSettings(), { align: "right" });
     const seedInput = el("input", { class: "input seed", placeholder: "Random", value: seed, inputmode: "numeric",
@@ -135,7 +164,7 @@ export async function renderStudio(root) {
       el("button", { class: "menu-item danger", onclick: () => confirmDeleteSession(more) }, "Delete session")), { align: "right" });
     return el("header", { class: "main-head" },
       editableTitle(name), el("div", { class: "spacer" }),
-      el("div", { class: "muted" }, "Generate with"), picker.element,
+      el("div", { class: "muted generate-label" }, "Generate with"), picker.element, language,
       el("div", { class: "pop-holder" }, settingsButton),
       el("label", { class: "row muted" }, "Seed", seedInput),
       el("button", { class: "btn", onclick: exportSession }, "Export"),
@@ -290,7 +319,8 @@ export async function renderStudio(root) {
     return el("div", { class: "speaker" },
       el("div", { class: "row speaker-name" }, dot(deleted ? "var(--faint)" : color, 8),
         deleted ? el("span", { class: "warn" }, "Deleted character") : line.character_name),
-      el("div", { class: "faint small speaker-sample" }, sampleOf(line)?.label || "default voice"));
+      el("div", { class: "faint small speaker-sample" }, sampleOf(line)?.label || "default voice",
+        line.language && ` \u00b7 ${line.language.toUpperCase()}`));
   }
 
   function row(line, i) {
@@ -298,7 +328,7 @@ export async function renderStudio(root) {
     const selected = takes.find((t) => t.file === line.selected);
     const right = el("div", { class: "row line-right" });
     if (generating.has(line.id)) {
-      right.append(el("span", { class: "muted small" }, "Generating…"));
+      right.append(busyLabel(line.id, "Generating…"));
     } else if (selected) {
       right.append(player(`/files/sessions/${sid()}/${selected.file}`, { buckets: 30, showTime: false, label: "Play selected take" }),
         el("button", { class: "btn btn-ghost btn-takes", onclick: () => open(line.id) },
@@ -310,7 +340,7 @@ export async function renderStudio(root) {
     more.onclick = () => popover(more, lineMenu(line, i, more), { align: "right" });
     right.append(el("div", { class: "pop-holder" }, more));
 
-    const node = el("div", { class: "line", "data-line": line.id },
+    const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""}`, "data-line": line.id },
       handle(line), speaker(line),
       el("div", { class: `line-text ${line.text ? "" : "faint"}` }, line.text || "Empty line"),
       right);
@@ -432,13 +462,25 @@ export async function renderStudio(root) {
       onchange: () => patch({ sample: sampleSelect.value }) },
     entry?.samples.length ? entry.samples.map((s) => el("option", { value: s.id }, s.label)) : el("option", {}, "default voice"));
     if (sample) sampleSelect.value = sample.id;
+    // Text is saved while typing without redrawing: a redraw on blur would replace the Generate button under
+    // the pointer and swallow the click.
+    let typing = null;
+    const saveText = () => {
+      clearTimeout(typing);
+      delete pendingText[line.id];
+      if (text.value === line.text) return Promise.resolve();
+      line.text = text.value;
+      return api("PATCH", `/api/sessions/${sid()}/lines/${line.id}`, { text: text.value }).then((data) => { session = data; }, fail);
+    };
     const text = el("textarea", { class: "textarea line-input", rows: 2, "aria-label": "Line text", value: line.text,
-      onchange: () => patch({ text: text.value }) });
+      oninput: () => { clearTimeout(typing); pendingText[line.id] = saveText; typing = setTimeout(saveText, 600); },
+      onchange: saveText });
     const pause = el("input", { class: "input pause", value: line.pause_after, inputmode: "decimal", "aria-label": "Pause after the line in seconds",
       onchange: () => {
         const value = Number(pause.value.replace(",", "."));
         if (!Number.isFinite(value) || value < 0 || value > 10) { pause.value = line.pause_after; return setMessage(message, "Pause must be between 0 and 10 seconds.", "warn"); }
-        patch({ pause_after: value });
+        line.pause_after = value;
+        api("PATCH", `/api/sessions/${sid()}/lines/${line.id}`, { pause_after: value }).then((data) => { session = data; }, fail);
       } });
 
     const chosen = lineModels[line.id] || session.models;
@@ -453,7 +495,9 @@ export async function renderStudio(root) {
         handle(line),
         el("div", { class: "speaker" },
           el("div", { class: "row speaker-name" }, dot(characterColors(line.character)[0], 8), characterSelect),
-          el("label", { class: "row faint small speaker-sample" }, "Sample", sampleSelect)),
+          el("label", { class: "row faint small speaker-sample" }, "Sample", sampleSelect),
+          el("label", { class: "row faint small speaker-sample" }, "Language",
+            languageSelect(picker.get(), line.language, (code) => patch({ language: code }), session.language, true))),
         text,
         el("div", { class: "row line-right" },
           el("label", { class: "row muted" }, "Pause", pause, "s"),
@@ -463,12 +507,42 @@ export async function renderStudio(root) {
         el("label", { class: "row muted" }, "Seed", lineSeed),
         el("button", { class: "btn btn-primary", disabled: busy || !count,
           onclick: () => generate(line, picker.get(), lineSeeds[line.id] ?? seed) },
-        busy ? "Generating…" : `Generate ${plural(count || 0, "take")}`),
+        busy ? busyLabel(line.id, "Generating…") : `Generate ${plural(count || 0, "take")}`),
         el("div", { class: "faint small" }, "One take per selected model, so you can compare them.")),
+      languageNotes(line, picker.get()),
       lineSettings(line, picker.get()),
       el("div", { class: "detail-bottom" }, takesList(line), perform(line)));
     dragTarget(node, line);
     return node;
+  }
+
+  // Warns when a chosen model cannot speak the line's language, or the sample is in another language.
+  function languageNotes(line, names) {
+    const language = lineLanguage(line);
+    const notes = [];
+    for (const name of names) {
+      const info = modelInfo(name);
+      if (info && !info.languages.some((l) => l.code === language)) {
+        notes.push(el("div", { class: "warn small" }, `${info.title} does not support ${languageName(language)}.`));
+      }
+    }
+    const sample = sampleOf(line);
+    if (sample?.language && sample.language !== language) {
+      const fixes = names.map(modelInfo).filter((info) => info?.accent_setting).filter((info) => {
+        const { key, value } = info.accent_setting;
+        return ({ ...sessionValues(info.name), ...(line.settings[info.name] || {}) })[key] !== value;
+      });
+      notes.push(el("div", { class: "row small wrap" },
+        el("span", { class: "warn" }, `The sample \u201c${sample.label}\u201d is ${languageName(sample.language)} and the line is `
+          + `${languageName(language)}, so the voice may keep a ${languageName(sample.language)} accent.`),
+        fixes.map((info) => el("button", { class: "btn btn-small", onclick: () => {
+          const { key, value } = info.accent_setting;
+          const label = info.settings.find((x) => x.key === key)?.label || key;
+          api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${info.name}`, { ...(line.settings[info.name] || {}), [key]: value })
+            .then((data) => { apply(data); setMessage(message, `${label} set to ${value} for this line.`); }, fail);
+        } }, `Reduce accent (${titles()[info.name]})`))));
+    }
+    return notes.length ? el("div", { class: "detail-row language-notes" }, notes) : null;
   }
 
   function lineSettings(line, names) {
@@ -509,7 +583,8 @@ export async function renderStudio(root) {
     const model = converted ? "Converted" : titles()[take.model] || take.model;
     const meta = converted
       ? `from your recording · Chatterbox VC · ${take.duration} s`
-      : `${take.sample_label} · seed ${take.seed} · ${take.duration} s`;
+      : [take.sample_label, take.language && languageName(take.language), `seed ${take.seed}`, `${take.duration} s`]
+        .filter(Boolean).join(" \u00b7 ");
     const rowNode = el("div", { class: "take" },
       el("input", { type: "radio", name: `take-${line.id}`, checked: isSelected, "aria-label": `Use take ${takeNumber(take.file)}`,
         onchange: () => api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/select`, { file: take.file }).then(apply, fail) }),
@@ -591,7 +666,7 @@ export async function renderStudio(root) {
     async function convert(samples, sampleRate) {
       if (samples.length < sampleRate * 0.3) { status.textContent = "Too short. Record the whole line."; return; }
       status.textContent = "Converting…";
-      generating.add(line.id);
+      generating.set(line.id, Date.now());
       try {
         const { id } = await api("POST", `/api/sessions/${sid()}/lines/${line.id}/convert`, encodeWav(samples, sampleRate));
         await waitForJob(id);
@@ -614,7 +689,8 @@ export async function renderStudio(root) {
   async function generate(line, names, seedValue) {
     if (!names.length) return setMessage(message, installed().length ? "Choose a model in “Generate with”." : "Install a model in the Models tab.", "warn");
     const number = session.lines.findIndex((l) => l.id === line.id) + 1;
-    generating.add(line.id);
+    await pendingText[line.id]?.(); // typed text that was not saved yet
+    generating.set(line.id, Date.now());
     draw();
     setMessage(message, `Generating line ${number}…`);
     try {
@@ -662,7 +738,8 @@ export async function renderStudio(root) {
   }
 
   function footer() {
-    return el("footer", { class: "main-foot" }, message, el("div", { class: "spacer" }), exportInfo);
+    return el("footer", { class: "main-foot" },
+      batch && el("span", { class: "spinner", "aria-hidden": "true" }), message, el("div", { class: "spacer" }), exportInfo);
   }
 
   // --- Routing -------------------------------------------------------------------------------

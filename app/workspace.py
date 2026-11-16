@@ -188,6 +188,12 @@ def set_sample_label(char_id: str, sample_id: str, label: str, session_id: str |
     _save_character(char_id, data, session_id)
 
 
+def set_sample_language(char_id: str, sample_id: str, language: str | None, session_id: str | None = None) -> None:
+    data = load_character(char_id, session_id)
+    _find_sample(data, sample_id)["language"] = language
+    _save_character(char_id, data, session_id)
+
+
 def set_default_sample(char_id: str, sample_id: str, session_id: str | None = None) -> None:
     data = load_character(char_id, session_id)
     data["default_sample"] = sample_id
@@ -234,18 +240,23 @@ def _session_file(session_id: str) -> Path:
 
 def create_session(name: str | None = None) -> str:
     _sessions_root().mkdir(parents=True, exist_ok=True)
+    newest = list_sessions()[:1]
+    language = newest[0][1]["language"] if newest else "en"  # people usually stay in one language
     session_id = new_id(_sessions_root())
     session_dir(session_id).mkdir()
     data = {
         "id": session_id, "name": name or time.strftime("Session %Y-%m-%d %H:%M"), "created": _now(),
-        "models": [], "settings": {}, "cast": [], "lines": [], "next_line": 1,
+        "models": [], "settings": {}, "cast": [], "lines": [], "next_line": 1, "language": language,
     }
     save_session(session_id, data)
     return session_id
 
 
 def load_session(session_id: str) -> dict:
-    return _read_json(_session_file(session_id))
+    data = _read_json(_session_file(session_id))
+    if data is not None:
+        data.setdefault("language", "tr")  # sessions from before languages were all generated in Turkish
+    return data
 
 
 def save_session(session_id: str, data: dict) -> None:
@@ -265,6 +276,16 @@ def rename_session(session_id: str, name: str) -> None:
     data = load_session(session_id)
     data["name"] = name
     save_session(session_id, data)
+
+
+def set_session_language(session_id: str, language: str) -> None:
+    data = load_session(session_id)
+    data["language"] = language
+    save_session(session_id, data)
+
+
+def effective_language(session: dict, line: dict) -> str:
+    return line.get("language") or session["language"]
 
 
 def delete_session(session_id: str) -> None:
@@ -324,7 +345,7 @@ def sessions_using(char_id: str) -> list[str]:
 
 # --- Script lines -------------------------------------------------------------------------------
 
-_LINE_FIELDS = {"character", "sample", "text", "pause_after"}
+_LINE_FIELDS = {"character", "sample", "text", "pause_after", "language"}
 
 
 def _line_index(data: dict, line_id: str) -> int:
@@ -337,7 +358,7 @@ def add_line(session_id: str, char_id: str, text: str = "", pause_after: float =
     line_id = f"l{data['next_line']}"
     data["next_line"] += 1
     line = {"id": line_id, "character": char_id, "sample": None, "text": text, "pause_after": pause_after,
-            "settings": {}, "selected": None, "takes": []}
+            "settings": {}, "selected": None, "takes": [], "language": None}
     position = len(data["lines"]) if after is None else _line_index(data, after) + 1
     data["lines"].insert(position, line)
     save_session(session_id, data)
