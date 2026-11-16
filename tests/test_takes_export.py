@@ -1,0 +1,138 @@
+import pytest
+
+import workspace as ws
+from conftest import make_wav
+
+
+def _session_with_lines(texts, name="Episode 1", character="Burak"):
+    sid = ws.create_session(name)
+    cid = ws.create_character(character)
+    ws.add_to_cast(sid, cid, "library")
+    return sid, [ws.add_line(sid, cid, t) for t in texts]
+
+
+def _add_take(sid, lid, model, seconds, sr=24000, **extra):
+    path = ws.new_take_path(sid, lid, model)
+    make_wav(path, seconds, sr)
+    take = {"file": str(path), "kind": "tts", "model": model, "text": "x", **extra}
+    ws.add_take(sid, lid, take)
+    return path
+
+
+def _line(sid, lid):
+    return next(l for l in ws.load_session(sid)["lines"] if l["id"] == lid)
+
+
+def test_take_names_and_selection(tmp_workspace):
+    sid, (lid,) = _session_with_lines(["Hello"])
+    first = _add_take(sid, lid, "chatterbox", 1)
+    second = _add_take(sid, lid, "omnivoice", 1)
+    assert first.name == "01-burak-chatterbox-take1.wav"
+    assert second.name == "01-burak-omnivoice-take2.wav"
+    line = _line(sid, lid)
+    assert line["selected"] == "takes/01-burak-chatterbox-take1.wav"
+    assert [t["file"] for t in line["takes"]] == ["takes/01-burak-chatterbox-take1.wav",
+                                                  "takes/01-burak-omnivoice-take2.wav"]
+    ws.delete_take(sid, lid, "takes/01-burak-chatterbox-take1.wav")
+    assert not first.exists()
+    assert _line(sid, lid)["selected"] == "takes/01-burak-omnivoice-take2.wav"
+
+
+def test_take_number_is_not_reused_after_delete(tmp_workspace):
+    sid, (lid,) = _session_with_lines(["Hello"])
+    _add_take(sid, lid, "chatterbox", 1)
+    second = _add_take(sid, lid, "chatterbox", 1)
+    ws.delete_take(sid, lid, "takes/01-burak-chatterbox-take1.wav")
+    third = _add_take(sid, lid, "chatterbox", 1)
+    assert third.name == "01-burak-chatterbox-take3.wav"
+    assert second.exists()
+
+
+def test_recording_path_uses_line_number(tmp_workspace):
+    sid, (_, lid) = _session_with_lines(["a", "b"])
+    assert ws.new_recording_path(sid, lid) == ws.session_dir(sid) / "recordings" / "02-take1.wav"
+
+
+def test_select_take(tmp_workspace):
+    sid, (lid,) = _session_with_lines(["Hello"])
+    _add_take(sid, lid, "chatterbox", 1)
+    _add_take(sid, lid, "chatterbox", 1)
+    ws.select_take(sid, lid, "takes/01-burak-chatterbox-take2.wav")
+    assert _line(sid, lid)["selected"] == "takes/01-burak-chatterbox-take2.wav"
+
+
+def test_export_joins_selected_takes_and_pauses(tmp_workspace):
+    sid, (l1, l2) = _session_with_lines(["one", "two"])
+    ws.update_line(sid, l1, pause_after=0.5)
+    _add_take(sid, l1, "chatterbox", 1.0)
+    _add_take(sid, l2, "chatterbox", 2.0)
+    out = ws.export_session(sid)
+    assert out.parent == ws.session_dir(sid) / "exports"
+    assert out.name.startswith("episode-1-")
+    assert ws.wav_duration(out) == pytest.approx(3.8, abs=0.01)
+    import wave
+    with wave.open(str(out)) as w:
+        assert w.getframerate() == 24000
+
+
+def test_export_refuses_lines_without_takes(tmp_workspace):
+    sid, (l1, _, _) = _session_with_lines(["one", "two", "three"])
+    _add_take(sid, l1, "chatterbox", 1.0)
+    with pytest.raises(ws.WorkspaceError, match="Lines 2, 3 have no takes yet."):
+        ws.export_session(sid)
+    assert not (ws.session_dir(sid) / "exports").exists()
+
+
+def test_export_reports_missing_take_file(tmp_workspace):
+    sid, (l1,) = _session_with_lines(["one"])
+    path = _add_take(sid, l1, "chatterbox", 1.0)
+    path.unlink()
+    with pytest.raises(ws.WorkspaceError, match="Line 1"):
+        ws.export_session(sid)
+
+
+def test_export_refuses_mixed_sample_rates(tmp_workspace):
+    sid, (l1, l2) = _session_with_lines(["one", "two"])
+    _add_take(sid, l1, "chatterbox", 1.0, sr=24000)
+    _add_take(sid, l2, "chatterbox", 1.0, sr=16000)
+    with pytest.raises(ws.WorkspaceError, match="24000.*16000"):
+        ws.export_session(sid)
+
+
+def test_effective_settings_layers(tmp_workspace):
+    sid, (lid,) = _session_with_lines(["one"])
+    defaults = {"a": 1, "b": 2}
+    ws.set_session_settings(sid, "m", {"a": 3})
+    ws.set_line_settings(sid, lid, "m", {"b": 4})
+    session = ws.load_session(sid)
+    assert ws.effective_settings(session, _line(sid, lid), "m", defaults) == {"a": 3, "b": 4}
+    ws.reset_line_settings(sid, lid)
+    assert ws.effective_settings(ws.load_session(sid), _line(sid, lid), "m", defaults) == {"a": 3, "b": 2}
+    ws.reset_session_settings(sid, "m")
+    assert ws.effective_settings(ws.load_session(sid), _line(sid, lid), "m", defaults) == {"a": 1, "b": 2}
+
+
+def test_session_models_are_stored(tmp_workspace):
+    sid = ws.create_session("E")
+    ws.set_session_models(sid, ["chatterbox", "omnivoice"])
+    assert ws.load_session(sid)["models"] == ["chatterbox", "omnivoice"]
+
+
+def test_custom_settings_flag(tmp_workspace):
+    sid = ws.create_session("E")
+    defaults = {"a": 1, "b": 2}
+    ws.set_session_settings(sid, "m", {"a": 3})
+    session = ws.load_session(sid)
+    assert ws.take_has_custom_settings(session, {"model": "m", "settings": {"a": 3, "b": 4}}, defaults)
+    assert not ws.take_has_custom_settings(session, {"model": "m", "settings": {"a": 3, "b": 2}}, defaults)
+    assert not ws.take_has_custom_settings(session, {"model": "m", "kind": "convert"}, defaults)
+
+
+def test_text_changed_flag(tmp_workspace):
+    sid, (lid,) = _session_with_lines(["old text"])
+    tts = {"kind": "tts", "text": "old text"}
+    convert = {"kind": "convert"}
+    ws.update_line(sid, lid, text="new text")
+    line = _line(sid, lid)
+    assert ws.take_text_changed(line, tts)
+    assert not ws.take_text_changed(line, convert)

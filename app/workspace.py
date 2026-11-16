@@ -11,6 +11,7 @@ import unicodedata
 import wave
 from pathlib import Path
 
+import numpy as np
 import soundfile as sf
 
 MIN_SAMPLE_SECONDS = 10
@@ -399,3 +400,163 @@ def paste_script(session_id: str, text: str) -> int:
     for name, line_text in parsed:
         add_line(session_id, by_name[name.casefold()], line_text)
     return len(parsed)
+
+
+# --- Takes and recordings -----------------------------------------------------------------------
+
+
+def _line(data: dict, line_id: str) -> dict:
+    return data["lines"][_line_index(data, line_id)]
+
+
+def _take_number(line: dict) -> int:
+    return line.get("next_take", 1)  # never reused, so a deleted take's file name is never taken again
+
+
+def new_take_path(session_id: str, line_id: str, model: str) -> Path:
+    data = load_session(session_id)
+    line = _line(data, line_id)
+    character = cast_character(data, line["character"])
+    slug = slugify(character["name"]) if character else "deleted"
+    number = _line_index(data, line_id) + 1
+    folder = session_dir(session_id) / "takes"
+    folder.mkdir(exist_ok=True)
+    return folder / f"{number:02d}-{slug}-{slugify(model)}-take{_take_number(line)}.wav"
+
+
+def new_recording_path(session_id: str, line_id: str) -> Path:
+    data = load_session(session_id)
+    folder = session_dir(session_id) / "recordings"
+    folder.mkdir(exist_ok=True)
+    number = _line_index(data, line_id) + 1
+    return folder / f"{number:02d}-take{_take_number(_line(data, line_id))}.wav"
+
+
+def _relative(session_id: str, path) -> str:
+    path = Path(path)
+    if path.is_absolute():
+        path = path.relative_to(session_dir(session_id))
+    return path.as_posix()
+
+
+def add_take(session_id: str, line_id: str, take: dict) -> None:
+    data = load_session(session_id)
+    line = _line(data, line_id)
+    take = dict(take, file=_relative(session_id, take["file"]))
+    if take.get("source_recording"):
+        take["source_recording"] = _relative(session_id, take["source_recording"])
+    line["takes"].append(take)
+    line["next_take"] = _take_number(line) + 1
+    if line["selected"] is None:
+        line["selected"] = take["file"]
+    save_session(session_id, data)
+
+
+def select_take(session_id: str, line_id: str, file: str) -> None:
+    data = load_session(session_id)
+    _line(data, line_id)["selected"] = file
+    save_session(session_id, data)
+
+
+def delete_take(session_id: str, line_id: str, file: str) -> None:
+    data = load_session(session_id)
+    line = _line(data, line_id)
+    take = next(t for t in line["takes"] if t["file"] == file)
+    line["takes"].remove(take)
+    for key in ("file", "source_recording"):
+        if take.get(key):
+            (session_dir(session_id) / take[key]).unlink(missing_ok=True)
+    if line["selected"] == file:
+        line["selected"] = line["takes"][-1]["file"] if line["takes"] else None
+    save_session(session_id, data)
+
+
+def take_text_changed(line: dict, take: dict) -> bool:
+    return take.get("kind") == "tts" and take.get("text") != line["text"]
+
+
+# --- Models and generation settings (spec 6: model defaults <- session <- line) -----------------
+
+
+def set_session_models(session_id: str, models: list[str]) -> None:
+    data = load_session(session_id)
+    data["models"] = list(models)
+    save_session(session_id, data)
+
+
+def set_session_settings(session_id: str, model: str, settings: dict) -> None:
+    data = load_session(session_id)
+    data["settings"][model] = dict(settings)
+    save_session(session_id, data)
+
+
+def reset_session_settings(session_id: str, model: str) -> None:
+    data = load_session(session_id)
+    data["settings"].pop(model, None)
+    save_session(session_id, data)
+
+
+def set_line_settings(session_id: str, line_id: str, model: str, overrides: dict) -> None:
+    data = load_session(session_id)
+    _line(data, line_id)["settings"][model] = dict(overrides)
+    save_session(session_id, data)
+
+
+def reset_line_settings(session_id: str, line_id: str) -> None:
+    data = load_session(session_id)
+    _line(data, line_id)["settings"] = {}
+    save_session(session_id, data)
+
+
+def _session_level(session: dict, model: str, defaults: dict) -> dict:
+    return {**defaults, **session["settings"].get(model, {})}
+
+
+def effective_settings(session: dict, line: dict, model: str, defaults: dict) -> dict:
+    return {**_session_level(session, model, defaults), **line["settings"].get(model, {})}
+
+
+def take_has_custom_settings(session: dict, take: dict, defaults: dict) -> bool:
+    """True when a take was generated with settings that differ from the session's current ones."""
+    if "settings" not in take:
+        return False
+    session_level = _session_level(session, take["model"], defaults)
+    return any(session_level.get(key) != value for key, value in take["settings"].items())
+
+
+# --- Export -------------------------------------------------------------------------------------
+
+
+def export_session(session_id: str) -> Path:
+    """Joins each line's selected take and its pause into exports/<session>-<time>.wav."""
+    data = load_session(session_id)
+    missing = [str(n) for n, line in enumerate(data["lines"], 1) if not line["selected"]]
+    if missing:
+        if len(missing) == 1:
+            raise WorkspaceError(f"Line {missing[0]} has no takes yet.")
+        raise WorkspaceError(f"Lines {', '.join(missing)} have no takes yet.")
+    if not data["lines"]:
+        raise WorkspaceError("The script is empty.")
+    chunks, rate = [], None
+    for n, line in enumerate(data["lines"], 1):
+        path = session_dir(session_id) / line["selected"]
+        if not path.exists():
+            raise WorkspaceError(f"Line {n}: the selected take file is missing ({line['selected']}). "
+                                 "Generate it again or choose another take.")
+        with wave.open(str(path), "rb") as w:
+            if rate is None:
+                rate = w.getframerate()
+            elif w.getframerate() != rate:
+                raise WorkspaceError(f"Line {n} has a different sample rate than line 1 "
+                                     f"({rate} Hz and {w.getframerate()} Hz), so they cannot be joined.")
+            chunks.append(np.frombuffer(w.readframes(w.getnframes()), dtype="<i2"))
+        chunks.append(np.zeros(round(line["pause_after"] * rate), dtype="<i2"))
+    folder = session_dir(session_id) / "exports"
+    folder.mkdir(exist_ok=True)
+    out = folder / f"{slugify(data['name'])}-{time.strftime('%Y%m%d-%H%M%S')}.wav"
+    with wave.open(str(out), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(np.concatenate(chunks).tobytes())
+    return out
