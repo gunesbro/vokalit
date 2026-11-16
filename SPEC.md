@@ -1,347 +1,266 @@
 # SPEC — Vokalit
 
-Lokal ses klonlama ve seslendirme karşılaştırma aracı.
+Local voice cloning and text-to-speech workspace.
 
-> Durum: **v1.14** (v1.13'e göre: ağ engeli soket sınıfı yerine bağlantı fonksiyonlarında — §5.3).
-> Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
+> Status: **v2.0** (v1.14 was the Turkish single-page Gradio version; v2.0 is the workspace with our own UI).
+> The workspace is specified in detail in `docs/superpowers/specs/2026-11-16-workspace-design.md`;
+> this file is the overview. Changes are made here (or in that design) first, then in code.
 
-## 1. Amaç
+## 1. Purpose
 
-Kullanıcının kendi bilgisayarında, ses/metin dışarı gönderilmeden, kısa bir referans kayıttan
-(≥10 sn) Türkçe metni o sesle okutmak ve iki açık kaynak modelin sonucunu yan yana dinlemek.
-Her şey masaüstü penceresinden tıklanarak yapılır.
+Read text aloud in a voice cloned from a short reference recording (at least 10 s), entirely on the user's own
+computer: no audio or text leaves the machine. Several open models can voice the same line so their results can be
+compared. Work is organised in sessions (scripts with several characters, e.g. podcasts) and can be exported as one
+file. Everything is done by clicking in a desktop window.
 
-## 2. Kapsam (v1)
+## 2. Scope (v2)
 
-- İki model: **Chatterbox Multilingual** (Resemble AI) ve **OmniVoice** (k2-fsa).
-- Masaüstü penceresi (Gradio arayüzü + pywebview penceresi):
-  - Referans sesi dosyadan yükleme veya mikrofondan kaydetme; kayıtta mikrofon seçimi, üretimden önce kaydı dinleme ve kırpma (Gradio'nun yerleşik aracı).
-  - Okunacak metni girme.
-  - İki ses modu:
-    - **Clone voice:** referans sesle klonlayarak okutma.
-    - **Default voice:** referans ses olmadan, modelin kendi sesiyle okutma.
-  - Modeli kurma / kaldırma (kurulum öncesi boyut + onay).
-  - Her modelin sonucunu oynatıcıda dinleme ve `.wav` olarak kaydetme.
-- Donanım: **NVIDIA GPU (CUDA)**. İşletim sistemi: Windows 10/11 ve Linux.
-- Lisans: **Unlicense** (kamu malı; telif sahibi yok). Yalnızca bu reponun kodunu kapsar; modellerin ve kütüphanelerin kendi lisansları geçerlidir.
+- Models: **Chatterbox Multilingual** (Resemble AI) now; **OmniVoice** (k2-fsa) next.
+- Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
+  - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
+    generation settings at three levels (model defaults → session → line); voice conversion ("Perform this line");
+    export of the selected takes to one WAV.
+  - **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
+    before saving). Session-only characters can be saved to the library.
+  - **Models:** install / remove with size, location and license shown first; progress and a collapsible log.
+- Hardware: **NVIDIA GPU (CUDA)**. Operating systems: Windows 10/11 and Linux.
+- License: **Unlicense** (public domain; no copyright holder). It covers this repository's code only; models and
+  libraries keep their own licenses.
 
-## 3. Kapsam dışı (v1)
+## 3. Out of scope (v2)
 
-- Otomatik kalite ölçümleri (ses benzerliği, WER, RTF).
-- CPU ve Apple Silicon desteği (GPU yoksa açık bir hata mesajı gösterilir).
-- Komut satırı arayüzü (v0.2'deki `manage.py` / `compare.py` kaldırıldı; tüm işlemler pencereden).
-- Tek tıkla yükleyici (.exe/.dmg), Docker.
-- Fine-tuning, streaming üretim, üçüncü model, bulut API'leri.
-- Disk alanı ön kontrolü, yarım indirmeyi sürdürme, otomatik güncelleme.
+- Automatic quality metrics (speaker similarity, WER, RTF).
+- CPU and Apple Silicon (without an NVIDIA GPU the app says so).
+- Command-line interface; one-click installers (.exe/.dmg); Docker.
+- Fine-tuning (planned later on the Characters screen; the data model leaves room for it), streaming, cloud APIs.
+- Transcript import (maybe later with a local language model), reading numbers aloud, emotion tags.
+- Disk space pre-check, resuming downloads, automatic updates.
 
-## 4. Seçilen modeller
+## 4. Models
 
 | | Chatterbox Multilingual | OmniVoice |
 |---|---|---|
-| Türkçe | Var (`language_id="tr"`) | Var (600+ dil) |
-| Boyut | ~500M parametre | ~0.6B parametre |
-| Model indirme | ~2 GB | doğrulanmadı (~1.2 GB tahmini) |
-| VRAM | ~3.5–4 GB | ~8 GB yeterli (RTX 4090 testi) |
-| Referans | Ses dosyası | Ses dosyası + opsiyonel transkript (boşsa Whisper ile otomatik; Whisper kurulumda iner, bkz. §5.3) |
-| Kod lisansı | MIT | Apache 2.0 |
-| **Ağırlık lisansı** | MIT | **CC-BY-NC (ticari kullanım yok)** |
-| Referanssız okuma | Var: `audio_prompt_path` verilmezse yerleşik varsayılan ses | Var: "Auto Voice" modu (`ref_audio` verilmez) |
-| Not | Çıktılara PerTh filigranı ekler | |
+| Languages | 23 (Turkish via `language_id="tr"`) | 600+ |
+| Size | ~500M parameters | ~0.6B parameters |
+| Measured disk use | 11.3 GB on Windows (libraries + weights) | not measured yet |
+| VRAM | ~3.5–4 GB | ~8 GB is enough (RTX 4090 test) |
+| Reference | Audio file | Audio file + optional transcript (Whisper fills it in; downloaded at install) |
+| Code license | MIT | Apache 2.0 |
+| **Weights license** | MIT | **CC-BY-NC (no commercial use)** |
+| Without a reference | Built-in default voice | "Auto Voice" mode |
+| Voice conversion | Yes (`ChatterboxVC`) | No |
+| Note | Adds a PerTh watermark to outputs | |
 
-**Doğrulanacak (plan adım 3/4):** Chatterbox'ın varsayılan sesinin Türkçede aksanlı olup
-olmadığı; OmniVoice'un Auto Voice modunda her üretimde farklı bir ses seçip seçmediği.
-Sonuç README'ye not edilir. OmniVoice'un sesi metinle tarif etme özelliği ("Voice Design")
-v1 kapsamı dışında.
+The license difference is shown in the install confirmation and in the README.
 
-Lisans farkı kurulum onay penceresinde ve README'de gösterilir.
-
-## 5. Mimari
+## 5. Architecture
 
 ```
-┌──────────────────────────────┐
-│  Uygulama (.local/app/venv)  │  Gradio + pywebview
-└──────┬───────────────┬───────┘
-       │ JSON satırları (stdin/stdout)
+┌──────────────────────────────────────────────┐
+│ App process (.local/app/venv)                │
+│  pywebview window ── HTTP ── local server    │  app/main.py, app/server.py
+│  (app/ui: HTML/CSS/JS)        127.0.0.1      │  storage: app/workspace.py → workspace/
+└──────┬───────────────┬───────────────────────┘
+       │ JSON lines (stdin/stdout)
 ┌──────▼──────┐ ┌──────▼──────┐
-│ Chatterbox  │ │ OmniVoice   │   her biri kendi venv'inde
-│ işçisi      │ │ işçisi      │   model bir kez yüklenir, açık kalır
+│ Chatterbox  │ │ OmniVoice   │   each in its own venv;
+│ worker      │ │ worker      │   the model loads once and stays loaded
 └─────────────┘ └─────────────┘
 ```
 
-### 5.1 Ayrı ortamlar
+### 5.1 Separate environments
 
-Her model kendi venv'inde çalışır (torch/transformers sürüm çakışma riski). Uygulama
-arayüzü de ayrı bir venv'dedir ve torch içermez.
+Each model runs in its own venv (torch/transformers versions can conflict). The app's environment has no torch.
 
-### 5.2 İşçi protokolü
+### 5.2 Worker protocol
 
-Uygulama, kurulu her model için bir işçi süreci başlatır (ilk "Üret"te, tembel). İşçi modeli
-bir kez yükler, sonra stdin'den satır satır JSON okur, stdout'a satır satır JSON yazar.
-Log/progress çıktıları stderr'e gider.
+The app starts a worker per installed model on first use. The worker loads the model once, then reads one JSON
+object per line from stdin and writes one per line to stdout. Logs go to stderr.
 
 ```
-→ {"ref": "<yol>", "text": "...", "out": "<yol>", "ref_text": "..."}   # ref ve ref_text opsiyonel; ref yoksa varsayılan ses
-← {"ok": true, "out": "<yol>", "seconds": 2.1}
-← {"ok": false, "error": "mesaj"}
+→ {"text": "...", "ref": "<path>|null", "out": "<path>", "seed": 1234567, "settings": {...}}   # text to speech
+→ {"task": "convert", "source": "<path>", "ref": "<path>|null", "out": "<path>"}          # Chatterbox only
+← {"ok": true, "out": "<path>", "seconds": 1.2}
+← {"ok": false, "error": "message"}
 ```
 
-- Açılışta işçi bir kez `{"ready": true}` yazar (model yüklendi) ya da `{"ready": false, "error": "..."}` (ör. GPU yok).
-- İşçi `--download` argümanıyla çağrılırsa yalnızca model ağırlıklarını indirip çıkar (kurulumda kullanılır, ağ açık).
-- Kütüphanelerin stdout'a yazdıkları stderr'e yönlendirilir; stdout yalnızca protokol içindir. Metin UTF-8'dir (`PYTHONUTF8=1`).
-- Dil v1'de sabit: Türkçe (`tr`).
-- Ağ portu açılmaz. Uygulama kapanınca işçiler sonlandırılır.
+- On start the worker writes `{"ready": true}` once (model loaded) or `{"ready": false, "error": "..."}`.
+- A missing `task` means text to speech. `ref: null` uses the model's default voice. `settings` keys must be declared
+  in that model's settings schema (`app/models.py`); unknown keys are rejected.
+- The seed is applied with `torch.manual_seed` (and CUDA) before generating.
+- `--download` only downloads the weights (text to speech and voice conversion) and exits; used during install.
+- Library output that would go to stdout is redirected to stderr; stdout is only for the protocol. Text is UTF-8
+  (`PYTHONUTF8=1`).
+- Workers open no network port and stop when the app closes.
 
-### 5.3 Gizlilik ve şeffaflık
+### 5.3 Local server and interface
 
-**Temel kural:** Kullanıcının sesi, metni ve üretilen sesler hiçbir koşulda bilgisayardan çıkmaz.
-Ağ yalnızca kullanıcı "Install" düğmesine basıp onay verdiğinde, paket ve model indirmek için kullanılır.
+- `ThreadingHTTPServer` (standard library) on `127.0.0.1` with a random port; nothing listens on other interfaces.
+- A random token per run is put into the page; every `/api/` request must send it (`X-Vokalit-Token`). Requests
+  whose `Host` is not `127.0.0.1:<port>` are refused.
+- Content Security Policy: `default-src 'self'; media-src 'self' blob:; img-src 'self' data:`. No CDN, no remote
+  fonts, no build step: plain ES modules in `app/ui/`.
+- `/files/` serves only `.wav` files inside `workspace/`.
+- The interface builds the page with DOM text nodes only (no `innerHTML`), so names and lines typed by the user are
+  never parsed as HTML.
+- Microphone recording and file decoding happen in the window (Web Audio); audio is sent to the local server as WAV.
+- Long tasks (install, generation, export) run as background jobs that the page polls.
 
-**Uygulama süreci (arayüz):**
+### 5.4 Privacy and transparency
 
-- Gradio yalnızca `127.0.0.1`'e bağlanır, `share=False`.
-- `GRADIO_ANALYTICS_ENABLED=False`, `HF_HUB_DISABLE_TELEMETRY=1`.
-- Referans ses bileşeninde "share" (sesi Hugging Face'e yükler) ve "download" (gereksiz) düğmeleri kapalıdır.
-- Pencere (pywebview) gizli modda açılmaz, böylece mikrofon izni hatırlanır; pencerenin verisi `.local/webview/` altında tutulur.
-- Tema yazı tipleri sistem fontlarıdır (Gradio'nun varsayılan temasının Google Fonts'tan font çekmesi engellenir).
-- Gradio'nun geçici dosyaları `GRADIO_TEMP_DIR=.local/tmp` altına yazılır, uygulama kapanırken silinir.
-  Sistem geçici klasörüne ses bırakılmaz.
-- Her kayıt/yükleme **kalıcı olarak** ses kütüphanesine (`voices/`, §7.1) kaydedilir ve kullanıcı silene kadar
-  diskte şifresiz durur. Bu durum arayüzde ("Saved to library") ve README'de açıkça belirtilir.
+**Rule:** the user's voice, text and generated audio never leave the computer. The network is used only when the
+user presses "Install" and confirms, to download packages and model weights.
 
-**İşçi süreçleri (sesi işleyen yer) — teknik olarak zorunlu:**
+**App process:**
 
-- `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`: kütüphaneler ağa çıkmaya çalışmaz.
-- İşçi, herhangi bir kütüphaneyi import etmeden önce bağlantı kurmayı, veri göndermeyi ve ad çözümlemeyi
-  engeller (`socket.socket.connect`, `connect_ex`, `sendto`, `socket.getaddrinfo` hata verir). `socket.socket`
-  sınıfının kendisi değiştirilmez: `ssl` gibi modüller yüklenirken ondan alt sınıf türetir (v1.14 hatası). Bir kütüphane ağa çıkmaya çalışırsa sessizce değil,
-  açık bir hatayla durur. İşçiler zaten yalnızca stdin/stdout kullanır.
-- Bu yüzden üretim sırasında ihtiyaç duyulan her şey (OmniVoice'un Whisper modeli dahil)
-  **kurulum sırasında** indirilir; ilk kullanımda indirme yoktur.
+- Binds to `127.0.0.1` only; `HF_HUB_DISABLE_TELEMETRY=1`.
+- The window does not run in private mode so the microphone permission is remembered; its data is kept in
+  `.local/webview/`.
+- Samples, takes, recordings and exports are stored **unencrypted** in `workspace/` until the user deletes them.
+  Temporary uploads go to `workspace/.tmp/`, which is cleared at start and exit.
 
-**Şeffaflık:**
+**Workers (where audio is processed), enforced in code:**
 
-- README'de "Privacy" bölümü: veri akışı şeması, hangi adımda ağa çıkıldığı ve nereye
-  (yalnızca PyPI ve Hugging Face), kullanıcının kendi doğrulama yöntemi.
-- Kullanıcının kendi doğrulama yöntemi: modeller kurulduktan sonra internet bağlantısını kesip
-  uygulamayı kullanmak — her şey çalışmaya devam etmelidir.
-- Bilinen sınır (README'de yazılır): Windows'ta pencereyi gösteren Microsoft WebView2 bileşeni
-  kendi tanılama verisini Microsoft'a gönderebilir; ses içeriği bu kapsamda değildir.
-  Bundan kaçınmak isteyen kullanıcı aynı arayüzü kendi tarayıcısında açabilir.
+- `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`.
+- Before importing any library the worker blocks connecting, sending and name resolution
+  (`socket.socket.connect`, `connect_ex`, `sendto`, `socket.getaddrinfo` raise). The `socket.socket` class itself
+  is not replaced, because modules such as `ssl` subclass it at import. A library that tries the network stops
+  with a clear error.
+- Everything needed at generation time (including OmniVoice's Whisper model and Chatterbox's voice conversion model)
+  is downloaded **during install**.
 
-### 5.4 Herkese açık repo
+**Transparency:**
 
-Repo GitHub'da herkese açıktır. Bu yüzden:
+- README "Privacy" section: data flow, when and where the network is used (PyPI, Hugging Face, GitHub for uv), and
+  how users can check it themselves: after installing models, disconnect from the internet and keep working.
+- Known limit (in the README): on Windows, Microsoft's WebView2 component that draws the window may send its own
+  diagnostic data to Microsoft; audio content is not part of it.
 
-- Repoya hiçbir ses dosyası girmez: `.gitignore` yaygın ses biçimlerini (`*.wav`, `*.mp3`, `*.flac`, `*.ogg`, `*.m4a`, `*.webm`) dışlar. `samples/` yalnızca metin içerir.
-- Commit'lerde kişisel e-posta görünmez: katkıda bulunanlara GitHub'ın "Keep my email addresses private" ayarı README'de önerilir.
-- README'de iki bölüm zorunlu:
-  - **Privacy:** veri akışı, ağa çıkılan tek anlar (kurulum: PyPI, Hugging Face, GitHub/uv), kullanıcının kendi doğrulama yöntemi (§5.3), bilinen sınırlar.
-  - **Responsible use:** yalnızca kendi sesini veya izni olan sesleri kullanma; Chatterbox çıktılarındaki filigranın kaldırılmaması; hata bildirirken başkalarının ses kayıtlarını eklememe.
-- Chatterbox'ın PerTh filigranı devre dışı bırakılmaz.
+### 5.5 Public repository
 
-## 6. Kurulum ve kaldırma
+- No audio files in the repo: `.gitignore` excludes common audio formats, `workspace/` and `.local/`. `samples/`
+  holds text only.
+- README sections required: **Privacy** (above) and **Responsible use** (use only your own voice or voices you have
+  permission to use; do not remove Chatterbox's watermark; do not attach other people's recordings to bug reports).
+- Chatterbox's PerTh watermark is not disabled.
 
-**İlke:** Her şey proje klasöründe kalır. Projeyi silmek her şeyi siler.
+## 6. Install and remove
+
+**Principle:** everything stays in the project folder. Deleting the folder deletes everything.
 
 ```
-.local/uv/                # uv'nin kendisi (gerekirse indirilir)
-.local/uv-cache/          # UV_CACHE_DIR
-.local/python/            # UV_PYTHON_INSTALL_DIR (uv'nin indirdiği Python)
-.local/app/venv/          # arayüz ortamı
-.local/webview/           # pencere verisi (mikrofon izni vb.)
-.local/<model>/venv/      # model ortamı
+.local/uv/                # uv itself (downloaded if needed)
+.local/python/            # UV_PYTHON_INSTALL_DIR (Python downloaded by uv)
+.local/app/venv/          # app environment
+.local/webview/           # window data (microphone permission, etc.)
+.local/<model>/venv/      # model environment
 .local/<model>/cache/     # HF_HOME, TORCH_HOME
+workspace/                # the user's characters, sessions, takes and exports
 ```
 
-Kullanıcının önceden kurması gereken **hiçbir şey yok** (NVIDIA sürücüsü hariç).
+Nothing has to be installed beforehand except the NVIDIA driver.
 
-- `start` betiği uv'yi şu sırayla arar: `.local/uv/` → sistemde kurulu uv.
-- İkisi de yoksa, model kurulumundaki gibi önce bilgi verip onay ister (`[y/N]`, varsayılan Hayır),
-  sonra uv'nin sabitlenmiş sürümünü GitHub'dan (astral-sh/uv) `.local/uv/` içine indirir.
-  PATH'e ve sistem ayarlarına dokunulmaz.
-- Python'u da uv indirir (`.local/python/`).
+- `start.bat` (Windows) / `start.sh` (Linux) look for uv in `.local/uv/`, then on the system. If neither exists they
+  explain and ask (`[y/N]`, default No), then download a pinned uv release from GitHub (astral-sh/uv) into
+  `.local/uv/`. PATH and system settings are not touched. uv also downloads Python into `.local/python/`.
+- The scripts set the environment, create the app environment if needed and open the window; on errors the
+  Windows window stays open so the message can be read.
 
-### Başlatma
+### 6.1 Model install details
 
-`start.bat` (Windows) / `start.sh` (Linux): ortam değişkenlerini ayarlar, uv ile arayüz
-ortamını kurar (yoksa), uygulamayı açar.
+- Confirmation first: model name with a link to its page (supported languages), disk space, location, license,
+  and that it downloads from PyPI and Hugging Face. Nothing is downloaded without confirmation.
+- **PyTorch:** `torch==2.8.0` + `torchaudio==2.8.0`, CUDA 12.8 build (supports RTX 50 series). The NVIDIA driver must
+  support CUDA 12.8.
+- **Chatterbox:** `chatterbox-tts==0.1.7` installed with `--no-deps` (its `torch==2.6.0` pin does not support RTX 50);
+  the other dependencies are listed in `workers/chatterbox/requirements.txt` with upstream pins.
+- **Per-model uv cache:** `UV_CACHE_DIR=.local/<model>/uv-cache` during install, deleted afterwards, so "Remove"
+  frees all of it. Cost: reinstalling downloads the packages again.
+- **Progress:** a status line updated every few seconds (`Step 2/5: PyTorch with CUDA · 37% · 1.42 of ~11.3 GB · 3m 12s`)
+  above a collapsible log. Size = the model folder (hard links counted once); percent = size / measured total, at
+  most 99%.
+- **Cancel** stops the running process within seconds and deletes `.local/<model>/`. Install always clears leftovers
+  of an interrupted install first. A finished install writes `.local/<model>/installed`.
+- **Remove** shows the folder and the space it frees, then, after confirmation, stops the worker and deletes
+  `.local/<model>/`.
 
-### "Kur" düğmesi
+## 7. Interface
 
-1. Onay kutusu gösterir:
-   ```
-   Chatterbox Multilingual (https://huggingface.co/ResembleAI/chatterbox)
-   Yaklaşık indirme: ~5–7 GB (kütüphaneler ~3–5 GB + model ~2 GB)
-   Konum: .local/chatterbox/
-   Lisans: MIT
-   [Kur] [Vazgeç]
-   ```
-2. Onaylanırsa venv oluşturur, bağımlılıkları kurar, ağırlıkları indirir; ilerlemeyi bir
-   log kutusunda canlı gösterir.
-3. Sonunda gerçek disk kullanımını gösterir.
+All interface text is English. The visual design is the design canvas; behaviour is specified in the design doc
+(§7 Studio, Characters, Models). Summary:
 
-Boyutlar kodda küçük bir tablodadır ve "yaklaşık" diye etiketlenir.
+- **Rail:** Studio, Characters, Models, and a GPU status dot.
+- **Studio:** session list with search; header with session name, "Generate with" (multi-select of installed
+  models), Settings (session settings per model), Seed, Export, Generate missing / Stop; cast strip; script rows
+  (speaker, sample, text, selected take player) with drag-and-drop reordering, "+ Insert line" between lines and a
+  ⋯ menu; line details with text, sample, pause, Generate with + seed, line settings ("Reset to session settings"),
+  takes (select, play, "custom settings", "text changed", "Use these settings", delete) and "Perform this line";
+  "Paste script" (`Name: text` lines).
+- **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
+  (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
+  level, 10 s hint) or upload, then trim and "Add sample". Note: "Only use your own voice or voices you have
+  permission to use."
+- **Models:** as in §6.1.
+- Messages appear on the page (a message line per screen), not as pop-up toasts.
 
-### 6.1 Model kurulum ayrıntıları
-
-- **PyTorch:** `torch==2.8.0` + `torchaudio==2.8.0`, CUDA 12.8 derlemesi (`download.pytorch.org/whl/cu128`).
-  RTX 50 serisi (Blackwell, sm_120) dahil destekler. NVIDIA sürücüsü CUDA 12.8'i desteklemelidir (README'de yazılır).
-- **Chatterbox:** `chatterbox-tts==0.1.7` `--no-deps` ile kurulur, çünkü `torch==2.6.0` sabitlemesi RTX 50 serisini
-  desteklemez. Diğer bağımlılıkları `workers/chatterbox/requirements.txt` içinde, upstream sabitlemeleriyle listelenir.
-- **Model başına uv önbelleği:** Kurulum sırasında `UV_CACHE_DIR=.local/<model>/uv-cache` kullanılır ve kurulum
-  bitince silinir (venv kendi hard-link'li kopyalarını tutar). Ortak önbellekte bir şey kalmaz, "Remove" alanın
-  tamamını boşaltır. Bedeli: yeniden kurulumda paketler tekrar iner.
-- **İlerleme:** uv terminal dışında indirme yüzdesi vermez. Bu yüzden kurulum logunun üstünde 3 sn'de bir
-  güncellenen bir satır gösterilir: `Step 2/5: PyTorch with CUDA · 1.42 GB downloaded · 3m 12s`.
-  "Downloaded" değeri `.local/<model>/` klasörünün büyüklüğüdür (hard link'ler bir kez sayılır).
-  Yüzde = bu büyüklük / ölçülen toplam (`disk_gb`, en fazla %99).
-- **Ölçülen boyut:** Chatterbox kurulumu Windows'ta 11.3 GB (onay kutusunda "Disk space" olarak gösterilir).
-- **Kurulum sırasında:** Install/Remove gizlenir, **Cancel install** görünür. İptal birkaç saniye içinde çalışan
-  süreci sonlandırır ve `.local/<model>/` klasörünü siler. Install her zaman önce yarım kalmış bir kurulumun
-  kalıntılarını temizler.
-- Kurulum logu katlanabilir bir bölümdedir (varsayılan kapalı); ilerleme satırı her zaman görünür.
-- Kurulum yarıda kalırsa `.local/<model>/` silinir ve hata gösterilir. Başarılı kurulumun sonunda
-  `.local/<model>/installed` işaret dosyası yazılır; "kurulu mu?" kontrolü buna bakar.
-
-### "Kaldır" düğmesi
-
-Silinecek klasörü ve açılacak alanı gösterir, onay alınca işçiyi durdurur ve `.local/<model>/`
-klasörünü siler.
-
-## 7. Arayüz
-
-Tüm arayüz metinleri İngilizce (bkz. V2).
-
-```
-┌ Models ─────────────────────────────────────────────┐
-│ Chatterbox  ● installed (5.8 GB)   [Remove]          │  ← model adı model sayfasına bağlantıdır (desteklenen diller)
-│ OmniVoice   ○ not installed        [Install]         │
-│ [log box — visible during install]                   │
-└─────────────────────────────────────────────────────┘
-┌ Voice ──────────────────────────────────────────────┐
-│ (•) Clone voice   ( ) Default voice                  │
-│ [Upload file | Record]   duration: 12.4 s ✓          │  ← yalnızca Clone voice'ta
-│ Reference transcript (optional, OmniVoice)           │  ← yalnızca Clone voice'ta
-└─────────────────────────────────────────────────────┘
-┌ Text ───────────────────────────────────────────────┐
-│ [....................................]  [Generate]  │
-└─────────────────────────────────────────────────────┘
-┌ Results ────────────────────────────────────────────┐
-│ Chatterbox  ▶ player  ⬇ download   (generated in 3.2 s)│
-│ OmniVoice   ▶ player  ⬇ download                     │
-└─────────────────────────────────────────────────────┘
-```
-
-- Kırpma: Gradio'nun yerleşik kırpma aracı (✂ ve ↺) kullanılır. Kendi kırpma aracımız denendi;
-  hata verdi ve görsel olarak daha kötüydü, geri alındı (v1.7).
-  - Bilinen görsel sorun (Gradio kaynaklı, kabul edildi): kırpmadan sonra turuncu seçim görünmeye devam edebilir.
-  - README'de not: ↺ kaydı kırpılmamış hâline döndürür.
-- Clone voice modunda referans yoksa veya 10 sn'den kısaysa "Generate" tıklandığında hata mesajı gösterilir (düğmeyi devre dışı bırakmak yerine — daha az kod, aynı sonuç). Mesaj ölçülen süreyi içerir (Gradio süreyi yuvarlar; 9.6 sn "0:10" görünebilir).
-- **Mesajlar sayfada gösterilir, Gradio'nun açılır pencereleri (toast) kullanılmaz:** uygulama penceresinde görünmüyorlar (v1.13). Üretim mesajları Generate'in altında, kurulum hata/iptal mesajları ilerleme satırında. Bir model hata verirse diğer modeller yine çalışır.
-- Default voice modunda referans alanları gizlenir, 10 sn kontrolü uygulanmaz.
-- Kurulu olmayan model sonuç bölümünde "not installed" yazar.
-- Sayfanın altında kısa bir not: "Only use your own voice or voices you have permission to use."
-
-### 7.1 Ses kütüphanesi
-
-Tek tür kayıt vardır: **her mikrofon kaydı ve her yüklenen dosya otomatik olarak kütüphaneye eklenir.**
-
-**Depolama** — proje kökünde `voices/` (`.gitignore`'da açıkça listelenir):
-
-```
-voices/<id>/voice.wav     # ses (wav'a çevrilmiş)
-voices/<id>/info.json     # {"name", "created", "duration", "source": "recording"|"upload"}
-```
-
-- `<id>`: oluşturulma zamanından türetilir (ör. `20261116-142530`); dosya adı sorunlarını önler.
-- Ad (otomatik): kayıt için `Recording 2026-11-16 14:25:30`, yükleme için orijinal dosya adı (uzantısız).
-- Yeniden adlandırma v1'de yok.
-
-**Ne zaman kaydedilir:** Gradio'nun `stop_recording` (kayıt bitti) ve `upload` (dosya yüklendi) olaylarında.
-Gradio'nun ✂ aracıyla kırpma yapılırsa, kırpılmış hâl aynı kütüphane kaydının üzerine yazılır
-(**doğrulanacak:** Gradio'nun kırpma sonrası hangi olayı tetiklediği).
-
-**Arayüz:**
-
-- Ana ekran: referans sesin altında **Saved voices** açılır listesi. Bir ses seçmek onu referans olarak yükler.
-  Yeni kayıt/yükleme sonrası kısa bir bildirim: "Saved to library as …". Yanında not:
-  "Only record or upload your own voice or voices you have permission to use."
-- **Voices** sekmesi: kayıtlı sesler listesi (ad, süre, tarih), seçili sesi dinleme, **Delete** düğmesi.
-  - Delete önce onay ister ("Permanently delete …? This cannot be undone."), sonra `voices/<id>/` klasörünü siler
-    (çöp kutusuna gitmez).
-
-## 8. Planlanan repo yapısı
+## 8. Repository structure
 
 ```
 vokalit/
-├── CLAUDE.md
-├── SPEC.md
-├── README.md
-├── LICENSE                    # Unlicense
+├── CLAUDE.md, SPEC.md, README.md, LICENSE (Unlicense)
 ├── start.sh / start.bat
 ├── app/
-│   ├── requirements.txt       # gradio, pywebview
-│   ├── main.py                # arayüz + pencere
-│   └── models.py              # model tablosu, kur/kaldır, işçi yönetimi
-├── workers/
-│   ├── chatterbox/
-│   │   ├── requirements.txt
-│   │   └── worker.py
-│   └── omnivoice/
-│       ├── requirements.txt
-│       └── worker.py
-├── samples/                   # örnek Türkçe test metinleri (ses dosyası YOK)
-├── voices/                    # ses kütüphanesi (§7.1) — .gitignore'da
-├── outputs/                   # .gitignore'da
-└── .local/                    # .gitignore'da
+│   ├── requirements.txt       # numpy, soundfile, pywebview
+│   ├── main.py                # starts the server and the window
+│   ├── server.py              # local HTTP API
+│   ├── workspace.py           # storage under workspace/
+│   ├── models.py              # model table, install/remove, workers
+│   └── ui/                    # HTML/CSS/JS (+ tests/ for node --test)
+├── workers/<model>/           # requirements.txt + worker.py
+├── tests/                     # pytest (stubs for torch/chatterbox; no GPU or network needed)
+├── docs/superpowers/          # design docs and plans
+├── samples/                   # sample texts (no audio)
+├── workspace/                 # user data — .gitignore
+└── .local/                    # .gitignore
 ```
 
-## 9. Başarı kriterleri (v1)
+Tests: `python3 -m pytest tests -q` and `node --test "app/ui/tests/*.test.mjs"`.
 
-1. Temiz bir Windows veya Linux + NVIDIA makinede (uv ve Python kurulu değil): `start` çalıştır → uv indirme onayı → pencere açılır.
-2. "Kur" onay kutusu model adı, yaklaşık boyut, konum ve lisansı gösteriyor; onay olmadan hiçbir şey indirilmiyor.
-3. Dosyadan yüklenen ve mikrofondan kaydedilen ≥10 sn'lik referansla iki model de Türkçe `.wav` üretiyor ve pencerede dinlenebiliyor.
-4. <10 sn referansta "Generate" üretim yapmıyor ve hata mesajı görünüyor.
-5. Türkçe karakterli metin (ç, ğ, ı, İ, ö, ş, ü) doğru okunuyor — örnek metinle elle dinlenerek doğrulanır.
-6. "Kaldır" sonrası `.local/<model>/` yok; ev dizininde (`~/.cache/huggingface`, `~/.cache/torch`, `~/.cache/pip`, `~/.cache/uv`) kurulum sırasında yeni dosya oluşmamış — öncesi/sonrası boyut karşılaştırmasıyla doğrulanır.
-7. İkinci "Üret" çağrısı modeli yeniden yüklemiyor (ilkinden belirgin şekilde hızlı).
-8. GPU yoksa anlaşılır bir hata mesajı gösteriliyor.
-9. Default voice modunda referans ses vermeden iki model de Türkçe `.wav` üretiyor.
-10. Kod tabanında (`app/`, `workers/`, betikler) Türkçe metin yok — Türkçe karakter araması (`grep -rP "[çğıİöşüÇĞÖŞÜ]"`) yalnızca `samples/` ve dokümanlarda sonuç veriyor.
-11. Modeller kurulduktan sonra ağ bağlantısı kesikken iki mod da iki modelle çalışıyor.
-12. Üretim sırasında `127.0.0.1` dışında hiçbir ağ bağlantısı açılmıyor — Linux'ta `ss -tnp`, Windows'ta Kaynak İzleyicisi > Ağ ile doğrulanır; uygulama kapandıktan sonra sistem geçici klasöründe ses dosyası kalmıyor.
-13. Kayıt alanında bilgisayardaki mikrofonlar listeleniyor ve seçilebiliyor; kayıt durdurulunca kayıt pencerede dinlenebiliyor; temizle (✕) düğmesi kaydı/dosyayı kaldırıyor; "share" düğmesi yok; Gradio'nun kendi düğmeleri İngilizce ve düzgün görünüyor.
-14. Kırpma: Gradio'nun ✂ aracıyla kırpılan kayıt, üretimde kırpılmış hâliyle kullanılıyor.
-15. Repoda ses dosyası yok (`git ls-files | grep -iE "\.(wav|mp3|flac|ogg|m4a|webm)$"` boş) ve README'de Privacy ve Responsible use bölümleri var.
-16. Kütüphane: bir kayıt ve bir yükleme sonrası iki giriş `voices/` altında ve Voices sekmesinde görünüyor; uygulama yeniden açılınca hâlâ duruyorlar; Saved voices listesinden seçilen ses referans olarak yükleniyor; Delete onaydan sonra klasörü siliyor; `git status` `voices/` içeriğini göstermiyor.
+## 9. Success criteria
 
-## 10. Riskler
+1. On a clean Windows or Linux machine with an NVIDIA GPU (no uv, no Python): run `start` → uv download prompt →
+   the window opens.
+2. The install confirmation shows name, size, location and license; nothing is downloaded without confirmation.
+3. "Remove" leaves no `.local/<model>/`, and nothing new appeared in the home folder caches
+   (`~/.cache/huggingface`, `~/.cache/torch`, `~/.cache/pip`, `~/.cache/uv`).
+4. Without a GPU the app says so clearly.
+5. Turkish text with Turkish-specific letters (see `samples/`) is read correctly, checked by listening.
+6. A second generation does not reload the model (clearly faster than the first).
+7. With the network disconnected after installing, everything keeps working; during generation no connection other
+   than `127.0.0.1` is opened (Linux `ss -tnp`, Windows Resource Monitor > Network).
+8. No Turkish text in code (`app/`, `workers/`, scripts): a search for Turkish letters
+   (`grep -rnP "[\x{00C7}\x{00E7}\x{011E}\x{011F}\x{0130}\x{0131}\x{00D6}\x{00F6}\x{015E}\x{015F}\x{00DC}\x{00FC}]"`)
+   finds results only in `samples/`.
+9. No audio files in the repo (`git ls-files | grep -iE "\.(wav|mp3|flac|ogg|m4a|webm)$"` is empty) and the README
+   has Privacy and Responsible use sections.
+10. The workspace criteria in the design doc (§11) hold.
 
-| Risk | Etki | Önlem |
+## 10. Risks
+
+| Risk | Effect | Mitigation |
 |---|---|---|
-| pywebview penceresinde mikrofon izni çalışmayabilir (özellikle Linux) | Mikrofonla kayıt yok | Plan adım 2'de erken test. Çalışmazsa: arayüzde "Tarayıcıda aç" düğmesi (aynı adres, varsayılan tarayıcı). |
-| Linux'ta pywebview GTK/Qt sistem paketleri ister | Kurulum zorlaşır | README'de gerekli paket komutu; olmazsa tarayıcıda açılır. |
-| Bir kütüphane `.local` dışına yazar | Kriter 6 bozulur | Adım 3/4'te ölçülür, gerekli ortam değişkeni eklenir. |
-| Uzun metinde modelin sınırı | Kesik/bozuk çıktı | Adım 3/4'te sınır ölçülür; arayüzde karakter limiti olarak uygulanır. |
+| Microphone permission in the pywebview window (especially Linux) | No recording | Upload still works; tested on Windows. |
+| pywebview on Linux needs Qt/GTK system packages | Harder install | README lists the packages. |
+| A library writes outside `.local` | Criterion 3 fails | Measured per model; environment variables added as needed. |
+| Long text exceeds a model's limit | Cut or broken audio | Split into lines; limits measured per model. |
 
-## 11. Uygulama planı
+## 11. Assumptions
 
-1. İskelet: klasörler, `start.sh/bat`, `.gitignore`, LICENSE → doğrula: `start` ile boş bir Gradio penceresi açılıyor.
-2. pywebview + mikrofon testi → doğrula: Windows'ta pencerede mikrofonla kayıt yapılabiliyor (Linux sonucu not edilir).
-3. Chatterbox işçisi + kur/kaldır → doğrula: kriter 2, 3, 6, 7 (Chatterbox için).
-4. OmniVoice işçisi → doğrula: aynı kriterler (OmniVoice için).
-5. Arayüz tamamlama (10 sn kontrolü, yan yana sonuç, hata mesajları) → doğrula: kriter 4, 5, 8.
-6. Gerçek boyutları ölç, model tablosunu güncelle → doğrula: gösterilen tahmin ölçümle uyumlu.
-7. README (TR + EN) → doğrula: kriter 1, temiz bir makinede adım adım.
+- Python 3.11 (downloaded by uv).
+- Code is entirely English: names, comments, log and error messages, interface text. Turkish appears only in
+  `samples/` and in documents written for the maintainer (e.g. the Turkish part of the README).
+- A model can be used without installing the others.
 
-Not: Paketler bu çalışma ortamında indirilemediği için 2–7. adımların doğrulaması kullanıcının makinesinde yapılır.
+## 12. Open questions
 
-## 12. Varsayımlar
-
-- V1: Python 3.11 (uv tarafından indirilir).
-- V2: Kod tamamen İngilizce: değişken/fonksiyon adları, yorumlar, log/hata mesajları ve arayüz metinleri. Türkçe yalnızca `samples/` altındaki test metinlerinde ve dokümanlarda (SPEC, README'nin TR bölümü) bulunur.
-- V3: Kullanıcı bir modeli kurmadan diğerini kullanabilir.
-
-## 13. Açık sorular
-
-Yok.
+None.
