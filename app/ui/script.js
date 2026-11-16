@@ -27,3 +27,8 @@ export function takeNumber(file) {
 export function formatTime(seconds) {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 }
+
+// Time for a click at `fraction` (0..1) of a waveform, kept inside [start, end].
+export function seekTo(fraction, duration, start = 0, end = duration) {
+  return Math.min(end, Math.max(start, fraction * duration));
+}

@@ -282,3 +282,14 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .record-round.on .rec-dot { border-radius: 2px; }
 .export-info { gap: 12px; }
 .export-info .player { width: 200px; }
+.range-track { cursor: text; }
+.range-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--text);
+  pointer-events: none; }
+.wave > span { pointer-events: none; }
+
+.editable-title { position: relative; display: flex; align-items: center; cursor: text; }
+.editable-title .title-input { border-color: var(--line); padding-right: 28px; }
+.editable-title:hover .title-input { border-color: var(--border); background: var(--raised); }
+.editable-title .title-input:focus { border-color: var(--accent); background: var(--raised); }
+.editable-title .pencil { position: absolute; right: 8px; color: var(--faint); display: flex; pointer-events: none; }
+.editable-title:hover .pencil { color: var(--muted); }

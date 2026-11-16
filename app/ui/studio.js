@@ -1,5 +1,5 @@
 // Studio screen: sessions, cast, script lines with takes, generation, export.
-import { api, el, icon, ICONS, setMessage, waitForJob } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { formatTime, moveLine, settingsChanges, takeNumber } from "./script.js";
@@ -134,7 +134,7 @@ export async function renderStudio(root) {
     more.onclick = () => popover(more, el("div", { class: "menu" },
       el("button", { class: "menu-item danger", onclick: () => confirmDeleteSession(more) }, "Delete session")), { align: "right" });
     return el("header", { class: "main-head" },
-      name, el("div", { class: "spacer" }),
+      editableTitle(name), el("div", { class: "spacer" }),
       el("div", { class: "muted" }, "Generate with"), picker.element,
       el("div", { class: "pop-holder" }, settingsButton),
       el("label", { class: "row muted" }, "Seed", seedInput),

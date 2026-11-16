@@ -1,5 +1,5 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
-import { api, el, icon, ICONS, setMessage } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, setMessage } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
 import { player, rangeEditor } from "./waveform.js";
 
@@ -83,11 +83,13 @@ export async function renderCharacters(root) {
         try {
           await api("PATCH", `/api/characters/${character.id}`, { name: value });
           character.name = value;
+          badge.replaceWith(badge = avatar(character.id, value, 32));
           await refreshList();
         } catch (error) { setMessage(message, error.message, "error"); }
       } });
+    let badge = avatar(character.id, character.name, 32);
     const head = el("header", { class: "main-head" },
-      avatar(character.id, character.name, 32), name,
+      badge, editableTitle(name),
       el("div", { class: "muted small" }, character.used_in.length ? `Used in ${character.used_in.join(", ")}` : "Not used in any session"),
       el("div", { class: "spacer" }), message,
       el("button", { class: "btn btn-danger", onclick: () => confirmDelete(head, character) }, "Delete character"));

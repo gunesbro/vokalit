@@ -29,3 +29,11 @@ test("formatTime shows minutes and seconds", () => {
   assert.equal(formatTime(14.4), "0:14");
   assert.equal(formatTime(75), "1:15");
 });
+
+test("seekTo maps a click position to a time inside the selection", async () => {
+  const { seekTo } = await import("../script.js");
+  assert.equal(seekTo(0.5, 20), 10);
+  assert.equal(seekTo(0.1, 20, 4, 16), 4);
+  assert.equal(seekTo(0.95, 20, 4, 16), 16);
+  assert.equal(seekTo(-1, 20), 0);
+});

@@ -68,7 +68,14 @@ export const ICONS = {
   play: ["M7 4.5l12 7.5-12 7.5z"],
   pause: ["M8 5v14M16 5v14"],
   chevron: ["M6 9l6 6 6-6"],
+  pencil: ["M4 20h4L19 9l-4-4L4 16v4z", "M13.5 6.5l4 4"],
 };
+
+// A text field that clearly looks editable: the input plus a pencil that focuses it.
+export function editableTitle(input) {
+  return el("label", { class: "editable-title", title: "Click to rename" }, input,
+    el("span", { class: "pencil", "aria-hidden": "true" }, icon(ICONS.pencil, 13)));
+}
 
 // One message line per screen: setMessage(node, text, "error" | "warn" | "info").
 export function setMessage(node, text = "", kind = "info") {
