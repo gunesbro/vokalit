@@ -47,13 +47,16 @@ def main():
         send(ready=False, error="No NVIDIA GPU with CUDA was found.")
         return
     model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
+    # Cloning replaces model.conds (the active voice); keep the built-in voice to restore it.
+    default_conds = model.conds
     send(ready=True)
 
     for line in sys.stdin:
         request = json.loads(line)
         try:
             start = time.perf_counter()
-            # No reference means the model's built-in default voice.
+            if not request.get("ref"):
+                model.conds = default_conds  # otherwise the last cloned voice would be used
             wav = model.generate(request["text"], language_id=LANGUAGE, audio_prompt_path=request.get("ref"))
             sf.write(request["out"], wav.squeeze(0).cpu().numpy(), model.sr)
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1))
