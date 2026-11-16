@@ -50,3 +50,15 @@ test("commonLanguages keeps languages every chosen model supports", async () => 
   assert.deepEqual(commonLanguages(models, []).map((l) => l.code), ["tr"]); // no choice: what installed models share
   assert.deepEqual(commonLanguages([], []), []);
 });
+
+test("splitSentences groups sentences into chunks under the limit", async () => {
+  const { splitSentences } = await import("../script.js");
+  assert.deepEqual(splitSentences("One. Two! Three?", 9), ["One. Two!", "Three?"]);
+  assert.deepEqual(splitSentences("Short line.", 300), ["Short line."]);
+  assert.deepEqual(splitSentences("A sentence... Next one; still going. Last", 20),
+    ["A sentence...", "Next one;", "still going. Last"]);
+  const long = "word ".repeat(100).trim(); // no punctuation: split on spaces
+  const parts = splitSentences(long, 120);
+  assert.ok(parts.every((p) => p.length <= 120) && parts.join(" ") === long);
+  assert.deepEqual(splitSentences("   ", 10), []);
+});

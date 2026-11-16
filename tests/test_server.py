@@ -230,3 +230,40 @@ def test_reveal_opens_file_manager_for_workspace_audio(api, monkeypatch, tmp_pat
 def test_system_reports_platform(api):
     _, body, _ = api("GET", "/api/system")
     assert body["platform"] in ("win32", "linux", "darwin")
+
+
+def _session_with_line(api, text):
+    _, session, _ = api("POST", "/api/sessions", {"name": "E"})
+    sid = session["id"]
+    _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
+    api("POST", f"/api/sessions/{sid}/cast", {"character": character["id"], "scope": "library"})
+    _, line, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": character["id"], "text": text})
+    return sid, line["id"], character["id"]
+
+
+def test_empty_line_is_not_generated(api, monkeypatch):
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", lambda *a: pytest.fail("generated an empty line"))
+    sid, lid, _ = _session_with_line(api, "   ")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Line 1 is empty" in done["error"]
+
+
+def test_generate_missing_skips_empty_lines(api, monkeypatch):
+    generated = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language):
+        generated.append(text)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, _, cid = _session_with_line(api, "")
+    api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "Hello"})
+    api("PATCH", f"/api/sessions/{sid}", {"models": ["chatterbox"]})
+    _, job, _ = api("POST", f"/api/sessions/{sid}/generate-missing", {})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done" and generated == ["Hello"]
+    assert done["result"] == {"generated": 1, "skipped_empty": 1}

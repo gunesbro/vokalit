@@ -2,7 +2,7 @@
 import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
-import { commonLanguages, formatTime, moveLine, settingsChanges, takeNumber } from "./script.js";
+import { commonLanguages, formatTime, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
 import { dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
 import { player, stopAudio } from "./waveform.js";
 
@@ -10,6 +10,12 @@ const ICON_GRIP = ["M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"];
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
 const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
 
+// Lines longer than this get a note and a "Split" action: models work best with sentence-sized lines.
+const LONG_LINE = 300;
+const SPLIT_SIZE = 250;
+const ICON_EDIT = ["M9 6l6 6-6 6"];
+
+const textRows = (text) => Math.min(10, Math.max(2, Math.ceil(text.length / 90) + (text.match(/\n/g) || []).length));
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const when = (created) => created.slice(0, 16).replace("T", " ");
 
@@ -334,16 +340,26 @@ export async function renderStudio(root) {
         el("button", { class: "btn btn-ghost btn-takes", onclick: () => open(line.id) },
           `${titles()[selected.model] || selected.model} · ${plural(takes.length, "take")}`));
     } else {
-      right.append(el("button", { class: "btn", onclick: () => generate(line, session.models, seed) }, "Generate"));
+      const empty = !line.text.trim();
+      right.append(el("button", { class: "btn", disabled: empty, title: empty ? "Write the line first" : "",
+        onclick: () => generate(line, session.models, seed) }, "Generate"));
     }
-    const more = el("button", { class: "icon-btn btn btn-ghost hover-only", "aria-label": "More actions" }, icon(ICON_MORE));
+    const more = el("button", { class: "icon-btn btn btn-ghost hover-only", "aria-label": "More actions", title: "More" }, icon(ICON_MORE));
     more.onclick = () => popover(more, lineMenu(line, i, more), { align: "right" });
-    right.append(el("div", { class: "pop-holder" }, more));
+    const remove = el("button", { class: "icon-btn btn btn-ghost hover-only", "aria-label": `Delete line ${i + 1}`, title: "Delete line" },
+      icon(ICONS.trash));
+    remove.onclick = () => confirmDeleteLine(remove, line, i);
+    right.append(el("div", { class: "pop-holder" }, remove), el("div", { class: "pop-holder" }, more),
+      el("span", { class: "open-hint", "aria-hidden": "true" }, icon(ICON_EDIT, 16)));
 
-    const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""}`, "data-line": line.id },
-      handle(line), speaker(line),
-      el("div", { class: `line-text ${line.text ? "" : "faint"}` }, line.text || "Empty line"),
-      right);
+    const long = line.text.length > LONG_LINE;
+    const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""}`, "data-line": line.id,
+      title: "Click to edit the line and its takes" },
+    handle(line), speaker(line),
+    el("div", { class: "line-body" },
+      el("div", { class: `line-text ${line.text ? "" : "faint"}` }, line.text || "Empty line \u2014 click to write it"),
+      long && el("div", { class: "faint small" }, `${line.text.length} characters \u00b7 click to see all or split it`)),
+    right);
     node.addEventListener("click", (e) => { if (!e.target.closest("button, a, input, select, .player, .popover")) open(line.id); });
     dragTarget(node, line);
     return node;
@@ -359,12 +375,20 @@ export async function renderStudio(root) {
       el("button", { class: "menu-item", disabled: i === 0, onclick: () => move(i - 1) }, "Move up"),
       el("button", { class: "menu-item", disabled: i === session.lines.length - 1, onclick: () => move(i + 1) }, "Move down"),
       el("div", { class: "menu-sep" }),
-      el("button", { class: "menu-item danger", onclick: () => popover(anchor, el("div", { class: "menu confirm-menu" },
-        el("strong", {}, `Delete line ${i + 1}?`),
-        el("div", { class: "muted small" }, line.takes.length ? `Its ${plural(line.takes.length, "take")} are removed permanently.` : "It has no takes."),
-        el("button", { class: "btn btn-danger", onclick: () => { close(); if (openLine === line.id) openLine = null;
-          api("DELETE", `/api/sessions/${sid()}/lines/${line.id}`).then(apply, fail); } }, "Delete line")), { align: "right" }) },
-      "Delete line…"));
+      el("button", { class: "menu-item danger", onclick: () => confirmDeleteLine(anchor, line, i) }, "Delete line\u2026"));
+  }
+
+  function confirmDeleteLine(anchor, line, i) {
+    const close = () => document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+    popover(anchor, el("div", { class: "menu confirm-menu" },
+      el("strong", {}, `Delete line ${i + 1}?`),
+      el("div", { class: "muted small" }, line.takes.length
+        ? `Its ${plural(line.takes.length, "take")} are removed permanently.` : "It has no takes."),
+      el("button", { class: "btn btn-danger", onclick: () => {
+        close();
+        if (openLine === line.id) openLine = null;
+        api("DELETE", `/api/sessions/${sid()}/lines/${line.id}`).then(apply, fail);
+      } }, "Delete line")), { align: "right" });
   }
 
   function handle(line) {
@@ -472,7 +496,7 @@ export async function renderStudio(root) {
       line.text = text.value;
       return api("PATCH", `/api/sessions/${sid()}/lines/${line.id}`, { text: text.value }).then((data) => { session = data; }, fail);
     };
-    const text = el("textarea", { class: "textarea line-input", rows: 2, "aria-label": "Line text", value: line.text,
+    const text = el("textarea", { class: "textarea line-input", rows: textRows(line.text), "aria-label": "Line text", value: line.text,
       oninput: () => { clearTimeout(typing); pendingText[line.id] = saveText; typing = setTimeout(saveText, 600); },
       onchange: saveText });
     const pause = el("input", { class: "input pause", value: line.pause_after, inputmode: "decimal", "aria-label": "Pause after the line in seconds",
@@ -489,6 +513,18 @@ export async function renderStudio(root) {
       "aria-label": "Seed for this line", oninput: () => { lineSeeds[line.id] = lineSeed.value.replace(/\D/g, ""); lineSeed.value = lineSeeds[line.id]; } });
     const count = picker.get().length;
     const busy = generating.has(line.id);
+    const deleteButton = el("button", { class: "btn btn-ghost icon-btn", "aria-label": `Delete line ${i + 1}`, title: "Delete line" },
+      icon(ICONS.trash));
+    deleteButton.onclick = () => confirmDeleteLine(deleteButton, line, i);
+    const generateButton = el("button", { class: "btn btn-primary", disabled: busy || !count || !line.text.trim(),
+      title: line.text.trim() ? "" : "Write the line first",
+      onclick: () => generate(line, picker.get(), lineSeeds[line.id] ?? seed) },
+    busy ? busyLabel(line.id, "Generating\u2026") : `Generate ${plural(count || 0, "take")}`);
+    text.addEventListener("input", () => {
+      generateButton.disabled = busy || !count || !text.value.trim();
+      generateButton.title = text.value.trim() ? "" : "Write the line first";
+      text.rows = textRows(text.value);
+    });
 
     const node = el("div", { class: "line-details", "data-line": line.id },
       el("div", { class: "line detail-top" },
@@ -501,19 +537,47 @@ export async function renderStudio(root) {
         text,
         el("div", { class: "row line-right" },
           el("label", { class: "row muted" }, "Pause", pause, "s"),
-          el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close details", onclick: () => { openLine = null; draw(); } }, icon(ICONS.close)))),
+          el("div", { class: "pop-holder" }, deleteButton),
+          el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close details", title: "Close", onclick: () => { openLine = null; draw(); } }, icon(ICONS.close)))),
       el("div", { class: "detail-row row wrap" },
         el("div", { class: "muted" }, "Generate with"), picker.element,
         el("label", { class: "row muted" }, "Seed", lineSeed),
-        el("button", { class: "btn btn-primary", disabled: busy || !count,
-          onclick: () => generate(line, picker.get(), lineSeeds[line.id] ?? seed) },
-        busy ? busyLabel(line.id, "Generating…") : `Generate ${plural(count || 0, "take")}`),
+        generateButton,
         el("div", { class: "faint small" }, "One take per selected model, so you can compare them.")),
+      longNote(line),
       languageNotes(line, picker.get()),
       lineSettings(line, picker.get()),
       el("div", { class: "detail-bottom" }, takesList(line), perform(line)));
     dragTarget(node, line);
     return node;
+  }
+
+  function longNote(line) {
+    if (line.text.length <= LONG_LINE) return null;
+    const parts = splitSentences(line.text, SPLIT_SIZE);
+    return el("div", { class: "detail-row row wrap small" },
+      el("span", { class: "warn" }, `This line is long (${line.text.length} characters). Models work best with a sentence or two; `
+        + "very long lines can be cut off or drift."),
+      parts.length > 1 && el("button", { class: "btn btn-small", onclick: () => splitLine(line, parts) },
+        `Split into ${parts.length} lines`));
+  }
+
+  // Keeps the first part in this line and adds the rest after it, with the same character, sample and language.
+  async function splitLine(line, parts) {
+    try {
+      await api("PATCH", `/api/sessions/${sid()}/lines/${line.id}`, { text: parts[0] });
+      let after = line.id;
+      for (const part of parts.slice(1)) {
+        const result = await api("POST", `/api/sessions/${sid()}/lines`,
+          { character: line.character, text: part, pause_after: line.pause_after, after });
+        after = result.id;
+        if (line.sample || line.language) {
+          await api("PATCH", `/api/sessions/${sid()}/lines/${after}`, { sample: line.sample, language: line.language });
+        }
+      }
+      await refresh();
+      setMessage(message, `Split into ${parts.length} lines. Existing takes stay on the first line.`);
+    } catch (error) { fail(error); }
   }
 
   // Warns when a chosen model cannot speak the line's language, or the sample is in another language.
@@ -707,7 +771,9 @@ export async function renderStudio(root) {
 
   async function generateMissing() {
     if (!session.models.length) return setMessage(message, installed().length ? "Choose a model in “Generate with”." : "Install a model in the Models tab.", "warn");
-    if (!session.lines.some((l) => !l.takes.length)) return setMessage(message, "Every line already has a take.");
+    if (!session.lines.some((l) => !l.takes.length && l.text.trim())) {
+      return setMessage(message, session.lines.some((l) => !l.takes.length) ? "The lines without takes are empty." : "Every line already has a take.");
+    }
     try {
       const { id } = await api("POST", `/api/sessions/${sid()}/generate-missing`, { seed: seed || null });
       batch = id;
@@ -720,7 +786,8 @@ export async function renderStudio(root) {
           refresh();
         }
       });
-      setMessage(message, last.startsWith("Stopped") ? last : `Generated ${plural(result.generated, "line")}.`);
+      const skipped = result.skipped_empty ? ` Skipped ${plural(result.skipped_empty, "empty line")}.` : "";
+      setMessage(message, last.startsWith("Stopped") ? last : `Generated ${plural(result.generated, "line")}.${skipped}`);
     } catch (error) { fail(error); }
     batch = null;
     await refresh();

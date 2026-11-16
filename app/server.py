@@ -123,6 +123,9 @@ def _line_context(session_id, line_id):
 
 def _generate_line(session_id, line_id, model_names, seed):
     session, line, character, ref, sample_label = _line_context(session_id, line_id)
+    if not line["text"].strip():
+        number = next(i for i, l in enumerate(session["lines"], 1) if l["id"] == line_id)
+        raise ws.WorkspaceError(f"Line {number} is empty. Write its text first.")
     language = ws.effective_language(session, line)
     errors = []
     for name in model_names:
@@ -485,14 +488,16 @@ def generate_missing(req, sid):
     stop.clear()
 
     def work(job):
-        todo = [line["id"] for line in ws.load_session(sid)["lines"] if not line["takes"]]
+        missing = [line for line in ws.load_session(sid)["lines"] if not line["takes"]]
+        todo = [line["id"] for line in missing if line["text"].strip()]
+        skipped = len(missing) - len(todo)
         for number, line_id in enumerate(todo, 1):
             if stop.is_set():
                 job["progress"] = f"Stopped after {number - 1} of {len(todo)} lines."
-                return {"generated": number - 1}
+                return {"generated": number - 1, "skipped_empty": skipped}
             job["progress"] = f"Line {number}/{len(todo)}"
             _generate_line(sid, line_id, model_names, _random_seed() if seed in (None, "") else int(seed))
-        return {"generated": len(todo)}
+        return {"generated": len(todo), "skipped_empty": skipped}
     return _start_job(work)
 
 
