@@ -12,10 +12,16 @@ LANGUAGE = "tr"
 
 
 def block_network():
+    """Blocks connections, sends and name lookups. The socket class itself stays, since libraries
+    (e.g. ssl) subclass it when they are imported."""
+
     def blocked(*args, **kwargs):
         raise RuntimeError("Network access is blocked in Vokalit workers (SPEC.md §5.3).")
 
-    socket.socket = blocked
+    socket.socket.connect = blocked
+    socket.socket.connect_ex = blocked
+    socket.socket.sendto = blocked
+    socket.getaddrinfo = blocked
 
 
 def main():

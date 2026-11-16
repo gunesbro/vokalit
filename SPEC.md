@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.13** (v1.12'ye göre: mesajlar açılır pencere yerine sayfada — §7).
+> Durum: **v1.14** (v1.13'e göre: ağ engeli soket sınıfı yerine bağlantı fonksiyonlarında — §5.3).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -111,8 +111,9 @@ Ağ yalnızca kullanıcı "Install" düğmesine basıp onay verdiğinde, paket v
 **İşçi süreçleri (sesi işleyen yer) — teknik olarak zorunlu:**
 
 - `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`: kütüphaneler ağa çıkmaya çalışmaz.
-- İşçi, herhangi bir kütüphaneyi import etmeden önce soket oluşturmayı engeller
-  (`socket.socket` çağrısı hata verir). Bir kütüphane ağa çıkmaya çalışırsa sessizce değil,
+- İşçi, herhangi bir kütüphaneyi import etmeden önce bağlantı kurmayı, veri göndermeyi ve ad çözümlemeyi
+  engeller (`socket.socket.connect`, `connect_ex`, `sendto`, `socket.getaddrinfo` hata verir). `socket.socket`
+  sınıfının kendisi değiştirilmez: `ssl` gibi modüller yüklenirken ondan alt sınıf türetir (v1.14 hatası). Bir kütüphane ağa çıkmaya çalışırsa sessizce değil,
   açık bir hatayla durur. İşçiler zaten yalnızca stdin/stdout kullanır.
 - Bu yüzden üretim sırasında ihtiyaç duyulan her şey (OmniVoice'un Whisper modeli dahil)
   **kurulum sırasında** indirilir; ilk kullanımda indirme yoktur.
