@@ -25,8 +25,8 @@ file. Everything is done by clicking in a desktop window.
     before saving). Session-only characters can be saved to the library.
   - **Models:** install / remove with size, location and license shown first; progress and a collapsible log.
 - Hardware: **NVIDIA GPU (CUDA)**. Operating systems: Windows 10/11 and Linux.
-- License: **Unlicense** (public domain; no copyright holder). It covers this repository's code only; models and
-  libraries keep their own licenses.
+- License: **MIT** (free use, including commercial; copies keep the copyright and license notice). It covers this
+  repository's code only; models and libraries keep their own licenses.
 
 ## 3. Out of scope (v2)
 
@@ -215,7 +215,7 @@ All interface text is English. The visual design is the design canvas; behaviour
 
 ```
 vokalit/
-├── CLAUDE.md, SPEC.md, README.md, LICENSE (Unlicense)
+├── CLAUDE.md, SPEC.md, README.md, LICENSE (MIT)
 ├── start.sh / start.bat
 ├── app/
 │   ├── requirements.txt       # numpy, soundfile, pywebview

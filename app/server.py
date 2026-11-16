@@ -22,7 +22,7 @@ import workspace as ws
 
 CSP = "default-src 'self'; media-src 'self' blob:; img-src 'self' data:"
 STATIC_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript",
-                ".svg": "image/svg+xml", ".json": "application/json"}
+                ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".ico": "image/x-icon"}
 
 _httpd = None
 _token = None

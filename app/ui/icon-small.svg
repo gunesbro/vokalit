@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Vokalit icon, simplified for 16-48 px (favicon, title bar, taskbar): V and a sound wave only. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#25272d"/>
+      <stop offset="1" stop-color="#121316"/>
+    </linearGradient>
+    <linearGradient id="v" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd29a"/>
+      <stop offset="1" stop-color="#e08a3a"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="62" height="62" rx="15" fill="url(#bg)"/>
+  <path fill="none" stroke="#f5c58f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+        d="M7 33 H15 L18 26 L21 39 L24 30 L27 33 H37 L40 27 L43 38 L46 29 L49 33 H57"/>
+  <path fill="none" stroke="url(#v)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"
+        d="M21 19 L32 45 L43 19"/>
+</svg>

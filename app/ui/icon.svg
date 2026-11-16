@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Vokalit icon: a V carried by a sound wave over a chip (local AI). Detailed version for 64 px and up. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#25272d"/>
+      <stop offset="1" stop-color="#121316"/>
+    </linearGradient>
+    <linearGradient id="v" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd29a"/>
+      <stop offset=".55" stop-color="#e9a15b"/>
+      <stop offset="1" stop-color="#d9772f"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e9a15b" stop-opacity="0"/>
+      <stop offset=".18" stop-color="#e9a15b"/>
+      <stop offset=".8" stop-color="#ffd9a8"/>
+      <stop offset="1" stop-color="#ffd9a8" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="halo" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#e9a15b" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#e9a15b" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="9" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="17" y="17" width="478" height="478" rx="111" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="2"/>
+  <circle cx="256" cy="256" r="190" fill="url(#halo)"/>
+
+  <!-- chip with pins -->
+  <g fill="none" stroke="#e9a15b" stroke-opacity=".38" stroke-width="5" stroke-linecap="round">
+    <rect x="156" y="156" width="200" height="200" rx="34"/>
+    <path d="M196 156v-36M236 156v-50M276 156v-50M316 156v-36
+             M196 356v36M236 356v50M276 356v50M316 356v36
+             M156 196h-36M156 316h-36M356 196h36M356 316h36"/>
+  </g>
+  <g fill="#e9a15b" fill-opacity=".55">
+    <circle cx="196" cy="116" r="7"/><circle cx="236" cy="102" r="7"/><circle cx="276" cy="102" r="7"/><circle cx="316" cy="116" r="7"/>
+    <circle cx="196" cy="396" r="7"/><circle cx="236" cy="410" r="7"/><circle cx="276" cy="410" r="7"/><circle cx="316" cy="396" r="7"/>
+    <circle cx="116" cy="196" r="7"/><circle cx="116" cy="316" r="7"/><circle cx="396" cy="196" r="7"/><circle cx="396" cy="316" r="7"/>
+  </g>
+
+  <!-- sound wave through the V -->
+  <path filter="url(#glow)" fill="none" stroke="url(#wave)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"
+        d="M70 262 H140 L160 214 L182 306 L204 236 L222 274 L240 262 H272 L290 226 L308 300 L326 214 L346 286 L362 244 L378 270 L392 254 L404 262 H442"/>
+
+  <!-- V -->
+  <path filter="url(#glow)" fill="none" stroke="url(#v)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"
+        d="M178 168 L256 346 L334 168"/>
+</svg>

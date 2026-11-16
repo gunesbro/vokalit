@@ -1,3 +1,5 @@
+<p align="center"><img src="app/ui/icon.svg" width="112" alt="Vokalit icon"></p>
+
 # Vokalit
 
 **A local voice cloning and text-to-speech studio.** Clone a voice from a short recording, write a script with several
@@ -138,5 +140,5 @@ The interface is plain HTML, CSS and JavaScript modules in `app/ui/` (no build s
 
 ## License
 
-[The Unlicense](LICENSE): this code is in the public domain. The models and libraries it downloads have their own
-licenses, shown before installing.
+[MIT](LICENSE): use, change and share it freely, including commercially; keep the copyright and license notice
+in copies. The models and libraries it downloads have their own licenses, shown before installing.
