@@ -5,7 +5,7 @@ from conftest import make_wav
 
 
 def test_slugify_folds_to_ascii():
-    assert ws.slugify("Kızıl Şahin!") == "kizil-sahin"
+    assert ws.slugify("K\u0131z\u0131l \u015eahin!") == "kizil-sahin"
     assert ws.slugify("  ") == "x"
 
 

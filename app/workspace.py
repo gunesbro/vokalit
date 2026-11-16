@@ -30,7 +30,7 @@ def init(root: Path) -> None:
 
 
 def slugify(text: str) -> str:
-    text = text.replace("ı", "i")  # dotless i has no ASCII decomposition
+    text = text.replace("\u0131", "i")  # dotless i has no ASCII decomposition
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "x"
 
