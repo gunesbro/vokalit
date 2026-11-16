@@ -36,6 +36,10 @@ to compare, trim and pick; and *Perform this line* to convert your own recording
 
 ## Models
 
+**Models are not included in the download.** The repository contains only the app (a few hundred KB). You install
+the models you want from the app's **Models** screen, which shows each model's size, location and license and asks
+before downloading anything. Each model goes into its own folder under `.local/`, and **Remove** deletes it again.
+
 | Model | Languages | Disk space | License |
 |---|---|---|---|
 | [Chatterbox Multilingual](https://huggingface.co/ResembleAI/chatterbox) (Resemble AI) | 23 | ~11.3 GB (measured on Windows) | MIT |
@@ -49,7 +53,8 @@ Disk space includes PyTorch with CUDA, which every model installs into its own e
   series is supported. Chatterbox needs about 4 GB of video memory.
 - **Windows 10/11** (tested) or **Linux** (less tested).
 - An internet connection only while installing. Nothing else needs to be installed beforehand: Vokalit downloads its
-  own Python and packages into its folder.
+  own Python and packages into its folder, and the models are installed later from inside the app.
+- Disk space: about 1 GB for the app itself, plus the models you choose to install (see above).
 
 ## Getting started
 
@@ -60,7 +65,8 @@ Disk space includes PyTorch with CUDA, which every model installs into its own e
 
    The first start asks to download [uv](https://github.com/astral-sh/uv) (about 20 MB) unless you already have it.
    uv then sets up Python and the app's packages inside the folder. This takes a few minutes once.
-3. In the window, open **Models** and install a model. The confirmation shows the download size, where it goes and
+3. In the window, open **Models** and install a model — this is the large download, and the app cannot generate
+   speech until at least one model is installed. The confirmation shows the download size, where it goes and
    its license.
 4. Open **Characters**, create a character and add a sample: at least 10 seconds of clear speech. The first ~10
    seconds matter most, so trim away silence and noise.
