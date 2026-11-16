@@ -12,3 +12,4 @@ __pycache__/
 
 # User data (sessions, characters, recordings).
 workspace/
+.pytest_cache/

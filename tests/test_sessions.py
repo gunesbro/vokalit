@@ -1,0 +1,166 @@
+import json
+
+import pytest
+
+import workspace as ws
+from conftest import make_wav
+
+
+def _line_texts(session_id):
+    return [line["text"] for line in ws.load_session(session_id)["lines"]]
+
+
+def test_session_roundtrip(tmp_workspace):
+    sid = ws.create_session("Episode 1")
+    burak = ws.create_character("Burak")
+    guest = ws.create_character("Guest", session_id=sid)
+    ws.add_to_cast(sid, burak, "library")
+    ws.add_to_cast(sid, guest, "session")
+    ws.add_line(sid, burak, "one")
+    ws.add_line(sid, guest, "two")
+    ws.add_line(sid, burak, "three")
+    data = ws.load_session(sid)
+    assert data["name"] == "Episode 1"
+    assert data["cast"] == [{"character": burak, "scope": "library"}, {"character": guest, "scope": "session"}]
+    assert [(l["character"], l["text"], l["pause_after"]) for l in data["lines"]] == [
+        (burak, "one", ws.DEFAULT_PAUSE), (guest, "two", ws.DEFAULT_PAUSE), (burak, "three", ws.DEFAULT_PAUSE)]
+    assert ws.cast_character(data, guest)["name"] == "Guest"
+    assert [s for s, _ in ws.list_sessions()] == [sid]
+
+
+def test_default_session_name(tmp_workspace):
+    sid = ws.create_session()
+    assert ws.load_session(sid)["name"].startswith("Session 20")
+
+
+def test_failed_save_keeps_previous_file(tmp_workspace):
+    sid = ws.create_session("Safe")
+    data = ws.load_session(sid)
+    data["name"] = object()
+    with pytest.raises(TypeError):
+        ws.save_session(sid, data)
+    assert ws.load_session(sid)["name"] == "Safe"
+    assert not list((tmp_workspace / "sessions" / sid).glob("*.tmp"))
+
+
+def test_remove_used_character_is_refused(tmp_workspace):
+    sid = ws.create_session("E")
+    burak = ws.create_character("Burak")
+    other = ws.create_character("Other")
+    ws.add_to_cast(sid, burak, "library")
+    ws.add_to_cast(sid, other, "library")
+    ws.add_line(sid, burak, "a")
+    ws.add_line(sid, other, "b")
+    ws.add_line(sid, burak, "c")
+    with pytest.raises(ws.WorkspaceError, match="Burak is used by lines 1, 3"):
+        ws.remove_from_cast(sid, burak)
+    ws.delete_line(sid, ws.load_session(sid)["lines"][1]["id"])
+    ws.remove_from_cast(sid, other)
+    assert [c["character"] for c in ws.load_session(sid)["cast"]] == [burak]
+
+
+def test_save_as_character_moves_folder(tmp_workspace, tmp_path):
+    first = ws.create_session("First")
+    guest = ws.create_character("Guest", session_id=first)
+    ws.add_sample(guest, str(make_wav(tmp_path / "g.wav", 11)), "recording", session_id=first)
+    ws.add_to_cast(first, guest, "session")
+    ws.add_line(first, guest, "hi")
+    ws.save_as_character(first, guest)
+    data = ws.load_session(first)
+    new_id = data["cast"][0]["character"]
+    assert data["cast"][0]["scope"] == "library"
+    assert data["lines"][0]["character"] == new_id
+    assert (tmp_workspace / "characters" / new_id / "character.json").exists()
+    assert ws.sample_path(new_id, None).exists()
+    assert not (tmp_workspace / "sessions" / first / "characters" / guest).exists()
+    second = ws.create_session("Second")
+    ws.add_to_cast(second, new_id, "library")
+    assert ws.cast_character(ws.load_session(second), new_id)["name"] == "Guest"
+    assert ws.sessions_using(new_id) == ["Second", "First"]
+
+
+def test_move_and_delete_line(tmp_workspace):
+    sid = ws.create_session("E")
+    cid = ws.create_character("A")
+    ws.add_to_cast(sid, cid, "library")
+    l1 = ws.add_line(sid, cid, "one")
+    ws.add_line(sid, cid, "two")
+    ws.move_line(sid, l1, 1)
+    assert _line_texts(sid) == ["two", "one"]
+    ws.move_line(sid, l1, 5)
+    assert _line_texts(sid) == ["two", "one"]
+    take = tmp_workspace / "sessions" / sid / "takes" / "02-a-chatterbox-take1.wav"
+    make_wav(take, 1)
+    data = ws.load_session(sid)
+    data["lines"][1]["takes"] = [{"file": "takes/02-a-chatterbox-take1.wav"}]
+    ws.save_session(sid, data)
+    ws.delete_line(sid, l1)
+    assert _line_texts(sid) == ["two"]
+    assert not take.exists()
+
+
+def test_insert_line_after(tmp_workspace):
+    sid = ws.create_session("E")
+    cid = ws.create_character("A")
+    ws.add_to_cast(sid, cid, "library")
+    l1 = ws.add_line(sid, cid, "one")
+    l2 = ws.add_line(sid, cid, "two")
+    l3 = ws.add_line(sid, cid, "between", after=l1)
+    assert [l["id"] for l in ws.load_session(sid)["lines"]] == [l1, l3, l2]
+    assert len({l1, l2, l3}) == 3
+
+
+def test_reorder_lines_requires_permutation(tmp_workspace):
+    sid = ws.create_session("E")
+    cid = ws.create_character("A")
+    ws.add_to_cast(sid, cid, "library")
+    ids = [ws.add_line(sid, cid, t) for t in ("a", "b", "c")]
+    with pytest.raises(ws.WorkspaceError):
+        ws.reorder_lines(sid, ids[:2])
+    with pytest.raises(ws.WorkspaceError):
+        ws.reorder_lines(sid, ids + ["l99"])
+    ws.reorder_lines(sid, [ids[2], ids[0], ids[1]])
+    assert _line_texts(sid) == ["c", "a", "b"]
+
+
+def test_paste_script_edge_cases(tmp_workspace):
+    sid = ws.create_session("E")
+    host = ws.create_character("Host")
+    ws.add_to_cast(sid, host, "library")
+    added = ws.paste_script(sid, "host: Hello\n\nGuest: It's 10:30\nand still going\nHost: Bye")
+    data = ws.load_session(sid)
+    assert added == 3
+    assert [l["text"] for l in data["lines"]] == ["Hello", "It's 10:30 and still going", "Bye"]
+    assert data["lines"][0]["character"] == host
+    guest_entry = data["cast"][1]
+    assert guest_entry["scope"] == "session"
+    guest = ws.cast_character(data, guest_entry["character"])
+    assert guest["name"] == "Guest" and guest["samples"] == []
+
+
+def test_paste_script_without_speaker_is_refused(tmp_workspace):
+    sid = ws.create_session("E")
+    with pytest.raises(ws.WorkspaceError, match="speaker"):
+        ws.paste_script(sid, "Just some text without a speaker")
+    assert ws.load_session(sid)["lines"] == []
+
+
+def test_deleted_character_keeps_sessions_loadable(tmp_workspace):
+    sid = ws.create_session("E")
+    cid = ws.create_character("Gone")
+    ws.add_to_cast(sid, cid, "library")
+    lid = ws.add_line(sid, cid, "still here")
+    data = ws.load_session(sid)
+    data["lines"][0]["takes"] = [{"file": "takes/x.wav", "character_name": "Gone"}]
+    ws.save_session(sid, data)
+    ws.delete_character(cid)
+    data = ws.load_session(sid)
+    assert ws.cast_character(data, cid) is None
+    assert data["lines"][0]["id"] == lid
+    assert data["lines"][0]["takes"] == [{"file": "takes/x.wav", "character_name": "Gone"}]
+
+
+def test_session_file_is_readable_json(tmp_workspace):
+    sid = ws.create_session("E")
+    raw = json.loads((tmp_workspace / "sessions" / sid / "session.json").read_text(encoding="utf-8"))
+    assert raw["name"] == "E" and raw["lines"] == [] and raw["cast"] == []
