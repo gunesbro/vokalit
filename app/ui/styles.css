@@ -313,9 +313,9 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line:not(.detail-top):hover { box-shadow: inset 0 0 0 1px var(--line); }
 .line-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .line-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.open-hint { color: var(--faint); display: flex; opacity: 0; transform: translateX(-4px);
-  transition: opacity .18s ease, transform .18s ease; }
-.line:hover .open-hint { opacity: 1; transform: none; }
+.open-hint, .close-details { color: var(--muted); transition: color .18s ease, background-color .18s ease, transform .18s ease; }
+.line:hover .open-hint { color: var(--text); transform: translateY(1px); }
+.close-details:hover { color: var(--text); transform: translateY(-1px); }
 .hover-only { visibility: visible; opacity: 0; transition: opacity .18s ease; }
 .line:hover .hover-only, .hover-only[aria-expanded="true"], .hover-only:focus-visible { opacity: 1; }
 @keyframes open-details { from { opacity: 0; transform: translateY(-6px) scale(.995); } to { opacity: 1; transform: none; } }
@@ -342,7 +342,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .field .select-small, .field .input { font-size: 13px; }
 .field .language-select.select-small { max-width: 180px; }
 .detail-head .pause { width: 56px; height: 28px; }
-.close-details { gap: 6px; }
 .detail-text { padding: 0 16px 12px 44px; display: flex; flex-direction: column; gap: 4px; }
 .detail-text .line-input { width: 100%; min-height: 64px; line-height: 1.55; }
 .detail-head .select-small { height: 28px; padding: 0 6px; }

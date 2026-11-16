@@ -12,7 +12,8 @@ const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
 // Lines longer than this get a note and a "Split" action: models work best with sentence-sized lines.
 const LONG_LINE = 300;
 const SPLIT_SIZE = 250;
-const ICON_EDIT = ["M9 6l6 6-6 6"];
+const ICON_OPEN = ["M6 9l6 6 6-6"]; // chevron down: open the line
+const ICON_CLOSE = ["M6 15l6-6 6 6"]; // chevron up: close it
 
 const textRows = (text) => Math.min(10, Math.max(2, Math.ceil(text.length / 140) + (text.match(/\n/g) || []).length));
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -354,7 +355,8 @@ export async function renderStudio(root) {
       icon(ICONS.trash));
     remove.onclick = () => confirmDeleteLine(remove, line, i);
     right.append(el("div", { class: "pop-holder" }, remove), el("div", { class: "pop-holder" }, more),
-      el("span", { class: "open-hint", "aria-hidden": "true" }, icon(ICON_EDIT, 16)));
+      el("button", { class: "btn btn-ghost icon-btn open-hint", "aria-label": "Open details", title: "Open details",
+        onclick: () => open(line.id) }, icon(ICON_OPEN, 16)));
 
     const long = line.text.length > LONG_LINE;
     const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""}`, "data-line": line.id,
@@ -560,8 +562,8 @@ export async function renderStudio(root) {
       el("label", { class: "row field" }, "Pause", pause, "s"),
       el("div", { class: "spacer" }),
       el("div", { class: "pop-holder" }, deleteButton),
-      el("button", { class: "btn btn-small close-details", "aria-label": "Close details", onclick: close },
-        icon(["M6 15l6-6 6 6"], 12), "Close"));
+      el("button", { class: "btn btn-ghost icon-btn close-details", "aria-label": "Close details", title: "Close (Esc)", onclick: close },
+        icon(ICON_CLOSE, 16)));
     head.addEventListener("click", (e) => { if (e.target === head || e.target.classList.contains("spacer")) close(); });
     const node = el("div", { class: "line-details", "data-line": line.id,
       onkeydown: (e) => { if (e.key === "Escape" && !e.target.closest(".popover")) { e.preventDefault(); close(); } } },
