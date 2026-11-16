@@ -37,19 +37,21 @@ def build_model_row(name):
         status = gr.Markdown(model_status(name))
         install_btn = gr.Button("Install", visible=not installed, scale=0)
         remove_btn = gr.Button("Remove", visible=installed, scale=0)
+        cancel_install_btn = gr.Button("Cancel install", visible=False, scale=0)
     with gr.Group(visible=False) as confirm_box:
         confirm_text = gr.Markdown()
         with gr.Row():
             confirm_btn = gr.Button("Confirm", variant="primary")
             cancel_btn = gr.Button("Cancel")
     progress = gr.Markdown(visible=False)
-    log = gr.Textbox(label="Install log", lines=10, max_lines=10, autoscroll=True, visible=False)
+    with gr.Accordion("Install log", open=False, visible=False) as log_box:
+        log = gr.Textbox(show_label=False, lines=10, max_lines=10, autoscroll=True)
 
     def ask_install():
         text = (
             f"**Install {info['title']}?**\n\n"
             f"- Source: {info['url']}\n"
-            f"- Approximate download: {info['approx_download']}\n"
+            f"- Disk space: about {info['disk_gb']} GB (PyTorch with CUDA, libraries and the model)\n"
             f"- Location: `.local/{name}/`\n"
             f"- License: {info['license']}"
         )
@@ -70,6 +72,7 @@ def build_model_row(name):
             status: model_status(name),
             install_btn: gr.update(visible=not installed),
             remove_btn: gr.update(visible=installed),
+            cancel_install_btn: gr.update(visible=False),
         }
 
     def run(action):
@@ -81,7 +84,10 @@ def build_model_row(name):
         yield {
             confirm_box: gr.update(visible=False),
             progress: gr.update(visible=True, value="Starting..."),
-            log: gr.update(visible=True, value=""),
+            log_box: gr.update(visible=True),
+            log: "",
+            install_btn: gr.update(visible=False),
+            cancel_install_btn: gr.update(visible=True),
         }
         try:
             for kind, text in models.install(name):
@@ -90,14 +96,20 @@ def build_model_row(name):
                 else:
                     log_text += text
                     yield {log: log_text}
+        except models.Cancelled:
+            gr.Info("Install cancelled. Nothing was kept.")
         except Exception as error:
+            yield finished()
             raise gr.Error(f"Install failed: {error}. See the install log.")
         yield finished()
 
     install_btn.click(ask_install, None, [action, confirm_text, confirm_box])
     remove_btn.click(ask_remove, None, [action, confirm_text, confirm_box])
     cancel_btn.click(lambda: gr.update(visible=False), None, confirm_box)
-    confirm_btn.click(run, action, [confirm_box, progress, log, status, install_btn, remove_btn])
+    cancel_install_btn.click(lambda: models.cancel_install(name), None, None)
+    confirm_btn.click(
+        run, action, [confirm_box, progress, log_box, log, status, install_btn, remove_btn, cancel_install_btn]
+    )
 
 
 def generate(mode, ref, text):

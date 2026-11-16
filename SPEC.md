@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.11** (v1.10'a göre: model sayfası bağlantısı; kurulum ilerleme satırı; `--no-cache` yerine model başına uv önbelleği — §6, §6.1).
+> Durum: **v1.12** (v1.11'e göre: kurulum iptali, kurulum sırasında Install gizli, katlanabilir log, ölçülen boyut 11.3 GB ve yüzde — §6.1).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -193,7 +193,12 @@ Boyutlar kodda küçük bir tablodadır ve "yaklaşık" diye etiketlenir.
 - **İlerleme:** uv terminal dışında indirme yüzdesi vermez. Bu yüzden kurulum logunun üstünde 3 sn'de bir
   güncellenen bir satır gösterilir: `Step 2/5: PyTorch with CUDA · 1.42 GB downloaded · 3m 12s`.
   "Downloaded" değeri `.local/<model>/` klasörünün büyüklüğüdür (hard link'ler bir kez sayılır).
-  Gerçek toplam boyut ölçüldükten sonra (plan adım 6) yüzde eklenebilir.
+  Yüzde = bu büyüklük / ölçülen toplam (`disk_gb`, en fazla %99).
+- **Ölçülen boyut:** Chatterbox kurulumu Windows'ta 11.3 GB (onay kutusunda "Disk space" olarak gösterilir).
+- **Kurulum sırasında:** Install/Remove gizlenir, **Cancel install** görünür. İptal birkaç saniye içinde çalışan
+  süreci sonlandırır ve `.local/<model>/` klasörünü siler. Install her zaman önce yarım kalmış bir kurulumun
+  kalıntılarını temizler.
+- Kurulum logu katlanabilir bir bölümdedir (varsayılan kapalı); ilerleme satırı her zaman görünür.
 - Kurulum yarıda kalırsa `.local/<model>/` silinir ve hata gösterilir. Başarılı kurulumun sonunda
   `.local/<model>/installed` işaret dosyası yazılır; "kurulu mu?" kontrolü buna bakar.
 

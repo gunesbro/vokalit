@@ -1,4 +1,5 @@
 """Model install/remove and worker processes. See SPEC.md §5 and §6."""
+import contextlib
 import json
 import os
 import queue
@@ -18,7 +19,7 @@ MODELS = {
     "chatterbox": {
         "title": "Chatterbox Multilingual",
         "url": "https://huggingface.co/ResembleAI/chatterbox",
-        "approx_download": "~6-8 GB (PyTorch with CUDA ~4-5 GB, other libraries, model ~2 GB)",
+        "disk_gb": 11.3,  # measured on Windows (SPEC.md §6.1)
         "license": "MIT",
         "pip_steps": [
             ("PyTorch with CUDA", TORCH_CUDA),
@@ -29,6 +30,11 @@ MODELS = {
 }
 
 _workers = {}
+_cancelled = set()
+
+
+class Cancelled(Exception):
+    pass
 
 
 def model_dir(name):
@@ -87,21 +93,28 @@ def _run(command, env):
         lines.put(None)
 
     threading.Thread(target=read, daemon=True).start()
-    while True:
-        try:
-            line = lines.get(timeout=3)
-        except queue.Empty:
-            yield None
-            continue
-        if line is None:
-            break
-        yield line
-    if process.wait() != 0:
+    try:
+        while True:
+            try:
+                line = lines.get(timeout=3)
+            except queue.Empty:
+                yield None
+                continue
+            if line is None:
+                break
+            yield line
+        returncode = process.wait()
+    finally:
+        if process.poll() is None:  # stopped early (cancel or error)
+            process.kill()
+    if returncode != 0:
         raise RuntimeError(f"Command failed: {' '.join(command)}")
 
 
 def install(name):
-    """Yields ("log", line) and ("status", text). On failure removes the half-installed model and raises."""
+    """Yields ("log", line) and ("status", text). On failure or cancel removes the half-installed model and raises."""
+    remove(name)  # leftovers of an interrupted install
+    _cancelled.discard(name)
     env = _env(name, offline=False)
     # A per-model uv cache: its growth shows download progress, and it is deleted after the install.
     uv_cache = os.path.join(model_dir(name), "uv-cache")
@@ -114,23 +127,33 @@ def install(name):
     try:
         for number, (label, command) in enumerate(steps, 1):
             yield "log", f"--- Step {number}/{len(steps)}: {label}\n"
-            for line in _run(command, env):
-                if line:
-                    yield "log", line
-                now = time.monotonic()
-                if now - last_status >= 3:
-                    last_status = now
-                    elapsed = int(now - started)
-                    yield "status", (
-                        f"Step {number}/{len(steps)}: {label} · {size_gb(name):.2f} GB downloaded · "
-                        f"{elapsed // 60}m {elapsed % 60:02d}s"
-                    )
+            with contextlib.closing(_run(command, env)) as output:
+                for line in output:
+                    if name in _cancelled:
+                        raise Cancelled()
+                    if line:
+                        yield "log", line
+                    now = time.monotonic()
+                    if now - last_status >= 3:
+                        last_status = now
+                        elapsed = int(now - started)
+                        size = size_gb(name)
+                        percent = min(99, int(100 * size / MODELS[name]["disk_gb"]))
+                        yield "status", (
+                            f"Step {number}/{len(steps)}: {label} · {percent}% · "
+                            f"{size:.2f} of ~{MODELS[name]['disk_gb']} GB · {elapsed // 60}m {elapsed % 60:02d}s"
+                        )
     except Exception:
         remove(name)
         raise
     shutil.rmtree(uv_cache, ignore_errors=True)  # the venv keeps its own (hard-linked) copies
     open(_marker(name), "w").close()
     yield "log", f"Done. Disk usage: {size_gb(name):.1f} GB\n"
+
+
+def cancel_install(name):
+    """The running install stops within a few seconds and cleans up."""
+    _cancelled.add(name)
 
 
 def remove(name):
