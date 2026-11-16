@@ -62,3 +62,13 @@ test("splitSentences groups sentences into chunks under the limit", async () => 
   assert.ok(parts.every((p) => p.length <= 120) && parts.join(" ") === long);
   assert.deepEqual(splitSentences("   ", 10), []);
 });
+
+test("findPlayable walks to the next or previous line with a selected take", async () => {
+  const { findPlayable } = await import("../script.js");
+  const lines = [{ selected: "a" }, { selected: null }, { selected: null }, { selected: "d" }];
+  assert.deepEqual(findPlayable(lines, 1, 1), { index: 3, skipped: [1, 2] });
+  assert.deepEqual(findPlayable(lines, 0, 1), { index: 0, skipped: [] });
+  assert.deepEqual(findPlayable(lines, 2, -1), { index: 0, skipped: [2, 1] });
+  assert.deepEqual(findPlayable(lines, 4, 1), { index: -1, skipped: [] });
+  assert.deepEqual(findPlayable([{ selected: null }], 0, 1), { index: -1, skipped: [0] });
+});

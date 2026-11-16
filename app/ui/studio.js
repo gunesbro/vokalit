@@ -2,11 +2,13 @@
 import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
-import { commonLanguages, formatTime, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
+import { commonLanguages, findPlayable, formatTime, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
 import { dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
-import { player, stopAudio } from "./waveform.js";
+import { pauseAll, player, stopAudio } from "./waveform.js";
 
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
+const ICON_PREV = ["M18 6l-8 6 8 6z", "M6 6v12"];
+const ICON_NEXT = ["M6 6l8 6-8 6z", "M18 6v12"];
 const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
 
 // Lines longer than this get a note and a "Split" action: models work best with sentence-sized lines.
@@ -49,7 +51,10 @@ export async function renderStudio(root) {
   const generating = new Map(); // line id -> start time, for the spinner and elapsed seconds
   const pendingText = {}; // line id -> saves typed text not yet sent (the Generate button waits for it)
   // Elapsed time next to every spinner; one ticker for the whole screen.
-  setInterval(() => {
+  const ticker = setInterval(() => {
+    if (!main.isConnected) { stopAll(); clearInterval(ticker); document.removeEventListener("keydown", spaceToggle);
+      document.removeEventListener("vokalit-player-play", onPlayerPlay); return; }
+    paintClock();
     for (const node of main.querySelectorAll(".elapsed[data-start]")) {
       node.textContent = `${Math.floor((Date.now() - Number(node.dataset.start)) / 1000)} s`;
     }
@@ -106,7 +111,7 @@ export async function renderStudio(root) {
         el("button", { class: "btn btn-primary", onclick: newSession }, "New session")));
       return;
     }
-    if (session?.id !== id) { openLine = null; editing = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
+    if (session?.id !== id) { stopAll(); openLine = null; editing = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
     try {
       session = await api("GET", `/api/sessions/${id}`);
     } catch {
@@ -151,6 +156,7 @@ export async function renderStudio(root) {
     const scroll = main.querySelector(".main-body")?.scrollTop || 0;
     main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, script()), footer());
     main.querySelector(".main-body").scrollTop = scroll;
+    paintTransport();
   }
 
   function header() {
@@ -366,7 +372,8 @@ export async function renderStudio(root) {
         onclick: () => open(line.id) }, icon(ICON_OPEN, 16)));
 
     const long = line.text.length > LONG_LINE;
-    const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""} ${justClosed === line.id ? "reopened" : ""}`,
+    const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""} ${justClosed === line.id ? "reopened" : ""} `
+      + `${playback.lineId === line.id ? "now-playing" : ""}`,
       "data-line": line.id,
       title: "Click to edit the line and its takes" },
     handle(line), speaker(line),
@@ -384,6 +391,7 @@ export async function renderStudio(root) {
     const order = session.lines.map((l) => l.id);
     const move = (to) => { close(); api("POST", `/api/sessions/${sid()}/lines/order`, { order: moveLine(order, line.id, order[to], to > i) }).then(apply, fail); };
     return el("div", { class: "menu" },
+      el("button", { class: "menu-item", disabled: !line.selected, onclick: () => { close(); playFrom(i); } }, "Play from here"),
       el("button", { class: "menu-item", onclick: () => { close(); open(line.id); } }, "Edit and takes"),
       el("button", { class: "menu-item", onclick: () => { close(); open(line.id); } }, "Perform this line"),
       el("button", { class: "menu-item", disabled: i === 0, onclick: () => move(i - 1) }, "Move up"),
@@ -878,8 +886,112 @@ export async function renderStudio(root) {
 
   function footer() {
     return el("footer", { class: "main-foot" },
-      batch && el("span", { class: "spinner", "aria-hidden": "true" }), message, el("div", { class: "spacer" }), exportInfo);
+      transport, batch && el("span", { class: "spinner", "aria-hidden": "true" }), message, el("div", { class: "spacer" }), exportInfo);
   }
+
+  // --- Play all: the selected takes in order, with each line's pause between them ------------
+
+  const playback = { lineId: null, audio: null, timer: null, resumeAt: null, paused: false };
+  const transport = el("div", { class: "transport" });
+  const clock = el("span", { class: "num faint small transport-clock" });
+  const lineIndex = (id) => session ? session.lines.findIndex((l) => l.id === id) : -1;
+
+  function stopAll() {
+    playback.audio?.pause();
+    clearTimeout(playback.timer);
+    Object.assign(playback, { lineId: null, audio: null, timer: null, resumeAt: null, paused: false });
+    paintTransport();
+  }
+
+  // Plays the first line with a take at or after `from` (or before it, with step -1).
+  function playAt(from, step = 1) {
+    playback.audio?.pause();
+    clearTimeout(playback.timer);
+    playback.resumeAt = null;
+    const { index, skipped } = findPlayable(session.lines, from, step);
+    if (skipped.length) {
+      const numbers = (step > 0 ? skipped : [...skipped].reverse()).map((n) => n + 1);
+      setMessage(message, `Skipped ${numbers.length > 1 ? "lines" : "line"} ${numbers.join(", ")}: no take yet.`, "warn");
+    }
+    if (index < 0) {
+      if (!skipped.length || step < 0) setMessage(message, step > 0 ? "Reached the end of the script." : "");
+      stopAll();
+      return;
+    }
+    const line = session.lines[index];
+    pauseAll();
+    const audio = new Audio(`/files/sessions/${sid()}/${line.selected}`);
+    Object.assign(playback, { lineId: line.id, audio, paused: false });
+    audio.addEventListener("ended", () => {
+      // Silence for the line's pause, then the next line (looked up again: the script may have changed).
+      playback.timer = setTimeout(() => playAt(lineIndex(line.id) + 1), line.pause_after * 1000);
+      playback.resumeAt = line.id;
+    });
+    audio.play().catch(fail);
+    paintTransport();
+    main.querySelector(`.line[data-line="${line.id}"], .line-details[data-line="${line.id}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function playFrom(index) { playAt(index); }
+
+  function togglePlay() {
+    if (!session) return;
+    if (!playback.lineId) return playAt(0);
+    if (playback.resumeAt) { // paused or waiting in the gap after a line
+      const after = lineIndex(playback.resumeAt);
+      if (playback.timer && !playback.paused) { clearTimeout(playback.timer); playback.timer = null; playback.paused = true; return paintTransport(); }
+      playback.paused = false;
+      return playAt(after + 1);
+    }
+    if (playback.audio.paused) { pauseAll(); playback.audio.play(); playback.paused = false; } else { playback.audio.pause(); playback.paused = true; }
+    paintTransport();
+  }
+
+  function step(delta) {
+    if (!session) return;
+    const at = playback.lineId ? lineIndex(playback.lineId) : -1;
+    playAt(Math.max(0, at + delta), delta);
+  }
+
+  function paintClock() {
+    const a = playback.audio;
+    clock.textContent = a && !playback.resumeAt ? `${formatTime(a.currentTime || 0)} / ${formatTime(a.duration || 0)}` : "";
+  }
+
+  function paintTransport() {
+    const at = playback.lineId ? lineIndex(playback.lineId) : -1;
+    const isPlaying = playback.lineId && !playback.paused;
+    const line = at >= 0 ? session.lines[at] : null;
+    const playable = session?.lines.some((l) => l.selected);
+    transport.replaceChildren(
+      el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Previous line", title: "Previous line",
+        disabled: !playable, onclick: () => step(-1) }, icon(ICON_PREV, 14)),
+      el("button", { class: "btn icon-btn transport-play", "aria-label": isPlaying ? "Pause" : playback.lineId ? "Resume" : "Play all",
+        title: isPlaying ? "Pause (Space)" : "Play all lines in order, with their pauses (Space)", disabled: !playable,
+        onclick: togglePlay }, icon(isPlaying ? ICONS.pause : ICONS.play, 14)),
+      el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Next line", title: "Next line",
+        disabled: !playable, onclick: () => step(1) }, icon(ICON_NEXT, 14)),
+      el("span", { class: "small transport-label" }, line
+        ? `Line ${at + 1}/${session.lines.length} \u00b7 ${line.character_name || "Deleted character"}`
+        : playable ? "Play all" : ""),
+      clock);
+    for (const node of main.querySelectorAll("[data-line]")) {
+      node.classList.toggle("now-playing", node.dataset.line === playback.lineId);
+    }
+    paintClock();
+  }
+
+  // Space plays/pauses, unless you are typing or on a control.
+  function spaceToggle(e) {
+    if (e.key !== " " || e.target.closest?.("input, textarea, select, button, [contenteditable]")) return;
+    e.preventDefault();
+    togglePlay();
+  }
+  document.addEventListener("keydown", spaceToggle);
+  // Playing a single take pauses "Play all" (it can be resumed).
+  const onPlayerPlay = () => { if (playback.lineId && !playback.paused) togglePlay(); };
+  document.addEventListener("vokalit-player-play", onPlayerPlay);
 
   // --- Routing -------------------------------------------------------------------------------
 

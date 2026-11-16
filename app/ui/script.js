@@ -65,3 +65,14 @@ export function splitSentences(text, max) {
   }
   return chunks;
 }
+
+// From line `from`, steps (+1 or -1) to the first line with a selected take.
+// Returns its index (-1 when there is none) and the indexes passed over because they had no take.
+export function findPlayable(lines, from, step) {
+  const skipped = [];
+  for (let i = from; i >= 0 && i < lines.length; i += step) {
+    if (lines[i].selected) return { index: i, skipped };
+    skipped.push(i);
+  }
+  return { index: -1, skipped };
+}

@@ -353,3 +353,11 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .field .select, .field .input { cursor: pointer; }
 .field .input { cursor: text; }
 [hidden] { display: none !important; }
+
+/* Play all */
+.transport { display: flex; align-items: center; gap: 4px; margin-right: 8px; }
+.transport .icon-btn { width: 28px; height: 28px; }
+.transport-play { border-radius: 50%; width: 32px !important; height: 32px !important; border-color: var(--border); }
+.transport-label { color: var(--text); margin-left: 6px; white-space: nowrap; }
+.transport-clock { margin-left: 4px; }
+.line.now-playing, .line-details.now-playing { box-shadow: inset 3px 0 0 var(--accent); background: #1b1813; }

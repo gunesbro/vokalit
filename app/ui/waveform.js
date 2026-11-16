@@ -43,6 +43,11 @@ function sweep() {
 }
 setInterval(sweep, 250);
 
+// Pauses every player (used when "Play all" starts).
+export function pauseAll() {
+  for (const entry of live.values()) entry.audio.pause();
+}
+
 // Stops a file right away (before deleting it).
 export function stopAudio(url) {
   const entry = live.get(url);
@@ -71,6 +76,8 @@ export function player(url, { buckets = 48, selected = false, label = "Play", sh
   audio.addEventListener("loadedmetadata", paint, { signal });
   audio.addEventListener("timeupdate", paint, { signal });
   audio.addEventListener("play", paintButton, { signal });
+  // Lets "Play all" step aside when a single take or sample is played.
+  audio.addEventListener("play", () => document.dispatchEvent(new CustomEvent("vokalit-player-play")), { signal });
   audio.addEventListener("pause", paintButton, { signal });
   audio.addEventListener("ended", () => { audio.currentTime = 0; paint(); }, { signal });
   paint();
