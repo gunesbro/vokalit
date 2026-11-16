@@ -2,7 +2,7 @@
 
 Lokal ses klonlama ve seslendirme karşılaştırma aracı.
 
-> Durum: **v1.5** (v1.4'e göre: mikrofon seçimi ve kaydı dinleme gereksinimi; kriter 13).
+> Durum: **v1.6** (v1.5'e göre: Gradio'nun kırpma aracı yerine kendi kırpma aracımız — §7; repo herkese açık — §5.4; kriter 14–15).
 > Değişiklikler bu dosyada yapılır, sonra koda yansıtılır.
 
 ## 1. Amaç
@@ -15,7 +15,7 @@ Her şey masaüstü penceresinden tıklanarak yapılır.
 
 - İki model: **Chatterbox Multilingual** (Resemble AI) ve **OmniVoice** (k2-fsa).
 - Masaüstü penceresi (Gradio arayüzü + pywebview penceresi):
-  - Referans sesi dosyadan yükleme veya mikrofondan kaydetme; kayıtta mikrofon seçimi ve üretimden önce kaydı dinleme.
+  - Referans sesi dosyadan yükleme veya mikrofondan kaydetme; kayıtta mikrofon seçimi, üretimden önce kaydı dinleme ve kırpma.
   - Okunacak metni girme.
   - İki ses modu:
     - **Clone voice:** referans sesle klonlayarak okutma.
@@ -121,6 +121,17 @@ Ağ yalnızca kullanıcı "Install" düğmesine basıp onay verdiğinde, paket v
   kendi tanılama verisini Microsoft'a gönderebilir; ses içeriği bu kapsamda değildir.
   Bundan kaçınmak isteyen kullanıcı aynı arayüzü kendi tarayıcısında açabilir.
 
+### 5.4 Herkese açık repo
+
+Repo GitHub'da herkese açıktır. Bu yüzden:
+
+- Repoya hiçbir ses dosyası girmez: `.gitignore` yaygın ses biçimlerini (`*.wav`, `*.mp3`, `*.flac`, `*.ogg`, `*.m4a`, `*.webm`) dışlar. `samples/` yalnızca metin içerir.
+- Commit'lerde kişisel e-posta görünmez: katkıda bulunanlara GitHub'ın "Keep my email addresses private" ayarı README'de önerilir.
+- README'de iki bölüm zorunlu:
+  - **Privacy:** veri akışı, ağa çıkılan tek anlar (kurulum: PyPI, Hugging Face, GitHub/uv), kullanıcının kendi doğrulama yöntemi (§5.3), bilinen sınırlar.
+  - **Responsible use:** yalnızca kendi sesini veya izni olan sesleri kullanma; Chatterbox çıktılarındaki filigranın kaldırılmaması; hata bildirirken başkalarının ses kayıtlarını eklememe.
+- Chatterbox'ın PerTh filigranı devre dışı bırakılmaz.
+
 ## 6. Kurulum ve kaldırma
 
 **İlke:** Her şey proje klasöründe kalır. Projeyi silmek her şeyi siler.
@@ -192,6 +203,12 @@ Tüm arayüz metinleri İngilizce (bkz. V2).
 └─────────────────────────────────────────────────────┘
 ```
 
+- Kırpma: Gradio'nun yerleşik kırpma/geri alma düğmeleri kapalıdır (`editable=False`). Yerine:
+  `Start (s)` ve `End (s)` alanları, `Trim` ve `Undo trim` düğmeleri.
+  - Yeni kayıt/yükleme olunca alanlar `0` ve kaydın süresine ayarlanır.
+  - `Trim` seçili aralığı yeni bir wav olarak kaydeder ve oynatıcıda onu gösterir.
+  - `Undo trim` en son yüklenen/kaydedilen orijinal sese döner.
+  - Kırpılan dosyalar da `GRADIO_TEMP_DIR` altına yazılır (§5.3).
 - Clone voice modunda referans 10 sn'den kısaysa "Generate" devre dışı ve uyarı gösterilir.
 - Default voice modunda referans alanları gizlenir, 10 sn kontrolü uygulanmaz.
 - Kurulu olmayan model sonuç bölümünde "not installed" yazar.
@@ -236,7 +253,9 @@ vokalit/
 10. Kod tabanında (`app/`, `workers/`, betikler) Türkçe metin yok — Türkçe karakter araması (`grep -rP "[çğıİöşüÇĞÖŞÜ]"`) yalnızca `samples/` ve dokümanlarda sonuç veriyor.
 11. Modeller kurulduktan sonra ağ bağlantısı kesikken iki mod da iki modelle çalışıyor.
 12. Üretim sırasında `127.0.0.1` dışında hiçbir ağ bağlantısı açılmıyor — Linux'ta `ss -tnp`, Windows'ta Kaynak İzleyicisi > Ağ ile doğrulanır; uygulama kapandıktan sonra sistem geçici klasöründe ses dosyası kalmıyor.
-13. Kayıt alanında bilgisayardaki mikrofonlar listeleniyor ve seçilebiliyor; kayıt durdurulunca kayıt pencerede dinlenebiliyor; temizle (✕) düğmesi kaydı/dosyayı kaldırıyor; Gradio'nun kendi düğmeleri İngilizce ve düzgün görünüyor.
+13. Kayıt alanında bilgisayardaki mikrofonlar listeleniyor ve seçilebiliyor; kayıt durdurulunca kayıt pencerede dinlenebiliyor; temizle (✕) düğmesi kaydı/dosyayı kaldırıyor; "share" düğmesi yok; Gradio'nun kendi düğmeleri İngilizce ve düzgün görünüyor.
+14. Kırpma: `Trim` sonrası oynatıcı yalnızca seçili aralığı çalıyor ve süre güncelleniyor; `Undo trim` orijinale dönüyor; Gradio'nun kendi kırpma araçları görünmüyor.
+15. Repoda ses dosyası yok (`git ls-files | grep -iE "\.(wav|mp3|flac|ogg|m4a|webm)$"` boş) ve README'de Privacy ve Responsible use bölümleri var.
 
 ## 10. Riskler
 

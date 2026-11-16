@@ -1,5 +1,11 @@
 outputs/
 .local/
 __pycache__/
+
+# Never commit voice recordings (public repo).
 *.wav
 *.mp3
+*.flac
+*.ogg
+*.m4a
+*.webm
