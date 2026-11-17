@@ -1,0 +1,18 @@
+"""Stub OmniVoice: the "audio" it returns describes what generate() received."""
+import torch
+
+
+class OmniVoice:
+    @classmethod
+    def from_pretrained(cls, name, device_map=None, dtype=None):
+        print(f"stub omnivoice {name} loaded on {device_map} as {dtype}")
+        return cls()
+
+    def generate(self, text, language=None, ref_text=None, ref_audio=None, speed=None, **kwargs):
+        if ref_audio and not ref_text:
+            print("stub omnivoice would load its own Whisper")
+        if text == "CRASH":
+            raise RuntimeError("CUDA error: device-side assert triggered")
+        extra = "|".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
+        return [f"text={text}|language={language}|ref_audio={ref_audio}|ref_text={ref_text}|speed={speed}|{extra}"
+                f"|seed={torch.last_seed}"]

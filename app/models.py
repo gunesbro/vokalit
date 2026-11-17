@@ -31,6 +31,8 @@ MODELS = {
         "disk_gb": 12.3,  # measured on Windows (SPEC.md §6.1)
         "license": "MIT",
         "supports_convert": True,
+        "supports_tags": False,  # [laughter] and the like would be read aloud: they are removed from its text
+        "needs_transcript": False,
         "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
                       "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
         # When the sample's language differs from the line's, this setting value reduces the carried-over accent
@@ -48,6 +50,30 @@ MODELS = {
             ("PyTorch with CUDA", TORCH_CUDA),
             ("Other libraries", ["-r", os.path.join(ROOT, "workers", "chatterbox", "requirements.txt")]),
             ("Chatterbox", ["--no-deps", "chatterbox-tts==0.1.7"]),
+        ],
+    },
+    "omnivoice": {
+        "title": "OmniVoice",
+        "summary": "600+ languages \u00b7 cloning \u00b7 sound tags",
+        "url": "https://huggingface.co/k2-fsa/OmniVoice",
+        "disk_gb": 9.0,  # estimate until measured on Windows
+        "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
+        "supports_convert": False,
+        "supports_tags": True,
+        "needs_transcript": True,  # it copies a voice from the sample and what is said in it
+        # It speaks 600+ languages; Vokalit lists the ones it has names for.
+        "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
+                      "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
+        "settings": [
+            {"key": "speed", "label": "Speed", "min": 0.5, "max": 2.0, "step": 0.05, "default": 1.0,
+             "help": "Above 1 is faster."},
+            {"key": "num_step", "label": "Quality", "min": 16, "max": 64, "step": 16, "default": 32,
+             "help": "Higher sounds better but takes longer; 16 is quick."},
+        ],
+        "pip_steps": [
+            ("PyTorch with CUDA", TORCH_CUDA),  # the same files as Chatterbox's: shared, not downloaded again
+            ("Other libraries", ["-r", os.path.join(ROOT, "workers", "omnivoice", "requirements.txt")]),
+            ("OmniVoice", ["omnivoice==0.2.1"]),
         ],
     },
 }
@@ -458,12 +484,13 @@ def transcribe(audio, language):
     return {"text": reply["text"], "language": reply.get("language")}
 
 
-def generate(name, text, ref, out, seed, settings, language):
-    """Returns the generation time in seconds."""
+def generate(name, text, ref, out, seed, settings, language, ref_text=None):
+    """Returns the generation time in seconds. `ref_text`: what is said in `ref` (models that need it)."""
     if language not in MODELS[name].get("languages", []):
         raise ValueError(f"{MODELS[name]['title']} does not support {LANGUAGE_NAMES.get(language, language)}.")
     settings = validate_settings(name, settings)
-    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings, "language": language})
+    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings, "language": language,
+                       "ref_text": ref_text})
 
 
 def convert(name, source, ref, out):

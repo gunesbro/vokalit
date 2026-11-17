@@ -139,11 +139,13 @@ def _line_context(session_id, line_id):
     scope = _scope_session(session, line["character"])
     ref = ws.sample_path(line["character"], line["sample"], scope)
     sample = next((s for s in character["samples"] if ref and ref.name == Path(s["file"]).name), None)
-    return session, line, character, ref, (sample["label"] if sample else "default voice")
+    return session, line, character, ref, sample
 
 
 def _generate_line(session_id, line_id, model_names, seed):
-    session, line, character, ref, sample_label = _line_context(session_id, line_id)
+    session, line, character, ref, sample = _line_context(session_id, line_id)
+    sample_label = sample["label"] if sample else "default voice"
+    transcript = sample.get("transcript") if sample else None
     if not line["text"].strip():
         number = next(i for i, l in enumerate(session["lines"], 1) if l["id"] == line_id)
         raise ws.WorkspaceError(f"Line {number} is empty. Write its text first.")
@@ -157,10 +159,15 @@ def _generate_line(session_id, line_id, model_names, seed):
             errors.append(f"{models.MODELS[name]['title']} does not support "
                           f"{models.LANGUAGE_NAMES.get(language, language)}.")
             continue
+        if ref and not transcript and models.MODELS[name].get("needs_transcript"):
+            errors.append(f"{models.MODELS[name]['title']}: This sample has no transcript. Add it on the Characters "
+                          "screen or install Whisper.")
+            continue
         settings = ws.effective_settings(session, line, name, models.default_settings(name))
         out = ws.new_take_path(session_id, line_id, name)
         try:
-            seconds = models.generate(name, line["text"], str(ref) if ref else None, str(out), seed, settings, language)
+            seconds = models.generate(name, line["text"], str(ref) if ref else None, str(out), seed, settings, language,
+                                      ref_text=transcript)
         except Exception as error:
             errors.append(f"{models.MODELS[name]['title']}: {error}")
             continue
@@ -596,7 +603,8 @@ def convert_line(req, sid, lid):
     name = next((n for n in models.MODELS if models.MODELS[n].get("supports_convert") and models.is_installed(n)), None)
     if name is None:
         raise ws.WorkspaceError("Install Chatterbox Multilingual to convert recordings.")
-    _, line, character, ref, sample_label = _line_context(sid, lid)
+    _, line, character, ref, sample = _line_context(sid, lid)
+    sample_label = sample["label"] if sample else "default voice"
     recording = ws.new_recording_path(sid, lid)
     recording.write_bytes(req["raw"])
 

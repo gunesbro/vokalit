@@ -743,7 +743,8 @@ export async function renderStudio(root) {
       el("label", { class: "row field", title: "Who speaks this line. Only characters in the cast are listed." },
         dot(characterColors(line.character)[0], 8), "Character", characterSelect),
       el("label", { class: "row field", title: "Which recording of the voice to clone. Samples recorded in different moods steer "
-        + "the delivery. Without samples the model's default voice is used." }, "Sample", sampleSelect),
+        + "the delivery. Without samples the model's default voice is used (random for OmniVoice unless a seed is set)." },
+        "Sample", sampleSelect),
       el("label", { class: "row field", title: "The language the text is read in. \u201cSession\u201d follows the session's "
         + "language; only languages every selected model supports are listed." }, "Language",
         languageSelect(picker.get(), line.language, (code) => patch({ language: code }), session.language, true)),

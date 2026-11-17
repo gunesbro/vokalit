@@ -1,0 +1,3 @@
+# What the worker itself imports besides omnivoice (whose own dependencies uv resolves). torch is installed first
+# from the CUDA index (SPEC.md §6.1); omnivoice 0.2.1 accepts that build.
+soundfile

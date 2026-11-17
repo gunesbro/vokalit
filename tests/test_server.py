@@ -130,7 +130,7 @@ def test_sample_upload_wav(api, tmp_path):
 def test_generate_job_with_fake_model(api, monkeypatch, tmp_path):
     calls = []
 
-    def fake_generate(name, text, ref, out, seed, settings, language):
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
         calls.append((name, text, ref, seed, settings, language))
         make_wav(out, 1)
         return 0.5
@@ -253,7 +253,7 @@ def test_empty_line_is_not_generated(api, monkeypatch):
 def test_generate_missing_skips_empty_lines(api, monkeypatch):
     generated = []
 
-    def fake_generate(name, text, ref, out, seed, settings, language):
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
         generated.append(text)
         make_wav(out, 1)
         return 0.1
@@ -272,7 +272,7 @@ def test_generate_missing_skips_empty_lines(api, monkeypatch):
 def test_generate_selected_lines(api, monkeypatch):
     generated = []
 
-    def fake_generate(name, text, ref, out, seed, settings, language):
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
         generated.append(text)
         make_wav(out, 1)
         return 0.1
@@ -316,7 +316,7 @@ def test_export_formats_endpoint_and_audio_files(api, monkeypatch, tmp_path):
 
 
 def test_exports_and_trim_endpoints(api, monkeypatch):
-    def fake_generate(name, text, ref, out, seed, settings, language):
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
         make_wav(out, 2)
         return 0.1
 
@@ -340,7 +340,7 @@ def test_exports_and_trim_endpoints(api, monkeypatch):
 
 
 def test_files_deleted_outside_the_app_are_removed(api, monkeypatch, tmp_path):
-    def fake_generate(name, text, ref, out, seed, settings, language):
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
         make_wav(out, 1)
         return 0.1
 
@@ -385,7 +385,7 @@ def test_running_jobs_of_a_session_are_listed(api, monkeypatch):
     import threading
     release = threading.Event()
 
-    def slow_generate(name, text, ref, out, seed, settings, language):
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
         release.wait(5)
         make_wav(out, 1)
         return 0.1
@@ -552,3 +552,50 @@ def test_missing_transcripts_are_written_in_the_background(api, tmp_workspace, t
     assert [s["transcript"] for s in body["samples"]] == ["heard s1.wav", "heard s2.wav"]
     assert [s.get("language") for s in body["samples"]] == ["tr", "en"]  # a chosen language is kept
     assert not any(s.get("transcribing") for s in body["samples"])
+
+
+def test_old_sample_without_transcript_fails_for_omnivoice_only(api, tmp_workspace, monkeypatch, tmp_path):
+    calls = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        calls.append((name, ref_text))
+        make_wav(out, 1)
+        return 0.5
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    cid = ws.create_character("Burak")
+    ws.add_sample(cid, str(make_wav(tmp_path / "old.wav", 11)), "recording")  # saved before transcripts existed
+    _, session, _ = api("POST", "/api/sessions", {"name": "E"})
+    sid = session["id"]
+    api("POST", f"/api/sessions/{sid}/cast", {"character": cid, "scope": "library"})
+    _, line, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "Hello"})
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{line['id']}/generate", {"models": ["chatterbox", "omnivoice"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed"
+    assert "OmniVoice: This sample has no transcript. Add it on the Characters screen or install Whisper." in done["error"]
+    assert calls == [("chatterbox", None)]
+    _, view, _ = api("GET", f"/api/sessions/{sid}")
+    assert [t["model"] for t in view["lines"][0]["takes"]] == ["chatterbox"]
+
+
+def test_transcript_is_sent_with_the_sample(api, monkeypatch, tmp_path):
+    calls = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        calls.append((name, ref_text))
+        make_wav(out, 1)
+        return 0.5
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    _, session, _ = api("POST", "/api/sessions", {"name": "E"})
+    _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
+    sid, cid = session["id"], character["id"]
+    api("POST", f"/api/characters/{cid}/samples?source=upload&transcript=Merhaba", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
+        content_type="audio/wav")
+    api("POST", f"/api/sessions/{sid}/cast", {"character": cid, "scope": "library"})
+    _, line, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "Hello"})
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{line['id']}/generate", {"models": ["omnivoice"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert calls == [("omnivoice", "Merhaba")]

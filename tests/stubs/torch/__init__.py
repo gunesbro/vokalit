@@ -11,3 +11,5 @@ class cuda:
     @staticmethod
     def is_available():
         return True
+
+float16, float32 = "float16", "float32"
