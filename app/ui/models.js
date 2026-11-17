@@ -33,16 +33,21 @@ export async function renderModels(root) {
 
   async function refresh() {
     try {
-      draw(await api("GET", "/api/models"));
+      draw(await api("GET", "/api/components"));
     } catch (error) {
       setMessage(message, error.message, "error");
     }
   }
 
-  function draw(list) {
+  let busyName = null; // an install running on the server (also one started elsewhere): other Installs wait
+
+  function draw({ items, total_gb: total, installing }) {
+    busyName = installing || Object.keys(installs)[0] || null;
     body.replaceChildren(
-      el("div", { class: "table-head" }, el("div", {}, "Model"), el("div", {}, "Status"), el("div", {}, "License"), el("div")),
-      ...list.map(row),
+      el("div", { class: "table-head" }, el("div", {}, "Component"), el("div", {}, "Status"), el("div", {}, "License"), el("div")),
+      ...items.map(row),
+      total ? el("div", { class: "row total-line" }, el("span", { class: "muted" }, "All components"),
+        el("span", { class: "num" }, `${total} GB`)) : null,
       el("p", { class: "muted small" },
         "Sizes are measured on Windows and can differ slightly. The model name links to its page, which lists supported languages."));
   }
@@ -50,11 +55,14 @@ export async function renderModels(root) {
   function row(model) {
     const job = installs[model.name];
     const state = job ? "installing" : model.installed ? "installed" : "";
-    const statusText = job ? installingText(job) : model.installed ? `Installed · frees ${model.frees_gb} GB` : "Not installed";
+    const statusText = job ? installingText(job) : model.installed ? `Installed \u00b7 frees ${model.frees_gb} GB`
+      : `Not installed \u00b7 ~${model.disk_gb} GB`;
     const actions = el("div", { class: "row", style: { justifyContent: "flex-end" } });
     const container = el("div", { class: "table-row", "data-model": model.name },
       el("div", {},
-        el("a", { href: model.url, target: "_blank", rel: "noopener", style: { fontSize: "14px", fontWeight: "600", textDecoration: "none" } }, model.title),
+        el("div", { class: "row" },
+          el("a", { href: model.url, target: "_blank", rel: "noopener", style: { fontSize: "14px", fontWeight: "600", textDecoration: "none" } }, model.title),
+          model.recommended ? el("span", { class: "tag" }, "Recommended") : null),
         el("div", { class: "muted" }, model.summary)),
       el("div", { class: `status ${state}` }, el("span", { class: "dot" }), statusText),
       el("div", { class: "muted" }, model.license),
@@ -66,7 +74,9 @@ export async function renderModels(root) {
     } else if (model.installed) {
       actions.append(el("button", { class: "btn", onclick: () => confirmRemove(container, model) }, "Remove"));
     } else {
-      actions.append(el("button", { class: "btn btn-primary", onclick: () => confirmInstall(container, model) }, "Install"));
+      const waiting = busyName && busyName !== model.name;
+      actions.append(el("button", { class: "btn btn-primary", disabled: Boolean(waiting),
+        title: waiting ? "Another install is running." : "", onclick: () => confirmInstall(container, model) }, "Install"));
     }
     return container;
   }
@@ -101,9 +111,13 @@ export async function renderModels(root) {
       el("div", {},
         el("strong", {}, `Install ${model.title}?`),
         el("ul", {},
-          el("li", {}, `Disk space: about ${model.disk_gb} GB (PyTorch with CUDA, libraries and the model)`),
+          el("li", {}, model.kind === "tool"
+            ? `Disk space: about ${model.disk_gb} GB (the program and its model; runs on the processor)`
+            : `Disk space: about ${model.disk_gb} GB (PyTorch with CUDA, libraries and the model; PyTorch files are shared with other installed models)`),
           el("li", {}, `Location: .local/${model.name}/`),
-          el("li", {}, `License: ${model.license}`),
+          el("li", {}, model.license.startsWith("CC-BY-NC")
+            ? "License: CC-BY-NC \u2014 the model's weights may not be used commercially."
+            : `License: ${model.license}`),
           el("li", {}, "Downloads from PyPI and Hugging Face. Nothing else leaves your computer."))),
       el("div", { class: "spacer" }),
       el("button", { class: "btn", onclick: () => refresh() }, "Cancel"),
