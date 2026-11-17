@@ -224,6 +224,11 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .slider.changed input[type=range] { accent-color: var(--accent); }
 .settings-panel { width: 460px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
 .settings-panel .sliders { grid-template-columns: 1fr; }
+.text-setting { grid-column: 1 / -1; }
+.text-setting .input { width: 100%; }
+.text-setting.changed .input { border-color: var(--accent); }
+.text-setting .suggestions { flex-wrap: wrap; gap: 6px; }
+.suggestion[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
 .settings-foot { margin-top: 14px; }
 .select-small { height: 24px; padding: 0 4px; font-size: 12px; border-radius: 4px; }
 .link-btn { border: none; background: none; padding: 0; font-weight: 500; cursor: pointer; text-decoration: none; color: var(--text); }

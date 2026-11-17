@@ -899,7 +899,9 @@ export async function renderStudio(root) {
         return el("div", {},
           accentNote(line, name),
           sliders(modelInfo(name)?.settings || [], values, base,
-            (spec, value, baseValue) => (value === baseValue ? "Same as session" : `Session: ${Number(baseValue).toFixed(spec.step >= 1 ? 0 : 2)}`),
+            (spec, value, baseValue) => (value === baseValue ? "Same as session"
+              : spec.type === "text" ? (baseValue ? `Session: ${baseValue}` : "Session: none")
+                : `Session: ${Number(baseValue).toFixed(spec.step >= 1 ? 0 : 2)}`),
             (key, value) => {
               const overrides = { ...(line.settings[name] || {}), [key]: value };
               if (value === base[key]) delete overrides[key];

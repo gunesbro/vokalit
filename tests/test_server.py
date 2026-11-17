@@ -753,3 +753,48 @@ def test_components_show_gpu_memory(api, tmp_path, monkeypatch):
     assert items["chatterbox"]["vram_gb"] == 4.1
     assert items["omnivoice"]["vram_gb"] == 2.7
     assert items["whisper"]["vram_gb"] is None
+
+
+STYLE = {"key": "style", "type": "text", "label": "Style", "default": "", "max_length": 200, "help": "",
+         "placeholder": "", "suggestions": [{"label": "Happy", "value": "cheerful"}]}
+
+
+@pytest.fixture
+def text_setting(monkeypatch):
+    monkeypatch.setitem(models.MODELS["chatterbox"], "settings", [*models.MODELS["chatterbox"]["settings"], STYLE])
+
+
+def test_text_setting_is_cleaned(text_setting):
+    assert models.clean_settings("chatterbox", {"style": "  happy (very)\n warm "}) == {"style": "happy very warm"}
+    assert models.clean_settings("chatterbox", {"style": " ( ) "}) == {"style": ""}
+
+
+def test_text_setting_too_long(text_setting):
+    with pytest.raises(ValueError, match="200"):
+        models.clean_settings("chatterbox", {"style": "a" * 201})
+
+
+def test_text_setting_must_be_text(text_setting):
+    with pytest.raises(ValueError):
+        models.clean_settings("chatterbox", {"style": 3})
+
+
+def test_slider_rejects_a_string(api):
+    _, session, _ = api("POST", "/api/sessions", {"name": "E"})
+    status, body, _ = api("PUT", f"/api/sessions/{session['id']}/settings/chatterbox", {"exaggeration": "a"})
+    assert status == 400 and "Expressiveness" in body["error"]
+
+
+def test_line_settings_store_cleaned_text(api, text_setting):
+    sid, lid, _ = _session_with_line(api, "Hello.")
+    status, body, _ = api("PUT", f"/api/sessions/{sid}/lines/{lid}/settings/chatterbox", {"style": "(sad)"})
+    assert status == 200
+    assert ws.load_session(sid)["lines"][0]["settings"]["chatterbox"] == {"style": "sad"}
+
+
+def test_line_text_override_equal_to_session_is_not_stored(api, text_setting):
+    sid, lid, _ = _session_with_line(api, "Hello.")
+    api("PUT", f"/api/sessions/{sid}/settings/chatterbox", {"style": "sad"})
+    status, _, _ = api("PUT", f"/api/sessions/{sid}/lines/{lid}/settings/chatterbox", {"style": "(sad)"})
+    assert status == 200
+    assert "chatterbox" not in ws.load_session(sid)["lines"][0]["settings"]

@@ -87,11 +87,13 @@ export function modelTabs(names, titles, render, key = null) {
   return el("div", {}, names.length > 1 ? bar : null, body);
 }
 
-// One slider per setting. `values` are shown, `base` is what they are compared with.
-// note(spec, value, base) gives the text under a slider. onCommit(key, value) when a slider is released.
+// One control per setting: a slider, or for "text" settings a text box with suggestions. `values` are shown, `base`
+// is what they are compared with. note(spec, value, base) gives the text under a control. onCommit(key, value) when
+// a slider is released or a text is changed.
 export function sliders(schema, values, base, note, onCommit) {
   if (!schema.length) return el("p", { class: "muted small" }, "This model has no generation settings.");
   return el("div", { class: "sliders" }, schema.map((spec) => {
+    if (spec.type === "text") return textSetting(spec, values[spec.key], base[spec.key], note, onCommit);
     const changed = values[spec.key] !== base[spec.key];
     const shown = (v) => Number(v).toFixed(spec.step >= 1 ? 0 : 2); // whole-number settings (steps) without decimals
     const number = el("div", { class: `num ${changed ? "accent" : "muted"}` }, shown(values[spec.key]));
@@ -104,6 +106,24 @@ export function sliders(schema, values, base, note, onCommit) {
       input,
       el("div", { class: "faint small" }, note(spec, values[spec.key], base[spec.key])));
   }));
+}
+
+// A text setting: typing commits on Enter or when the box loses focus; a suggestion commits its value, and clicking
+// the suggestion in use clears the text.
+function textSetting(spec, value, baseValue, note, onCommit) {
+  const commit = (text) => { if (text !== value) onCommit(spec.key, text); };
+  const input = el("input", { class: "input", type: "text", maxlength: spec.max_length, placeholder: spec.placeholder || "",
+    value: value || "", "aria-label": spec.label,
+    onchange: () => commit(input.value.trim()),
+    onkeydown: (e) => { if (e.key === "Enter") input.blur(); } });
+  const suggestions = (spec.suggestions || []).map((s) =>
+    el("button", { class: "btn btn-small suggestion", type: "button", "aria-pressed": String(s.value === value),
+      title: s.value || "No style", onclick: () => commit(s.value === value ? "" : s.value) }, s.label));
+  return el("div", { class: `slider text-setting ${value !== baseValue ? "changed" : ""}`, title: spec.help || "" },
+    el("label", {}, spec.label),
+    input,
+    suggestions.length ? el("div", { class: "row suggestions" }, ...suggestions) : null,
+    el("div", { class: "faint small" }, note(spec, value, baseValue)));
 }
 
 // A menu at the mouse position (right-click). Closes on outside click, Escape or scrolling. Returns close().

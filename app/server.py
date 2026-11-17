@@ -611,8 +611,9 @@ def reset_session_settings(req, sid, model):
 
 @route("PUT", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)/settings/(?P<model>[a-z0-9_-]+)")
 def set_line_settings(req, sid, lid, model):
-    models.validate_settings(model, req["json"])
-    ws.set_line_settings(sid, lid, model, req["json"])
+    overrides = models.clean_settings(model, req["json"])
+    base = ws.effective_settings(ws.load_session(sid), {"settings": {}}, model, models.default_settings(model))
+    ws.set_line_settings(sid, lid, model, {key: value for key, value in overrides.items() if value != base.get(key)})
     return get_session(req, sid)
 
 

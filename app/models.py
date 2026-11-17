@@ -564,15 +564,31 @@ def default_settings(name):
     return {s["key"]: s["default"] for s in MODELS[name]["settings"]}
 
 
-def validate_settings(name, settings):
-    """Fills in defaults. ValueError on a key the model does not declare or a value out of range."""
+def clean_settings(name, settings):
+    """The given settings checked and cleaned, without defaults. ValueError on a key the model does not declare or a
+    bad value. Text settings lose their parentheses (VoxCPM2 reads text in parentheses as an instruction) and extra
+    whitespace."""
     spec = {s["key"]: s for s in MODELS[name]["settings"]}
+    cleaned = {}
     for key, value in settings.items():
         if key not in spec:
             raise ValueError(f"{MODELS[name]['title']} has no setting '{key}'.")
-        if not spec[key]["min"] <= value <= spec[key]["max"]:
-            raise ValueError(f"{spec[key]['label']} must be between {spec[key]['min']} and {spec[key]['max']}.")
-    return {**default_settings(name), **settings}
+        s = spec[key]
+        if s.get("type") == "text":
+            if not isinstance(value, str):
+                raise ValueError(f"{s['label']} must be text.")
+            value = " ".join(re.sub(r"[()]", " ", value).split())
+            if len(value) > s["max_length"]:
+                raise ValueError(f"{s['label']} can be at most {s['max_length']} characters.")
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not s["min"] <= value <= s["max"]:
+            raise ValueError(f"{s['label']} must be between {s['min']} and {s['max']}.")
+        cleaned[key] = value
+    return cleaned
+
+
+def validate_settings(name, settings):
+    """Fills in defaults. ValueError on a key the model does not declare or a bad value (see clean_settings)."""
+    return {**default_settings(name), **clean_settings(name, settings)}
 
 
 class OutOfGpuMemory(RuntimeError):
