@@ -1,0 +1,132 @@
+"""Models share identical package files through one uv cache (hard links); clean-up is automatic."""
+import os
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+os.environ.setdefault("VOKALIT_UV", "uv")
+import models  # noqa: E402
+
+
+@pytest.fixture
+def local(tmp_path, monkeypatch):
+    """Two fake models "a" and "b". Installing links files from the shared cache into the model's venv, as uv does;
+    each package also leaves a downloaded archive in the cache that no venv uses."""
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path))
+    for name, packages in (("a", ["torch", "only-a"]), ("b", ["torch", "only-b"])):
+        monkeypatch.setitem(models.MODELS, name, {"title": name.upper(), "settings": [],
+                                                  "pip_steps": [(p, [p]) for p in packages]})
+    gates = {}  # command word -> Event the fake waits for
+
+    def fake_run(command, env):
+        cache = Path(env["UV_CACHE_DIR"])
+        if command[1] == "venv":
+            Path(command[-1]).mkdir(parents=True)
+        elif command[1] == "pip":
+            package = command[-1]
+            venv = Path(command[command.index("--python") + 1]).parent
+            cache.mkdir(parents=True, exist_ok=True)
+            archive = cache / f"{package}.zip"
+            archive.write_bytes(b"z" * 10)
+            if package in gates:
+                gates[package].wait(5)
+            source = cache / f"{package}.py"
+            if not source.exists():
+                source.write_bytes(package.encode() * 1000)
+            os.link(source, venv / f"{package}.py")
+        else:  # model weights
+            Path(command[0]).parent.joinpath("weights.bin").write_bytes(b"w" * 500)
+        yield "ok\n"
+
+    monkeypatch.setattr(models, "_run", fake_run)
+    monkeypatch.setattr(models, "_python", lambda name: os.path.join(models.model_dir(name), "venv", "python"))
+    yield tmp_path, gates
+    models._join_background()
+
+
+def install(name):
+    list(models.install(name))
+
+
+def test_two_models_share_cache_files(local):
+    tmp_path, _ = local
+    install("a")
+    install("b")
+    shared = Path(models.shared_dir()) / "uv-cache" / "torch.py"
+    assert os.stat(shared).st_nlink == 3
+    sizes = models.sizes()
+    torch_gb = 5000 / 1e9
+    assert sizes["frees"]["a"] == pytest.approx((6000 + 500) / 1e9)  # only-a.py + weights, not torch
+    assert sizes["total_gb"] == pytest.approx((torch_gb * 1e9 + 6000 + 6000 + 1000) / 1e9)
+
+
+def test_remove_keeps_files_another_model_uses(local):
+    install("a")
+    install("b")
+    models.remove("a")
+    models._join_background()
+    kept = Path(models.model_dir("b")) / "venv" / "torch.py"
+    assert kept.read_bytes() == b"torch" * 1000
+    assert os.stat(kept).st_nlink == 2
+    cache = Path(models.shared_dir()) / "uv-cache"
+    assert not (cache / "only-a.py").exists()
+    assert not list(cache.glob("*.zip"))
+
+
+def test_last_remove_deletes_the_shared_folder(local):
+    install("a")
+    install("b")
+    models.remove("a")
+    models.remove("b")
+    models._join_background()
+    assert not os.path.exists(models.shared_dir())
+
+
+def test_cleanup_waits_for_a_running_install(local):
+    _, gates = local
+    gates["only-a"] = threading.Event()
+    runner = threading.Thread(target=install, args=("a",))
+    runner.start()
+    archive = Path(models.shared_dir()) / "uv-cache" / "only-a.zip"
+    for _ in range(100):
+        if archive.exists():
+            break
+        time.sleep(0.02)
+    cleaner = threading.Thread(target=models.clean_shared_cache)
+    cleaner.start()
+    cleaner.join(0.3)
+    assert cleaner.is_alive() and archive.exists()  # a fresh download is not deleted before uv links it
+    gates["only-a"].set()
+    runner.join(5)
+    cleaner.join(5)
+    assert not cleaner.is_alive()
+    assert (Path(models.model_dir("a")) / "venv" / "only-a.py").exists()
+
+
+def test_second_install_is_refused(local):
+    first = models.install("a")
+    next(first)
+    try:
+        assert models.installing() == "a"
+        with pytest.raises(RuntimeError, match="Another install is running"):
+            install("b")
+    finally:
+        first.close()
+    assert models.installing() is None
+
+
+def test_downloaded_archives_are_cleaned_after_install(local):
+    install("a")
+    cache = Path(models.shared_dir()) / "uv-cache"
+    assert not list(cache.glob("*.zip"))
+    assert (cache / "torch.py").exists()
+
+
+def test_sizes_are_read_from_the_file_without_walking(local, monkeypatch):
+    install("a")
+    walks = []
+    monkeypatch.setattr(models, "_walk_sizes", lambda: walks.append(1) or {"frees": {}, "total_gb": 0})
+    models.sizes()
+    assert walks == []

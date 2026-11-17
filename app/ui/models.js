@@ -50,7 +50,7 @@ export async function renderModels(root) {
   function row(model) {
     const job = installs[model.name];
     const state = job ? "installing" : model.installed ? "installed" : "";
-    const statusText = job ? installingText(job) : model.installed ? `Installed · ${model.size_gb} GB` : "Not installed";
+    const statusText = job ? installingText(job) : model.installed ? `Installed · frees ${model.frees_gb} GB` : "Not installed";
     const actions = el("div", { class: "row", style: { justifyContent: "flex-end" } });
     const container = el("div", { class: "table-row", "data-model": model.name },
       el("div", {},
@@ -114,7 +114,7 @@ export async function renderModels(root) {
     container.querySelector(".confirm")?.remove();
     container.append(el("div", { class: "confirm" },
       el("div", {}, el("strong", {}, `Remove ${model.title}?`), " ",
-        el("span", { class: "muted" }, `This permanently deletes .local/${model.name}/ and frees ${model.size_gb} GB.`)),
+        el("span", { class: "muted" }, `This permanently deletes .local/${model.name}/ and frees ${model.frees_gb} GB.`)),
       el("div", { class: "spacer" }),
       el("button", { class: "btn", onclick: () => refresh() }, "Keep"),
       el("button", { class: "btn btn-danger", onclick: (event) => {

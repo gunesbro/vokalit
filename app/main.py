@@ -50,6 +50,7 @@ def _windows_window_icon(window):
 def main():
     shutil.rmtree(workspace.workspace_root() / ".tmp", ignore_errors=True)  # leftovers from a crash
     models.delete_removed()
+    models._start_background(models.clean_shared_cache)  # e.g. after an install the app was closed during
     url, _ = server.start(UI_DIR)
     _windows_app_id()
     window = webview.create_window("Vokalit", url, width=1440, height=900, min_size=(1100, 700),

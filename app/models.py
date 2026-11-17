@@ -81,31 +81,77 @@ def is_installed(name):
     return os.path.exists(_marker(name))
 
 
-def installed_size_gb(name):
-    """Disk use of an installed model. Measured once at install and kept in the marker file: walking tens of
-    thousands of files on every request made the Models and Studio screens slow."""
-    try:
-        with open(_marker(name), encoding="utf-8") as f:
-            return float(f.read().strip())
-    except ValueError:  # installed before sizes were stored
-        size = round(size_gb(name), 2)
-        with open(_marker(name), "w", encoding="utf-8") as f:
-            f.write(f"{size:.2f}")
-        return size
+def shared_dir():
+    """Package files several components can share: one uv cache, hard-linked into each venv (SPEC.md \u00a76)."""
+    return os.path.join(LOCAL, "shared")
+
+
+def _components():
+    return list(MODELS)
+
+
+def _inodes(folder):
+    """{(dev, inode): (size, links, occurrences in folder)}"""
+    found = {}
+    for path, _, files in os.walk(folder):
+        for file in files:
+            try:
+                stat = os.lstat(os.path.join(path, file))
+            except FileNotFoundError:  # a temporary file removed meanwhile
+                continue
+            key = (stat.st_dev, stat.st_ino)
+            size, links, count = found.get(key, (stat.st_size, stat.st_nlink, 0))
+            found[key] = (size, links, count + 1)
+    return found
+
+
+def _size_gb(*folders):
+    seen = {}
+    for folder in folders:
+        seen.update(_inodes(folder))
+    return sum(size for size, _, _ in seen.values()) / 1e9
 
 
 def size_gb(name):
-    seen, total = set(), 0
-    for folder, _, files in os.walk(model_dir(name)):
-        for file in files:
-            try:
-                stat = os.lstat(os.path.join(folder, file))
-            except FileNotFoundError:  # a temporary file removed during an install
-                continue
-            if (stat.st_dev, stat.st_ino) not in seen:  # hard links count once
-                seen.add((stat.st_dev, stat.st_ino))
-                total += stat.st_size
-    return total / 1e9
+    return _size_gb(model_dir(name))
+
+
+def _walk_sizes():
+    """What removing each installed component frees (its files no other component links to), and the total."""
+    cache = _inodes(shared_dir())
+    frees, everything = {}, dict(cache)
+    for name in _components():
+        if not is_installed(name):
+            continue
+        own = _inodes(model_dir(name))
+        everything.update(own)
+        frees[name] = sum(size for key, (size, links, count) in own.items()
+                          if count + cache.get(key, (0, 0, 0))[2] >= links) / 1e9
+    return {"frees": frees, "total_gb": sum(size for size, _, _ in everything.values()) / 1e9}
+
+
+_sizes_lock = threading.Lock()
+
+
+def refresh_sizes():
+    with _sizes_lock:
+        result = _walk_sizes()
+        os.makedirs(LOCAL, exist_ok=True)
+        with open(os.path.join(LOCAL, "sizes.json"), "w", encoding="utf-8") as f:
+            json.dump(result, f)
+        return result
+
+
+def sizes():
+    """Measured after installs and removes; walking tens of thousands of files on every request was slow."""
+    try:
+        with open(os.path.join(LOCAL, "sizes.json"), encoding="utf-8") as f:
+            result = json.load(f)
+        if all(name in result["frees"] for name in _components() if is_installed(name)):
+            return result
+    except (FileNotFoundError, ValueError, KeyError):
+        pass
+    return refresh_sizes()
 
 
 def _env(name, offline):
@@ -156,25 +202,51 @@ def _kill_tree(process):
         process.wait(timeout=5)
 
 
+_install_lock = threading.Lock()  # one install at a time; the cache clean-up waits for it
+_installing = None
+
+
+def installing():
+    return _installing
+
+
 def install(name):
-    """Yields ("log", line) and ("status", text). On failure or cancel removes the half-installed model and raises."""
+    """Yields ("log", line) and ("status", text). On failure or cancel removes the half-installed component and
+    raises. Afterwards, unused cache files are deleted and sizes measured."""
+    global _installing
+    if not _install_lock.acquire(blocking=False):
+        raise RuntimeError("Another install is running. Wait for it to finish.")
+    _installing = name
+    try:
+        yield from _install(name)
+    finally:
+        _installing = None
+        _install_lock.release()
+        clean_shared_cache()
+        refresh_sizes()
+
+
+def _install(name):
     _wait_for_delete(model_dir(name))
-    remove(name)  # leftovers of an interrupted install
+    remove(name, maintain=False)  # leftovers of an interrupted install
     _wait_for_delete(model_dir(name))
     _cancelled.discard(name)
     env = _env(name, offline=False)
-    # A per-model uv cache: its growth shows download progress, and it is deleted after the install.
-    uv_cache = os.path.join(model_dir(name), "uv-cache")
-    env["UV_CACHE_DIR"] = uv_cache
+    # One cache for every component: uv hard-links its files into each venv, so identical packages (PyTorch) are
+    # stored once.
+    env["UV_CACHE_DIR"] = os.path.join(shared_dir(), "uv-cache")
+    env["UV_LINK_MODE"] = "hardlink"
     steps = [("Python environment", [UV, "venv", "--python", "3.11", os.path.join(model_dir(name), "venv")])]
     for label, args in MODELS[name]["pip_steps"]:
         steps.append((label, [UV, "pip", "install", "--python", _python(name), *args]))
     steps.append(("Model weights", [_python(name), _worker_script(name), "--download"]))
     started = time.monotonic()
+    cache_at_start = _size_gb(shared_dir())
 
     def status(number, label):
         elapsed = int(time.monotonic() - started)
-        return "status", (f"Step {number}/{len(steps)}: {label} \u00b7 {size_gb(name):.2f} GB on disk \u00b7 "
+        size = max(0.0, _size_gb(model_dir(name), shared_dir()) - cache_at_start)
+        return "status", (f"Step {number}/{len(steps)}: {label} \u00b7 {size:.2f} GB on disk \u00b7 "
                           f"{elapsed // 60}m {elapsed % 60:02d}s")
 
     try:
@@ -191,14 +263,12 @@ def install(name):
                     if time.monotonic() - last_status >= 3:
                         last_status = time.monotonic()
                         yield status(number, label)
-    except Exception:
-        remove(name)
+    except BaseException:  # also GeneratorExit: a closed install leaves nothing half-done
+        remove(name, maintain=False)
         raise
-    shutil.rmtree(uv_cache, ignore_errors=True)  # the venv keeps its own (hard-linked) copies
-    size = round(size_gb(name), 2)
-    with open(_marker(name), "w", encoding="utf-8") as f:
-        f.write(f"{size:.2f}")
-    yield "log", f"Done. Disk usage: {size:.1f} GB\n"
+    with open(_marker(name), "w", encoding="utf-8"):
+        pass
+    yield "log", "Done.\n"
 
 
 def cancel_install(name):
@@ -206,9 +276,9 @@ def cancel_install(name):
     _cancelled.add(name)
 
 
-def remove(name):
+def remove(name, maintain=True):
     """Deleting tens of thousands of files takes minutes on Windows, so the folder is renamed (instant) and
-    deleted in the background."""
+    deleted in the background; then unused cache files are deleted and sizes measured (`maintain`)."""
     stop(name)
     folder = model_dir(name)
     if not os.path.exists(folder):
@@ -224,22 +294,60 @@ def remove(name):
             time.sleep(0.25)
     else:
         trash = folder  # still locked: delete it in place; an install waits for that (_wait_for_delete)
-    _delete_in_background(trash)
+    _delete_in_background(trash, maintain)
 
 
 _deleting = {}  # folder -> thread deleting it in place
+_background = []  # every maintenance thread, so tests can wait for them
 
 
-def _delete_in_background(path):
-    thread = threading.Thread(target=shutil.rmtree, args=(path,), kwargs={"ignore_errors": True}, daemon=True)
-    _deleting[path] = thread
+def _start_background(target, *args):
+    thread = threading.Thread(target=target, args=args, daemon=True)
+    _background.append(thread)
     thread.start()
+    return thread
+
+
+def _join_background():
+    while _background:
+        _background.pop().join()
+
+
+def _delete(path, maintain):
+    shutil.rmtree(path, ignore_errors=True)
+    if maintain:
+        clean_shared_cache()
+        refresh_sizes()
+
+
+def _delete_in_background(path, maintain=False):
+    _deleting[path] = _start_background(_delete, path, maintain)
 
 
 def _wait_for_delete(path):
     thread = _deleting.pop(path, None)
     if thread:
         thread.join()
+
+
+def clean_shared_cache():
+    """Deletes cache files no venv uses any more (link count 1: downloaded archives, packages of removed
+    components), and the whole shared folder once nothing is installed. Waits for a running install, whose fresh
+    downloads are not linked yet."""
+    with _install_lock:
+        folder = shared_dir()
+        if not any(is_installed(name) for name in _components()):
+            shutil.rmtree(folder, ignore_errors=True)
+            return
+        for path, dirs, files in os.walk(folder, topdown=False):
+            for file in files:
+                full = os.path.join(path, file)
+                with contextlib.suppress(OSError):
+                    if os.lstat(full).st_nlink == 1:
+                        os.remove(full)
+            with contextlib.suppress(OSError):
+                if path != folder:
+                    os.rmdir(path)  # only when empty
 
 
 def delete_removed():

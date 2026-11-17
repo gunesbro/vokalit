@@ -19,20 +19,6 @@ def _fake_install(tmp_path, monkeypatch, marker_text):
     return walks
 
 
-def test_installed_size_comes_from_the_marker(tmp_path, monkeypatch):
-    walks = _fake_install(tmp_path, monkeypatch, "11.30")
-    assert models.installed_size_gb("chatterbox") == 11.3
-    assert walks == []
-
-
-def test_old_marker_is_measured_once(tmp_path, monkeypatch):
-    walks = _fake_install(tmp_path, monkeypatch, "")
-    first = models.installed_size_gb("chatterbox")
-    second = models.installed_size_gb("chatterbox")
-    assert first == second
-    assert walks == ["chatterbox"]
-
-
 def test_gpu_name_runs_nvidia_smi_once(monkeypatch):
     calls = []
 
@@ -62,7 +48,7 @@ def test_character_list_reads_sessions_once(tmp_workspace, monkeypatch):
 def test_remove_returns_before_the_files_are_deleted(tmp_path, monkeypatch):
     _fake_install(tmp_path, monkeypatch, "1.00")
     deleted = []
-    monkeypatch.setattr(models, "_delete_in_background", lambda path: deleted.append(path))
+    monkeypatch.setattr(models, "_delete_in_background", lambda path, maintain=False: deleted.append(path))
 
     models.remove("chatterbox")
 
@@ -93,7 +79,7 @@ def test_remove_does_not_wait_when_a_file_is_still_locked(tmp_path, monkeypatch)
     monkeypatch.setattr(models.os, "rename", lambda *a: (_ for _ in ()).throw(PermissionError()))
     monkeypatch.setattr(models.time, "sleep", lambda s: None)
     deleted = []
-    monkeypatch.setattr(models, "_delete_in_background", lambda path: deleted.append(path))
+    monkeypatch.setattr(models, "_delete_in_background", lambda path, maintain=False: deleted.append(path))
 
     models.remove("chatterbox")
 

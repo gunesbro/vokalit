@@ -91,7 +91,7 @@ def _model_view(name):
     return {"name": name, "title": info["title"], "summary": info["summary"], "url": info["url"],
             "license": info["license"],
             "disk_gb": info["disk_gb"], "installed": installed,
-            "size_gb": round(models.installed_size_gb(name), 1) if installed else None,
+            "frees_gb": round(models.sizes()["frees"].get(name, 0.0), 1) if installed else None,
             "settings": info["settings"], "supports_convert": info.get("supports_convert", False),
             "languages": [{"code": c, "name": models.LANGUAGE_NAMES[c]} for c in info.get("languages", [])],
             "accent_setting": info.get("accent_setting")}
