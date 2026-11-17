@@ -89,11 +89,12 @@ export function modelTabs(names, titles, render, key = null) {
 
 // One control per setting: a slider, or for "text" settings a text box with suggestions. `values` are shown, `base`
 // is what they are compared with. note(spec, value, base) gives the text under a control. onCommit(key, value) when
-// a slider is released or a text is changed.
-export function sliders(schema, values, base, note, onCommit) {
+// a slider is released or a text is changed. `scope` names where the controls are (e.g. "line:l3:voxcpm"), so a text
+// being typed survives the Studio redrawing.
+export function sliders(schema, values, base, note, onCommit, scope = "") {
   if (!schema.length) return el("p", { class: "muted small" }, "This model has no generation settings.");
   return el("div", { class: "sliders" }, schema.map((spec) => {
-    if (spec.type === "text") return textSetting(spec, values[spec.key], base[spec.key], note, onCommit);
+    if (spec.type === "text") return textSetting(spec, values[spec.key], base[spec.key], note, onCommit, `${scope}:${spec.key}`);
     const changed = values[spec.key] !== base[spec.key];
     const shown = (v) => Number(v).toFixed(spec.step >= 1 ? 0 : 2); // whole-number settings (steps) without decimals
     const number = el("div", { class: `num ${changed ? "accent" : "muted"}` }, shown(values[spec.key]));
@@ -108,18 +109,36 @@ export function sliders(schema, values, base, note, onCommit) {
   }));
 }
 
-// A text setting: typing commits on Enter or when the box loses focus; a suggestion commits its value, and clicking
+// Text typed into a text setting but not saved yet, and the text setting that has the focus. The Studio redraws after
+// every job; the new text box takes both over, so nothing typed is lost.
+const drafts = new Map();
+let focusedText = null;
+
+// A text setting: typing is saved on Enter or when the box loses the focus; a suggestion saves its value, and clicking
 // the suggestion in use clears the text.
-function textSetting(spec, value, baseValue, note, onCommit) {
-  const commit = (text) => { if (text !== value) onCommit(spec.key, text); };
+function textSetting(spec, value, baseValue, note, onCommit, id) {
+  const commit = (text) => { drafts.delete(id); if (text !== value) onCommit(spec.key, text); };
+  const shown = drafts.has(id) ? drafts.get(id) : value || "";
   const input = el("input", { class: "input", type: "text", maxlength: spec.max_length, placeholder: spec.placeholder || "",
-    value: value || "", "aria-label": spec.label,
-    onchange: () => commit(input.value.trim()),
+    value: shown, "aria-label": spec.label,
+    oninput: () => { drafts.set(id, input.value); focusedText = id; },  // typing means it has the focus
+    onfocus: () => { focusedText = id; },
+    onblur: () => {
+      if (focusedText === id) focusedText = null;
+      if (drafts.has(id)) commit(input.value.trim());
+    },
     onkeydown: (e) => { if (e.key === "Enter") input.blur(); } });
+  if (focusedText === id) {
+    setTimeout(() => {  // once the redrawn Studio is on the page
+      if (!input.isConnected) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  }
   const suggestions = (spec.suggestions || []).map((s) =>
     el("button", { class: "btn btn-small suggestion", type: "button", "aria-pressed": String(s.value === value),
       title: s.value || "No style", onclick: () => commit(s.value === value ? "" : s.value) }, s.label));
-  return el("div", { class: `slider text-setting ${value !== baseValue ? "changed" : ""}`, title: spec.help || "" },
+  return el("div", { class: `slider text-setting ${shown !== baseValue ? "changed" : ""}`, title: spec.help || "" },
     el("label", {}, spec.label),
     input,
     suggestions.length ? el("div", { class: "row suggestions" }, ...suggestions) : null,

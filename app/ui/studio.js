@@ -346,7 +346,7 @@ export async function renderStudio(root) {
         return el("div", {},
           sliders(modelInfo(name)?.settings || [], values, base, (spec) => spec.help, (key, value) =>
             api("PUT", `/api/sessions/${sid()}/settings/${name}`, { ...values, [key]: value })
-              .then((data) => { session = data; paint(); }, fail)),
+              .then((data) => { session = data; paint(); }, fail), `session:${name}`),
           el("div", { class: "row settings-foot" },
             el("div", { class: "muted small" }, "Default for every line in this session. Lines can override them."),
             el("div", { class: "spacer" }),
@@ -906,7 +906,7 @@ export async function renderStudio(root) {
               const overrides = { ...(line.settings[name] || {}), [key]: value };
               if (value === base[key]) delete overrides[key];
               api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${name}`, overrides).then(apply, fail);
-            }),
+            }, `line:${line.id}:${name}`),
           el("div", { class: "row settings-foot" },
             el("div", { class: "spacer" }),
             el("button", { class: "btn btn-small", disabled: !own,

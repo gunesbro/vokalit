@@ -11,7 +11,8 @@ class VoxCPM:
 
     @classmethod
     def from_pretrained(cls, hf_model_id="openbmb/VoxCPM2", load_denoiser=True, **kwargs):
-        print(f"stub voxcpm {hf_model_id} denoiser={load_denoiser}")
+        print(f"stub voxcpm {hf_model_id} denoiser={load_denoiser} device={kwargs.get('device')} "
+              f"optimize={kwargs.get('optimize', True)}")
         return cls()
 
     def generate(self, text, reference_wav_path=None, cfg_value=None, inference_timesteps=None, **kwargs):

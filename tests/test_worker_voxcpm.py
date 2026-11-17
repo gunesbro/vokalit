@@ -50,6 +50,11 @@ def test_download_loads_without_denoiser(installed):
     assert "stub voxcpm openbmb/VoxCPM2 denoiser=False" in log
 
 
+def test_download_stays_off_the_gpu(installed):
+    log, _ = installed
+    assert "denoiser=False device=cpu optimize=False" in log
+
+
 def test_style_is_sent_in_parentheses(installed):
     _, local = installed
     text = _generate(local, "style", "Merhaba.", style="cheerful, warm", cfg_value=2.5, inference_timesteps=12)

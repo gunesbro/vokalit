@@ -47,7 +47,8 @@ def main():
     if "--download" in sys.argv:
         from voxcpm import VoxCPM
 
-        VoxCPM.from_pretrained(MODEL, load_denoiser=False)
+        # On the CPU and without compiling: the GPU may be busy with other models while this one installs.
+        VoxCPM.from_pretrained(MODEL, load_denoiser=False, device="cpu", optimize=False)
         return
 
     block_network()  # before any library is imported
