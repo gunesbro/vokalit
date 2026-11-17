@@ -9,13 +9,15 @@ Your voice, your text and the generated audio never leave your machine.
 ![The Studio: a script with several characters, takes for each line, and Play all](docs/images/studio.png)
 
 - **Studio** — sessions with a cast of characters and a script. Generate one or more takes per line, pick the best,
-  trim it, listen to the whole script with *Play all*, and export it as one file (WAV, FLAC, MP3 or OGG).
+  trim it, listen to the whole script with *Play all*, and export it as one file (WAV, FLAC, MP3 or OGG). Lines made
+  by different models are joined at the highest sample rate among them.
 - **Characters** — a library of reusable voices. Each character can have several samples (e.g. *calm*, *excited*, or
   one per language), recorded in the app or uploaded, and trimmed before saving.
-- **Models** — install and remove open models with one click. Size, location and license are shown before anything
-  is downloaded, and *Remove* frees all of it.
+- **Models** — install and remove open models with one click. Size, GPU memory, location and license are shown
+  before anything is downloaded, and *Remove* frees all of it.
 - **Generation settings** — per model, at three levels: model defaults → session → line. A seed makes a take
-  reproducible.
+  reproducible. VoxCPM2 also takes a *Style*: a few words on how the line is said (type them or pick Happy, Sad,
+  Calm, …).
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.
@@ -53,6 +55,7 @@ before downloading anything. Each model goes into its own folder under `.local/`
 | [Whisper](https://github.com/SYSTRAN/faster-whisper) (optional, recommended) — writes sample transcripts, runs on the CPU | ~100 | ~1.7 GB | MIT |
 | [Chatterbox Multilingual](https://huggingface.co/ResembleAI/chatterbox) (Resemble AI) | 23 | ~12.3 GB (measured on Windows) | MIT |
 | [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) (k2-fsa) — cloning, sound tags | 646 | ~9 GB, less when Chatterbox is installed | Code Apache 2.0; **weights CC-BY-NC: no commercial use** |
+| [VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) (OpenBMB) — cloning, style instructions, 48 kHz | 30 | ~13.6 GB (measured on Windows), less when another model is installed | Apache 2.0 |
 
 Each component has its own environment, so one model's packages can never break another's. Identical files — above
 all PyTorch with CUDA, about 5 GB — are stored once and shared between models; files nothing uses any more are
@@ -64,7 +67,8 @@ data, and no paid license is offered.
 ## Requirements
 
 - **NVIDIA GPU** with an up-to-date driver that supports CUDA 12.8. RTX 20 series or newer is a safe choice; RTX 50
-  series is supported. Chatterbox needs about 4 GB of video memory.
+  series is supported. Video memory: Chatterbox about 4 GB, OmniVoice about 2.7 GB, VoxCPM2 about 8.4 GB (shown on the
+  Models screen). Models left unused for 5 minutes are unloaded, and others are unloaded when one needs room.
 - **Windows 10/11** (tested) or **Linux** (less tested).
 - An internet connection only while installing. Nothing else needs to be installed beforehand: Vokalit downloads its
   own Python and packages into its folder, and the models are installed later from inside the app.

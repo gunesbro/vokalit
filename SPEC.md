@@ -15,8 +15,9 @@ file. Everything is done by clicking in a desktop window.
 
 ## 2. Scope (v2)
 
-- Models: **Chatterbox Multilingual** (Resemble AI) and **OmniVoice** (k2-fsa); the optional **Whisper** component
-  (faster-whisper on the CPU) writes sample transcripts. Design: `docs/superpowers/specs/2026-11-17-omnivoice-design.md`.
+- Models: **Chatterbox Multilingual** (Resemble AI), **OmniVoice** (k2-fsa) and **VoxCPM2** (OpenBMB); the optional
+  **Whisper** component (faster-whisper on the CPU) writes sample transcripts. Designs:
+  `docs/superpowers/specs/2026-11-17-omnivoice-design.md`, `docs/superpowers/specs/2026-11-17-voxcpm2-design.md`.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
   - A line's text is edited in our own small editor: plain text with sound tags shown as chips (× removes one,
     typed `[laughter]` becomes a chip, paste is plain text, own undo history). Stored text keeps canonical tags;
@@ -27,10 +28,15 @@ file. Everything is done by clicking in a desktop window.
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
     generation settings at three levels (model defaults → session → line); voice conversion ("Perform this line");
     export of the selected takes to one file (WAV always; FLAC, MP3 and OGG Vorbis when the computer's libsndfile can
-    write them). Export is enabled once every line has a take.
+    write them). Export is enabled once every line has a take. Takes at a lower sample rate are converted to the
+    highest one among the lines (linear interpolation), since VoxCPM2 writes 48 kHz and the others 24 kHz.
+  - Settings are sliders (`min`, `max`, `step`) or, with `"type": "text"`, a text box (`max_length`, `placeholder`,
+    `suggestions` as buttons that fill it). `models.clean_settings` checks them; text loses parentheses and extra
+    whitespace. A line override equal to the session's value is not stored.
   - **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
     before saving). Session-only characters can be saved to the library.
-  - **Models:** install / remove with size, location and license shown first; progress and a collapsible log.
+  - **Models:** install / remove with size, GPU memory (`vram_gb`), location and license shown first; progress and a
+    collapsible log.
 - Hardware: **NVIDIA GPU (CUDA)**. Operating systems: Windows 10/11 and Linux.
 - License: **MIT** (free use, including commercial; copies keep the copyright and license notice). It covers this
   repository's code only; models and libraries keep their own licenses.
@@ -47,20 +53,20 @@ file. Everything is done by clicking in a desktop window.
 
 ## 4. Models
 
-| | Chatterbox Multilingual | OmniVoice |
-|---|---|---|
-| Languages | 23 (Turkish via `language_id="tr"`) | 646, from its `utils/lang_map.py` (kept in `app/omnivoice_languages.json`); Vokalit's `ar` is sent as `arb` |
-| Size | ~500M parameters | ~0.6B parameters |
-| Measured disk use | 12.3 GB on Windows (libraries + weights) | ~9 GB estimate; PyTorch is shared with Chatterbox |
-| VRAM | ~4.1 GB (measured, Windows) | ~2.6 GB (measured, Windows) |
-| Reference | Audio file | Audio file + its transcript (`needs_transcript`; stored with every sample) |
-| Sound tags (`[laughter]`, `[sigh]`, …) | No: removed from its text | Yes (`sounds`: each tag as itself) |
-| Code license | MIT | Apache 2.0 |
-| **Weights license** | MIT | **CC-BY-NC (no commercial use)** |
-| Without a reference | Built-in default voice | "Auto Voice": random unless a seed is set |
-| Settings | Expressiveness, Pace control, Variation | Speed, Quality (diffusion steps, any whole number 16–64) |
-| Voice conversion | Yes (`ChatterboxVC`) | No |
-| Note | Adds a PerTh watermark to outputs | |
+| | Chatterbox Multilingual | OmniVoice | VoxCPM2 |
+|---|---|---|---|
+| Languages | 23 (Turkish via `language_id="tr"`) | 646, from its `utils/lang_map.py` (kept in `app/omnivoice_languages.json`); Vokalit's `ar` is sent as `arb` | 30 (from the model card; no language argument, it reads the text) |
+| Size | ~500M parameters | ~0.6B parameters | 2B parameters |
+| Measured disk use | 12.3 GB on Windows (libraries + weights) | ~9 GB estimate; PyTorch is shared with Chatterbox | 13.6 GB on Windows (8.6 GB environment, PyTorch shared; 5.0 GB weights) |
+| VRAM | ~4.1 GB (measured, Windows) | ~2.6 GB (measured, Windows) | ~8.4 GB (measured, Windows: 5.8 GB loaded, 8.3 GB peak) |
+| Reference | Audio file | Audio file + its transcript (`needs_transcript`; stored with every sample) | Audio file (`reference_wav_path`; no transcript, the mode its style instructions work in) |
+| Sound tags (`[laughter]`, `[sigh]`, …) | No: removed from its text | Yes (`sounds`: each tag as itself) | No: removed from its text |
+| Code license | MIT | Apache 2.0 | Apache 2.0 |
+| **Weights license** | MIT | **CC-BY-NC (no commercial use)** | Apache 2.0 |
+| Without a reference | Built-in default voice | "Auto Voice": random unless a seed is set | A random voice |
+| Settings | Expressiveness, Pace control, Variation | Speed, Quality (diffusion steps, any whole number 16–64) | Style (text, sent as `(style)text`; parentheses in the line become commas), Style strength (`cfg_value` 1–3), Quality (`inference_timesteps` 4–30) |
+| Voice conversion | Yes (`ChatterboxVC`) | No | No |
+| Note | Adds a PerTh watermark to outputs | | 48 kHz output; denoiser and text normalizer off; `voxcpm==2.0.3` |
 
 The license difference is shown in the install confirmation and in the README.
 
@@ -77,12 +83,12 @@ without a transcript; samples from before this rule fail only for models with `n
 │ App process (.local/app/venv)                │
 │  pywebview window ── HTTP ── local server    │  app/main.py, app/server.py
 │  (app/ui: HTML/CSS/JS)        127.0.0.1      │  storage: app/workspace.py → workspace/
-└──────┬───────────────┬───────────────────────┘
-       │ JSON lines (stdin/stdout)
-┌──────▼──────┐ ┌──────▼──────┐
-│ Chatterbox  │ │ OmniVoice   │   each in its own venv;
-│ worker      │ │ worker      │   the model loads once and stays loaded
-└─────────────┘ └─────────────┘
+└──────┬───────────────┬───────────────┬───────┘
+       │ JSON lines (stdin/stdout)     │
+┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
+│ Chatterbox  │ │ OmniVoice   │ │ VoxCPM2     │   each in its own venv;
+│ worker      │ │ worker      │ │ worker      │   the model loads once and stays loaded
+└─────────────┘ └─────────────┘ └─────────────┘
 ```
 
 ### 5.1 Separate environments

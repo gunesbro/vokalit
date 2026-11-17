@@ -21,7 +21,7 @@ LANGUAGE_NAMES = {
     "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek", "en": "English", "es": "Spanish",
     "fi": "Finnish", "fr": "French", "he": "Hebrew", "hi": "Hindi", "it": "Italian", "ja": "Japanese",
     "ko": "Korean", "ms": "Malay", "nl": "Dutch", "no": "Norwegian", "pl": "Polish", "pt": "Portuguese",
-    "ru": "Russian", "sv": "Swedish", "sw": "Swahili", "tr": "Turkish", "zh": "Chinese",
+    "ru": "Russian", "sv": "Swedish", "sw": "Swahili", "tl": "Tagalog", "tr": "Turkish", "zh": "Chinese",
 }
 
 # OmniVoice's own list (646 languages, ISO 639 codes) read from the package it installs, in English. Vokalit's names
@@ -36,6 +36,13 @@ LANGUAGE_NAMES = {**_OMNIVOICE_LANGUAGES, **LANGUAGE_NAMES}
 TAGS = ["laughter", "sigh", "confirmation-en", "question-en", "question-ah", "question-oh", "question-ei", "question-yi",
         "surprise-ah", "surprise-oh", "surprise-wa", "surprise-yo", "dissatisfaction-hnn"]
 _TAG = re.compile(r"\[(" + "|".join(re.escape(tag) for tag in TAGS) + r")\]")
+
+
+# VoxCPM2's Style suggestions: instructions in English, which its style control follows best.
+VOXCPM_STYLES = [{"label": "Neutral", "value": ""}, {"label": "Happy", "value": "cheerful, warm"},
+                 {"label": "Sad", "value": "sad, quiet"}, {"label": "Angry", "value": "angry, tense"},
+                 {"label": "Calm", "value": "calm, slow"}, {"label": "Excited", "value": "excited, energetic"},
+                 {"label": "Whispering", "value": "whispering"}, {"label": "Serious", "value": "serious, firm"}]
 
 
 MODELS = {
@@ -91,6 +98,32 @@ MODELS = {
             ("PyTorch with CUDA", TORCH_CUDA),  # the same files as Chatterbox's: shared, not downloaded again
             ("Other libraries", ["-r", os.path.join(ROOT, "workers", "omnivoice", "requirements.txt")]),
             ("OmniVoice", ["omnivoice==0.2.1"]),
+        ],
+    },
+    "voxcpm": {
+        "title": "VoxCPM2",
+        "summary": "30 languages \u00b7 cloning \u00b7 style instructions",
+        "url": "https://huggingface.co/openbmb/VoxCPM2",
+        "disk_gb": 13.6,  # measured on Windows: 8.6 GB environment (PyTorch shared with other models) + 5.0 GB model
+        "license": "Apache-2.0",
+        "supports_convert": False,
+        "needs_transcript": False,  # clones from the sample alone, the mode its style instructions work with
+        "vram_gb": 8.4,  # measured on an RTX 4070 SUPER (Windows): 5.8 GB loaded, 8.3 GB peak
+        "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "id", "it", "ja", "km", "ko", "lo",
+                      "ms", "my", "nl", "no", "pl", "pt", "ru", "sv", "sw", "th", "tl", "tr", "vi", "zh"],
+        "settings": [
+            {"key": "style", "type": "text", "label": "Style", "default": "", "max_length": 200,
+             "placeholder": "e.g. cheerful, a little faster", "suggestions": VOXCPM_STYLES,
+             "help": "How the line is said, in a few English words. The effect can be subtle, especially in Turkish; "
+                     "a higher Style strength makes it stronger."},
+            {"key": "cfg_value", "label": "Style strength", "min": 1.0, "max": 3.0, "step": 0.1, "default": 2.0,
+             "help": "Higher follows the style and the text more closely; above 2.5 can sound strained."},
+            {"key": "inference_timesteps", "label": "Quality", "min": 4, "max": 30, "step": 1, "default": 10,
+             "help": "Higher sounds better but takes longer."},
+        ],
+        "pip_steps": [
+            ("PyTorch with CUDA", TORCH_CUDA),  # voxcpm 2.0.3 accepts this build: shared with the other models
+            ("VoxCPM2", ["voxcpm==2.0.3"]),
         ],
     },
 }
