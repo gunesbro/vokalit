@@ -100,7 +100,7 @@ export async function renderModels(root) {
     const job = installs[model.name];
     const state = job ? "installing" : model.installed ? "installed" : "";
     const statusText = job ? installingText(job) : model.installed ? (model.frees_gb == null ? "Installed \u00b7 measuring size\u2026" : `Installed \u00b7 frees ${model.frees_gb} GB`)
-      : `Not installed \u00b7 ~${model.disk_gb} GB`;
+      : `Not installed \u00b7 ~${model.disk_gb} GB disk \u00b7 ${model.vram_gb ? `~${model.vram_gb} GB GPU memory` : "runs on the processor"}`;
     const actions = el("div", { class: "row", style: { justifyContent: "flex-end" } });
     const container = el("div", { class: "table-row", "data-model": model.name },
       el("div", {},
@@ -159,6 +159,8 @@ export async function renderModels(root) {
           el("li", {}, model.kind === "tool"
             ? `Disk space: about ${model.disk_gb} GB (the program and its model; runs on the processor)`
             : `Disk space: about ${model.disk_gb} GB (PyTorch with CUDA, libraries and the model; PyTorch files are shared with other installed models)`),
+          model.vram_gb ? el("li", {}, `GPU memory: about ${model.vram_gb} GB while it is loaded. Vokalit unloads it `
+            + "after 5 minutes unused, and unloads other models when it needs room.") : null,
           el("li", {}, `Location: .local/${model.name}/`),
           el("li", {}, model.license.startsWith("CC-BY-NC")
             ? "License: CC-BY-NC \u2014 the model's weights may not be used commercially."

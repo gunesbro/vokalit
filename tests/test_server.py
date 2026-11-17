@@ -744,3 +744,12 @@ def test_unload_stops_a_model_but_not_while_it_generates(api, monkeypatch):
     assert status == 400 and "generating" in body["error"] and stopped == []
     status, body, _ = api("POST", "/api/models/omnivoice/unload")
     assert status == 200 and stopped == ["omnivoice"] and body["runtime"] == {"loaded": False}
+
+
+def test_components_show_gpu_memory(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path / "local"))
+    status, body, _ = api("GET", "/api/components")
+    items = {item["name"]: item for item in body["items"]}
+    assert items["chatterbox"]["vram_gb"] == 4.1
+    assert items["omnivoice"]["vram_gb"] == 2.7
+    assert items["whisper"]["vram_gb"] is None
