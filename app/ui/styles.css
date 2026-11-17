@@ -159,7 +159,10 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .wave { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 1px;
   height: 24px; overflow: hidden; }
 .wave > span { flex: 0 1 2px; min-width: 1px; border-radius: 1px; background: #8a909c; }
-.wave > span.played, .wave.selected > span { background: var(--accent); }
+/* The played part is orange, the rest grey, so a click on the wave shows where playback continues from. The selected
+   take's unplayed part is a faint orange. */
+.wave.selected > span { background: color-mix(in srgb, var(--accent) 38%, #8a909c 20%); }
+.wave > span.played { background: var(--accent); }
 .wave.big { height: 56px; }
 
 /* Add a sample */

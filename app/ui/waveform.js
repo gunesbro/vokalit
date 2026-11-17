@@ -63,7 +63,7 @@ export function stopAudio(url) {
   if (entry) { entry.audio.pause(); entry.audio.currentTime = 0; }
 }
 
-// A play button + waveform that fills as it plays. `selected` uses the accent color.
+// A play button + waveform that fills as it plays. `selected` tints the unplayed part.
 export function player(url, { buckets = 48, selected = false, label = "Play", showTime = true } = {}) {
   const wave = el("div", { class: `wave ${selected ? "selected" : ""}`, "aria-hidden": "true" });
   const button = el("button", { class: "play", "aria-label": label, title: label, onclick: () => (audio.paused ? audio.play() : audio.pause()) });
