@@ -15,7 +15,8 @@ file. Everything is done by clicking in a desktop window.
 
 ## 2. Scope (v2)
 
-- Models: **Chatterbox Multilingual** (Resemble AI) now; **OmniVoice** (k2-fsa) next.
+- Models: **Chatterbox Multilingual** (Resemble AI) and **OmniVoice** (k2-fsa); the optional **Whisper** component
+  (faster-whisper on the CPU) writes sample transcripts. Design: `docs/superpowers/specs/2026-11-17-omnivoice-design.md`.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
     generation settings at three levels (model defaults → session → line); voice conversion ("Perform this line");
@@ -34,7 +35,8 @@ file. Everything is done by clicking in a desktop window.
 - CPU and Apple Silicon (without an NVIDIA GPU the app says so).
 - Command-line interface; one-click installers (.exe/.dmg); Docker.
 - Fine-tuning (planned later on the Characters screen; the data model leaves room for it), streaming, cloud APIs.
-- Transcript import (maybe later with a local language model), reading numbers aloud, emotion tags.
+- Transcript import (maybe later with a local language model), reading numbers aloud, voice design (a voice from a
+  description).
 - Disk space pre-check, resuming downloads, automatic updates.
 
 ## 4. Models
@@ -43,16 +45,24 @@ file. Everything is done by clicking in a desktop window.
 |---|---|---|
 | Languages | 23 (Turkish via `language_id="tr"`) | 600+ |
 | Size | ~500M parameters | ~0.6B parameters |
-| Measured disk use | 12.3 GB on Windows (libraries + weights) | not measured yet |
+| Measured disk use | 12.3 GB on Windows (libraries + weights) | ~9 GB estimate; PyTorch is shared with Chatterbox |
 | VRAM | ~3.5–4 GB | ~8 GB is enough (RTX 4090 test) |
-| Reference | Audio file | Audio file + optional transcript (Whisper fills it in; downloaded at install) |
+| Reference | Audio file | Audio file + its transcript (`needs_transcript`; stored with every sample) |
+| Sound tags (`[laughter]`, `[sigh]`, …) | No: removed from its text | Yes (`supports_tags`) |
 | Code license | MIT | Apache 2.0 |
 | **Weights license** | MIT | **CC-BY-NC (no commercial use)** |
-| Without a reference | Built-in default voice | "Auto Voice" mode |
+| Without a reference | Built-in default voice | "Auto Voice": random unless a seed is set |
+| Settings | Expressiveness, Pace control, Variation | Speed, Quality (diffusion steps 16–64) |
 | Voice conversion | Yes (`ChatterboxVC`) | No |
 | Note | Adds a PerTh watermark to outputs | |
 
 The license difference is shown in the install confirmation and in the README.
+
+**Whisper** (`TOOLS["whisper"]`, never offered for generation): `faster-whisper==1.2.1`, model `large-v3-turbo`, int8
+on the CPU (no PyTorch; the GPU stays free). Optional and recommended. When installed it transcribes a trimmed clip
+before the sample is saved (the user can correct it) and detects its language; installing it transcribes every
+sample without a transcript in the background. Without it the transcript is typed. A new sample cannot be saved
+without a transcript; samples from before this rule fail only for models with `needs_transcript`.
 
 ## 5. Architecture
 
@@ -131,8 +141,8 @@ user presses "Install" and confirms, to download packages and model weights.
   (`socket.socket.connect`, `connect_ex`, `sendto`, `socket.getaddrinfo` raise). The `socket.socket` class itself
   is not replaced, because modules such as `ssl` subclass it at import. A library that tries the network stops
   with a clear error.
-- Everything needed at generation time (including OmniVoice's Whisper model and Chatterbox's voice conversion model)
-  is downloaded **during install**.
+- Everything needed at generation time (Whisper's model and Chatterbox's voice conversion model included) is
+  downloaded **during install**. OmniVoice always gets the sample's transcript, so it never needs its own Whisper.
 
 **Transparency:**
 
@@ -158,8 +168,10 @@ user presses "Install" and confirms, to download packages and model weights.
 .local/python/            # UV_PYTHON_INSTALL_DIR (Python downloaded by uv)
 .local/app/venv/          # app environment
 .local/webview/           # window data (microphone permission, etc.)
-.local/<model>/venv/      # model environment
+.local/<model>/venv/      # model (or Whisper) environment
 .local/<model>/cache/     # HF_HOME, TORCH_HOME
+.local/shared/uv-cache/   # one uv cache for every component; its files are hard-linked into the environments
+.local/sizes.json         # what removing each component frees, and the total (measured after installs/removes)
 workspace/                # the user's characters, sessions, takes and exports
 ```
 
@@ -179,16 +191,22 @@ Nothing has to be installed beforehand except the NVIDIA driver.
   support CUDA 12.8.
 - **Chatterbox:** `chatterbox-tts==0.1.7` installed with `--no-deps` (its `torch==2.6.0` pin does not support RTX 50);
   the other dependencies are listed in `workers/chatterbox/requirements.txt` with upstream pins.
-- **Per-model uv cache:** `UV_CACHE_DIR=.local/<model>/uv-cache` during install, deleted afterwards, so "Remove"
-  frees all of it. Cost: reinstalling downloads the packages again.
+- **Shared uv cache:** `UV_CACHE_DIR=.local/shared/uv-cache`, `UV_LINK_MODE=hardlink`. Identical package files
+  (PyTorch) are stored once and linked into every environment that needs them; an environment only gains or loses
+  links, so one install cannot change another's files. After every install, cancel and remove, cache files no
+  environment links to (link count 1) are deleted, and `.local/shared/` goes with the last component. The clean-up
+  waits for a running install; only one install runs at a time. Where hard links are impossible uv copies, and the
+  clean-up empties the cache (each environment has its own copy).
 - **Progress:** no percentage (download sizes are not known in advance). A bar with one segment per step: finished
   steps filled, the running one animated. Under it a status line updated every few seconds
-  (`Step 2/5: PyTorch with CUDA · 1.42 GB on disk · 3m 12s`; size = the model folder, hard links counted once),
+  (`Step 2/5: PyTorch with CUDA · 1.42 GB on disk · 3m 12s`; size = growth of the model folder and the shared cache,
+  hard links counted once),
   above a collapsible log.
 - **Cancel** stops the running process within seconds and deletes `.local/<model>/`. Install always clears leftovers
   of an interrupted install first. A finished install writes `.local/<model>/installed`.
-- **Remove** shows the folder and the space it frees, then, after confirmation, stops the worker and deletes
-  `.local/<model>/`.
+- **Remove** shows the folder and the space it frees (files no other component links to), then, after confirmation,
+  stops the worker and deletes `.local/<model>/`; then the shared cache is cleaned. The Models screen also shows the
+  total of all components.
 
 ## 7. Interface
 

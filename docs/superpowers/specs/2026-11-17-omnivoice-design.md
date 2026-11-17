@@ -1,6 +1,7 @@
 # OmniVoice, Whisper and shared PyTorch — Design
 
-Date: 2026-11-17 · Status: **approved**
+Date: 2026-11-17 · Status: **implemented** (2026-11-17; sizes to be measured on Windows). Added during implementation at the
+user's request: Whisper's detected language fills the sample's language.
 
 > Items marked "*(proposal)*" are the designer's calls, not the user's; they can be revised.
 

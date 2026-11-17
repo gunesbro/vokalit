@@ -18,6 +18,10 @@ Your voice, your text and the generated audio never leave your machine.
   reproducible.
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
 - **Languages** — per session or per line, limited to what the selected models support.
+- **Sound tags** — write `[laughter]`, `[sigh]` and other sounds into a line (*Add sound*); OmniVoice performs them,
+  models that cannot are given the text without them.
+- **Transcripts** — every sample keeps what is said in it, which some models use to copy the voice. The optional
+  Whisper component writes it for you (and detects the language); otherwise you type it.
 
 ## Screenshots
 
@@ -42,12 +46,18 @@ to compare, trim and pick; and *Perform this line* to convert your own recording
 the models you want from the app's **Models** screen, which shows each model's size, location and license and asks
 before downloading anything. Each model goes into its own folder under `.local/`, and **Remove** deletes it again.
 
-| Model | Languages | Disk space | License |
+| Component | Languages | Disk space | License |
 |---|---|---|---|
+| [Whisper](https://github.com/SYSTRAN/faster-whisper) (optional, recommended) — writes sample transcripts, runs on the CPU | ~100 | ~1.7 GB | MIT |
 | [Chatterbox Multilingual](https://huggingface.co/ResembleAI/chatterbox) (Resemble AI) | 23 | ~12.3 GB (measured on Windows) | MIT |
-| OmniVoice (k2-fsa) | 600+ | — | *coming next; its weights are for non-commercial use* |
+| [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) (k2-fsa) — cloning, sound tags | 600+ (23 listed in the app) | ~9 GB, less when Chatterbox is installed | Code Apache 2.0; **weights CC-BY-NC: no commercial use** |
 
-Disk space includes PyTorch with CUDA, which every model installs into its own environment.
+Each component has its own environment, so one model's packages can never break another's. Identical files — above
+all PyTorch with CUDA, about 5 GB — are stored once and shared between models; files nothing uses any more are
+deleted automatically, and removing the last component frees everything.
+
+What you do with OmniVoice's output must be non-commercial: its weights are licensed CC-BY-NC because of its training
+data, and no paid license is offered.
 
 ## Requirements
 
@@ -69,9 +79,10 @@ Disk space includes PyTorch with CUDA, which every model installs into its own e
    uv then sets up Python and the app's packages inside the folder. This takes a few minutes once.
 3. In the window, open **Models** and install a model — this is the large download, and the app cannot generate
    speech until at least one model is installed. The confirmation shows the download size, where it goes and
-   its license.
+   its license. Installing **Whisper** too saves you typing what each sample says.
 4. Open **Characters**, create a character and add a sample: at least 10 seconds of clear speech. The first ~10
-   seconds matter most, so trim away silence and noise.
+   seconds matter most, so trim away silence and noise. Then check what the sample says (Whisper writes it) or type
+   it exactly.
 5. Open **Studio**, create a session, add the character to the cast, write or paste lines (`Name: text`), and
    **Generate**.
 
