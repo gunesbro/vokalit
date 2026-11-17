@@ -81,9 +81,19 @@ export async function renderModels(root) {
       el("div", { class: "table-head" }, el("div", {}, "Component"), el("div", {}, "Status"), el("div", {}, "License"), el("div")),
       ...items.map(row),
       total ? el("div", { class: "row total-line" }, el("span", { class: "muted" }, "All components"),
-        el("span", { class: "num" }, `${total} GB`)) : null,
+        el("span", { class: "num" }, `${total} GB`, sharedNote(items, total))) : null,
       el("p", { class: "muted small" },
         "Sizes are measured on Windows and can differ slightly. The model name links to its page, which lists supported languages."));
+  }
+
+  // What no single row frees: files several components use (PyTorch and common libraries), stored once.
+  function sharedNote(items, total) {
+    const installed = items.filter((c) => c.installed);
+    if (installed.some((c) => c.frees_gb == null)) return null;
+    const shared = Math.round((total - installed.reduce((sum, c) => sum + c.frees_gb, 0)) * 10) / 10;
+    return shared >= 0.1 ? el("span", { class: "muted", title: "Files several components use, such as PyTorch, are "
+      + "stored once. Removing one of them does not free these; removing the last one does." },
+    ` \u00b7 ${shared} GB shared between models`) : null;
   }
 
   function row(model) {
