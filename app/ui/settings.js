@@ -146,22 +146,36 @@ export function searchSelect({ options, value, onChange, label, placeholder = "S
       button.textContent = current();
       onChange(option.value);
     };
+    let shown = [];
+    let focused = 0; // the option the arrow keys are on; Enter takes it
+    const items = () => [...list.querySelectorAll(".menu-item")];
+    const paintFocus = () => {
+      items().forEach((item, i) => item.classList.toggle("focused", i === focused));
+      items()[focused]?.scrollIntoView({ block: "nearest" });
+    };
     const paint = () => {
-      const shown = filterOptions(options, input.value);
-      const limit = 200; // a long list is cut; typing narrows it
-      list.replaceChildren(...shown.slice(0, limit).map((o) => el("button", { type: "button",
+      shown = filterOptions(options, input.value).slice(0, 200); // a long list is cut; typing narrows it
+      const total = filterOptions(options, input.value).length;
+      list.replaceChildren(...shown.map((o) => el("button", { type: "button",
         class: `menu-item ${o.value === value ? "active" : ""}`, role: "option", onclick: () => pick(o) }, o.label)));
-      if (!shown.length) list.append(el("div", { class: "faint small menu-empty" }, "No match"));
-      if (shown.length > limit) list.append(el("div", { class: "faint small menu-empty" }, `Type to see the other ${shown.length - limit}`));
-      return shown;
+      if (!total) list.append(el("div", { class: "faint small menu-empty" }, "No match"));
+      if (total > shown.length) list.append(el("div", { class: "faint small menu-empty" }, `Type to see the other ${total - shown.length}`));
+      // Start on the current choice when nothing is typed, otherwise on the best match.
+      focused = input.value.trim() ? 0 : Math.max(0, shown.findIndex((o) => o.value === value));
+      paintFocus();
     };
     input.addEventListener("input", paint);
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); const [first] = paint(); if (first) pick(first); }
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && shown.length) {
+        e.preventDefault();
+        focused = (focused + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
+        paintFocus();
+      }
+      if (e.key === "Enter") { e.preventDefault(); if (shown[focused]) pick(shown[focused]); }
     });
     popover(button, el("div", { class: "search-box" }, input, list));
     paint();
-    list.querySelector(".active")?.scrollIntoView({ block: "center" });
+    items()[focused]?.scrollIntoView({ block: "center" });
     input.focus();
   };
   return el("div", { class: "pop-holder" }, button);
