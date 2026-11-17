@@ -55,6 +55,7 @@ def local(tmp_path, monkeypatch):
 
 def install(name):
     list(models.install(name))
+    models._join_background()  # the clean-up and measuring after it run in the background
 
 
 def test_two_models_share_cache_files(local):
@@ -144,3 +145,27 @@ def test_sizes_are_read_from_the_file_without_walking(local, monkeypatch):
     monkeypatch.setattr(models, "_walk_sizes", lambda: walks.append(1) or {"frees": {}, "total_gb": 0})
     models.sizes()
     assert walks == []
+
+
+def test_install_finishes_before_the_sizes_are_measured(local, monkeypatch):
+    # Measuring walks tens of thousands of files (slow on Windows); the install must not wait for it.
+    release = threading.Event()
+    real = models._walk_sizes
+    monkeypatch.setattr(models, "_walk_sizes", lambda: release.wait(5) and real())
+    done = threading.Event()
+    threading.Thread(target=lambda: (list(models.install("a")), done.set()), daemon=True).start()
+    assert done.wait(2), "the install waited for the size measurement"
+    assert models.is_installed("a")
+    release.set()
+
+
+def test_sizes_never_walk_in_a_request(local, monkeypatch):
+    install("a")
+    os.remove(os.path.join(models.LOCAL, "sizes.json"))
+    walked = threading.Event()
+    real = models._walk_sizes
+    monkeypatch.setattr(models, "_walk_sizes", lambda: (walked.wait(5), real())[1])
+    assert models.sizes() == {"frees": {}, "total_gb": None}  # unknown for now; measured in the background
+    walked.set()
+    models._join_background()
+    assert "a" in models.sizes()["frees"]

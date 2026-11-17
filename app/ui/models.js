@@ -43,6 +43,8 @@ export async function renderModels(root) {
 
   function draw({ items, total_gb: total, installing }) {
     busyName = installing || Object.keys(installs)[0] || null;
+    // Sizes are measured in the background after an install or remove: look again until they are known.
+    if (items.some((c) => c.installed && c.frees_gb == null)) setTimeout(() => root.isConnected && refresh(), 3000);
     body.replaceChildren(
       el("div", { class: "table-head" }, el("div", {}, "Component"), el("div", {}, "Status"), el("div", {}, "License"), el("div")),
       ...items.map(row),
@@ -55,7 +57,7 @@ export async function renderModels(root) {
   function row(model) {
     const job = installs[model.name];
     const state = job ? "installing" : model.installed ? "installed" : "";
-    const statusText = job ? installingText(job) : model.installed ? `Installed \u00b7 frees ${model.frees_gb} GB`
+    const statusText = job ? installingText(job) : model.installed ? (model.frees_gb == null ? "Installed \u00b7 measuring size\u2026" : `Installed \u00b7 frees ${model.frees_gb} GB`)
       : `Not installed \u00b7 ~${model.disk_gb} GB`;
     const actions = el("div", { class: "row", style: { justifyContent: "flex-end" } });
     const container = el("div", { class: "table-row", "data-model": model.name },
@@ -128,7 +130,7 @@ export async function renderModels(root) {
     container.querySelector(".confirm")?.remove();
     container.append(el("div", { class: "confirm" },
       el("div", {}, el("strong", {}, `Remove ${model.title}?`), " ",
-        el("span", { class: "muted" }, `This permanently deletes .local/${model.name}/ and frees ${model.frees_gb} GB.`)),
+        el("span", { class: "muted" }, `This permanently deletes .local/${model.name}/` + (model.frees_gb == null ? "." : ` and frees ${model.frees_gb} GB.`))),
       el("div", { class: "spacer" }),
       el("button", { class: "btn", onclick: () => refresh() }, "Keep"),
       el("button", { class: "btn btn-danger", onclick: (event) => {

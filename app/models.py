@@ -205,15 +205,31 @@ def refresh_sizes():
 
 
 def sizes():
-    """Measured after installs and removes; walking tens of thousands of files on every request was slow."""
+    """Measured in the background after installs and removes; walking tens of thousands of files is slow (minutes
+    on Windows), so a request never does it. Unknown sizes are missing (total None) until the measuring is done."""
     try:
         with open(os.path.join(LOCAL, "sizes.json"), encoding="utf-8") as f:
             result = json.load(f)
         if all(name in result["frees"] for name in _components() if is_installed(name)):
             return result
     except (FileNotFoundError, ValueError, KeyError):
-        pass
-    return refresh_sizes()
+        result = {"frees": {}, "total_gb": None}
+    _measure_soon()
+    return result
+
+
+_measuring = threading.Lock()
+
+
+def _measure_soon():
+    """Starts measuring in the background unless it already runs."""
+    if _measuring.acquire(blocking=False):
+        def run():
+            try:
+                refresh_sizes()
+            finally:
+                _measuring.release()
+        _start_background(run)
 
 
 def _env(name, offline):
@@ -284,8 +300,12 @@ def install(name):
     finally:
         _installing = None
         _install_lock.release()
-        clean_shared_cache()
-        refresh_sizes()
+        _start_background(_maintain)  # the install is done; this can take minutes on Windows
+
+
+def _maintain():
+    clean_shared_cache()
+    refresh_sizes()
 
 
 def _install(name):
@@ -378,8 +398,7 @@ def _join_background():
 def _delete(path, maintain):
     shutil.rmtree(path, ignore_errors=True)
     if maintain:
-        clean_shared_cache()
-        refresh_sizes()
+        _maintain()
 
 
 def _delete_in_background(path, maintain=False):

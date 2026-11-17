@@ -92,11 +92,20 @@ def _model_view(name):
     return {"name": name, "title": info["title"], "summary": info["summary"], "url": info["url"],
             "license": info["license"],
             "disk_gb": info["disk_gb"], "installed": installed,
-            "frees_gb": round(models.sizes()["frees"].get(name, 0.0), 1) if installed else None,
+            "frees_gb": _frees_gb(name) if installed else None,
             "settings": info["settings"], "supports_convert": info.get("supports_convert", False),
             "languages": [{"code": c, "name": models.LANGUAGE_NAMES[c]} for c in info.get("languages", [])],
             "accent_setting": info.get("accent_setting"),
             "tags": models.TAGS if info.get("supports_tags") else []}
+
+
+def _round(gb):
+    return None if gb is None else round(gb, 1)
+
+
+def _frees_gb(name):
+    """What removing it frees; None while it is being measured."""
+    return _round(models.sizes()["frees"].get(name))
 
 
 def _component_view(name):
@@ -106,7 +115,7 @@ def _component_view(name):
     view = _model_view(name) if name in models.MODELS else {
         "name": name, "title": info["title"], "summary": info["summary"], "url": info["url"],
         "license": info["license"], "disk_gb": info["disk_gb"], "installed": installed,
-        "frees_gb": round(models.sizes()["frees"].get(name, 0.0), 1) if installed else None}
+        "frees_gb": _frees_gb(name) if installed else None}
     return {**view, "kind": "model" if name in models.MODELS else "tool", "recommended": info.get("recommended", False)}
 
 
@@ -329,7 +338,7 @@ def list_models(req):
 def list_components(req):
     """The Models screen: tools (Whisper) first, then the voice models."""
     names = list(models.TOOLS) + list(models.MODELS)
-    return {"items": [_component_view(name) for name in names], "total_gb": round(models.sizes()["total_gb"], 1),
+    return {"items": [_component_view(name) for name in names], "total_gb": _round(models.sizes()["total_gb"]),
             "installing": models.installing()}
 
 
