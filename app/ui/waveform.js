@@ -32,7 +32,9 @@ const live = new Map(); // url -> { audio, owners: Map<Element, AbortController>
 function audioFor(url, owner) {
   let entry = live.get(url);
   if (!entry) {
-    entry = { audio: new Audio(url), owners: new Map() };
+    const audio = new Audio(url);
+    audio.preload = "metadata"; // length known early, so a click on the waveform can jump right away
+    entry = { audio, owners: new Map() };
     live.set(url, entry);
   }
   const controller = new AbortController();
@@ -92,12 +94,20 @@ export function player(url, { buckets = 48, selected = false, label = "Play", sh
   paint();
   // Clicking the waveform jumps there and plays from that point.
   wave.style.cursor = "pointer";
+  // Clicking the waveform jumps to that second (and plays). Before the first play the length is not known
+  // yet, so the jump waits for it.
+  wave.title = "Click to jump to this point";
   wave.addEventListener("click", (e) => {
-    if (!audio.duration) return;
     const box = wave.getBoundingClientRect();
-    audio.currentTime = seekTo((e.clientX - box.left) / box.width, audio.duration);
-    paint();
-    if (audio.paused) audio.play();
+    const fraction = (e.clientX - box.left) / box.width;
+    const jump = () => {
+      audio.currentTime = seekTo(fraction, audio.duration);
+      paint();
+      if (audio.paused) audio.play();
+    };
+    if (Number.isFinite(audio.duration) && audio.duration > 0) return jump();
+    audio.addEventListener("loadedmetadata", jump, { once: true });
+    audio.load();
   });
   return root;
 }

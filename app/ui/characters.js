@@ -286,6 +286,12 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       recordButton.replaceChildren(el("span", { class: "rec-dot on" }), "Stop");
       recordButton.classList.add("recording");
       ticker = setInterval(() => {
+        if (!box.isConnected) { // left the screen: end the recording and release the microphone
+          clearInterval(ticker);
+          recorder?.stop().catch(() => {});
+          recorder = null;
+          return;
+        }
         const s = recorder.seconds();
         timer.textContent = `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
         meter.firstChild.style.width = `${Math.min(100, recorder.level() * 100)}%`;

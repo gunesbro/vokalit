@@ -363,3 +363,60 @@ def test_missing_files_are_reported(api, monkeypatch, tmp_path):
     assert character["samples"][0]["missing"] is True
     _, listed, _ = api("GET", "/api/characters")
     assert listed[0]["samples"][0]["missing"] is True
+
+
+def test_running_jobs_of_a_session_are_listed(api, monkeypatch):
+    import threading
+    release = threading.Event()
+
+    def slow_generate(name, text, ref, out, seed, settings, language):
+        release.wait(5)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", slow_generate)
+    sid, lid, cid = _session_with_line(api, "one")
+    _, l2, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "two"})
+    _, single, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+    status, running, _ = api("GET", f"/api/sessions/{sid}/jobs")
+    assert status == 200 and running == [{"id": single["id"], "kind": "generate", "line": lid, "started": running[0]["started"],
+                                          "progress": ""}]
+    release.set()
+    _wait(api, single["id"])
+    release.clear()
+    _, batch, _ = api("POST", f"/api/sessions/{sid}/generate-lines", {"lines": [l2["id"]], "models": ["chatterbox"]})
+    import time as _t
+    for _ in range(50):
+        _, running, _ = api("GET", f"/api/sessions/{sid}/jobs")
+        if running and running[0]["line"]:
+            break
+        _t.sleep(0.05)
+    assert running[0]["kind"] == "batch" and running[0]["line"] == l2["id"]
+    release.set()
+    _wait(api, batch["id"])
+    _, running, _ = api("GET", f"/api/sessions/{sid}/jobs")
+    assert running == []
+
+
+def test_audio_files_support_range_requests(api, tmp_path):
+    """Seeking in an <audio> element needs byte ranges; without them the browser restarts from 0."""
+    sid, _, _ = _session_with_line(api, "one")
+    take = ws.session_dir(sid) / "takes" / "a.wav"
+    make_wav(take, 1)
+    whole = take.read_bytes()
+    url = server._httpd.server_address
+    conn = http.client.HTTPConnection("127.0.0.1", url[1], timeout=10)
+    conn.request("GET", f"/files/sessions/{sid}/takes/a.wav", headers={"Host": f"127.0.0.1:{url[1]}", "Range": "bytes=100-199"})
+    response = conn.getresponse()
+    body = response.read()
+    assert response.status == 206 and body == whole[100:200]
+    assert response.getheader("Content-Range") == f"bytes 100-199/{len(whole)}"
+    assert response.getheader("Accept-Ranges") == "bytes"
+    conn.request("GET", f"/files/sessions/{sid}/takes/a.wav", headers={"Host": f"127.0.0.1:{url[1]}", "Range": "bytes=1000-"})
+    response = conn.getresponse()
+    assert response.status == 206 and response.read() == whole[1000:]
+    conn.request("GET", f"/files/sessions/{sid}/takes/a.wav", headers={"Host": f"127.0.0.1:{url[1]}"})
+    response = conn.getresponse()
+    assert response.status == 200 and response.read() == whole and response.getheader("Accept-Ranges") == "bytes"
+    conn.close()

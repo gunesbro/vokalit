@@ -44,6 +44,7 @@ export async function renderStudio(root) {
   let library = [];
   let session = null;
   let openLine = null;
+  let performing = null; // { line, recorder } while "Perform this line" records
   let justOpened = null; // the open animation plays only when a line (or card) is opened, not on every redraw
   let justDone = null; // { line, file } of the newest take, briefly highlighted
   let exportFormats = []; // what this computer can export (from the server)
@@ -61,7 +62,10 @@ export async function renderStudio(root) {
   const pendingText = {}; // line id -> saves typed text not yet sent (the Generate button waits for it)
   // Elapsed time next to every spinner; one ticker for the whole screen.
   const ticker = setInterval(() => {
-    if (!main.isConnected) { stopAll(); clearInterval(ticker); document.removeEventListener("keydown", spaceToggle);
+    if (!main.isConnected) {
+      stopAll(); clearInterval(ticker);
+      performing?.recorder.stop().catch(() => {}); // leaving the screen ends the recording; the microphone is released
+      performing = null; document.removeEventListener("keydown", spaceToggle);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("keydown", selectionKeys);
       document.removeEventListener("vokalit-player-play", onPlayerPlay); return; }
@@ -126,7 +130,13 @@ export async function renderStudio(root) {
     const changed = session?.id !== id;
     try {
       session = await api("GET", `/api/sessions/${id}`);
-      if (changed) loadExports();
+      if (changed) {
+        performing?.recorder.stop().catch(() => {});
+        performing = null;
+        generating.clear(); batch = null; exporting = false; followed.clear(); // jobs of the previous session keep running
+        loadExports();
+        resumeJobs();
+      }
     } catch {
       main.replaceChildren(el("div", { class: "empty" }, el("p", {}, "This session no longer exists.")));
       return;
@@ -150,7 +160,7 @@ export async function renderStudio(root) {
 
   // Coming back to the window (e.g. after deleting files in File Explorer) re-checks the session's files.
   function onFocus() {
-    if (!main.isConnected || !session || Object.keys(pendingText).length || generating.size || batch
+    if (!main.isConnected || !session || Object.keys(pendingText).length || generating.size || batch || performing
         || document.querySelector(".popover, .trim-box, .review-box") || document.activeElement?.matches("input, textarea")) return;
     refresh().catch(() => {});
     loadExports();
@@ -494,7 +504,7 @@ export async function renderStudio(root) {
     const selected = takes.find((t) => t.file === line.selected);
     const right = el("div", { class: "row line-right" });
     if (generating.has(line.id)) {
-      right.append(busyLabel(line.id, "Generating…"));
+      right.append(busyLabel(line.id, "Generating\u2026"));
     } else if (selected?.missing) {
       right.append(el("span", { class: "file-missing", title: "The selected take's file was deleted outside Vokalit." },
         icon(ICONS.trash, 12), "Take file missing"),
@@ -970,8 +980,20 @@ export async function renderStudio(root) {
         convert(samples, sampleRate);
       } catch { setMessage(message, "Cannot read this file. Use WAV, MP3, M4A, OGG or FLAC.", "error"); }
     } });
-    let recorder = null;
+    // The recorder lives outside this panel: a redraw (a take finishing, a focus check) rebuilds the panel,
+    // and the new one picks up the running recording instead of losing it.
+    const ownRecording = () => performing?.line === line.id;
     let ticker = null;
+    const paintRecording = () => {
+      if (!ownRecording()) return;
+      button.classList.add("on");
+      button.setAttribute("aria-label", "Stop");
+      ticker = setInterval(() => {
+        if (!button.isConnected) return clearInterval(ticker);
+        status.textContent = `Recording ${formatTime(performing.recorder.seconds())}`;
+        meter.firstChild.style.width = `${Math.min(100, performing.recorder.level() * 100)}%`;
+      }, 200);
+    };
     const fill = () => microphones().then((devices) => {
       const current = mic.value;
       mic.replaceChildren(...devices.map((d, n) => el("option", { value: d.deviceId }, d.label || `Microphone ${n + 1}`)));
@@ -979,20 +1001,18 @@ export async function renderStudio(root) {
       if (devices.some((d) => d.deviceId === current)) mic.value = current;
     }).catch(() => {});
     button.onclick = async () => {
-      if (!recorder) {
-        try { recorder = await record(mic.value); } catch (error) { return setMessage(message, `Cannot use the microphone: ${error.message}`, "error"); }
+      if (performing && !ownRecording()) return setMessage(message, "Another line is being recorded. Stop it first.", "warn");
+      if (!performing) {
+        try { performing = { line: line.id, recorder: await record(mic.value) }; } catch (error) {
+          return setMessage(message, `Cannot use the microphone: ${error.message}`, "error");
+        }
         fill();
-        button.classList.add("on");
-        button.setAttribute("aria-label", "Stop");
-        ticker = setInterval(() => {
-          status.textContent = `Recording ${formatTime(recorder.seconds())}`;
-          meter.firstChild.style.width = `${Math.min(100, recorder.level() * 100)}%`;
-        }, 200);
+        paintRecording();
         return;
       }
       clearInterval(ticker);
-      const { samples, sampleRate } = await recorder.stop();
-      recorder = null;
+      const { samples, sampleRate } = await performing.recorder.stop();
+      performing = null;
       button.classList.remove("on");
       button.setAttribute("aria-label", "Record");
       meter.firstChild.style.width = "0";
@@ -1000,16 +1020,14 @@ export async function renderStudio(root) {
     };
     async function convert(samples, sampleRate) {
       if (samples.length < sampleRate * 0.3) { status.textContent = "Too short. Record the whole line."; return; }
-      status.textContent = "Converting…";
-      generating.set(line.id, Date.now());
+      status.textContent = "Converting\u2026";
       try {
         const { id } = await api("POST", `/api/sessions/${sid()}/lines/${line.id}/convert`, encodeWav(samples, sampleRate));
-        await waitForJob(id);
+        follow({ id, kind: "convert", line: line.id, started: Date.now() / 1000 });
       } catch (error) { fail(error); }
-      generating.delete(line.id);
-      await refresh();
     }
     fill();
+    paintRecording();
     const name = castEntry(line.character)?.name || "the character";
     return el("section", { class: "perform" },
       el("h3", {}, "Perform this line"),
@@ -1022,25 +1040,90 @@ export async function renderStudio(root) {
   // --- Generation and export -----------------------------------------------------------------
 
   async function generate(line, names, seedValue) {
-    if (!names.length) return setMessage(message, installed().length ? "Choose a model in “Generate with”." : "Install a model in the Models tab.", "warn");
-    const number = session.lines.findIndex((l) => l.id === line.id) + 1;
+    if (!names.length) return setMessage(message, installed().length ? "Choose a model in \u201cGenerate with\u201d." : "Install a model in the Models tab.", "warn");
     await pendingText[line.id]?.(); // typed text that was not saved yet
-    generating.set(line.id, Date.now());
-    draw();
-    setMessage(message, `Generating line ${number}…`);
     try {
       const { id } = await api("POST", `/api/sessions/${sid()}/lines/${line.id}/generate`, { models: names, seed: seedValue || null });
-      await waitForJob(id);
-      setMessage(message, `Line ${number} done.`);
+      follow({ id, kind: "generate", line: line.id, started: Date.now() / 1000 });
     } catch (error) { fail(error); }
-    generating.delete(line.id);
-    const before = new Set(line.takes.map((t) => t.file));
-    if (session?.id) {
-      session = await api("GET", `/api/sessions/${sid()}`);
-      const fresh = session.lines.find((l) => l.id === line.id)?.takes.find((t) => !before.has(t.file));
-      if (fresh) justDone = { line: line.id, file: fresh.file };
-      draw();
+  }
+
+  // --- Running jobs ----------------------------------------------------------------------------
+  // Jobs run on the local server. The screen follows them, and when it is opened again (another tab, another
+  // session and back, or a reload) it asks the server which jobs of this session are still running and
+  // follows those, so "Generating..." and Stop come back.
+
+  const followed = new Set();
+  let exporting = false;
+
+  async function resumeJobs() {
+    const owner = session?.id;
+    if (!owner) return;
+    let running = [];
+    try { running = await api("GET", `/api/sessions/${owner}/jobs`); } catch { return; }
+    if (session?.id !== owner) return;
+    for (const job of running) follow(job);
+  }
+
+  async function follow(job) {
+    if (followed.has(job.id)) return;
+    followed.add(job.id);
+    const owner = session.id;
+    const mine = () => session?.id === owner; // the user may switch session while it runs
+    const number = (lineId) => session.lines.findIndex((l) => l.id === lineId) + 1;
+    const takesOf = (lineId) => new Set(session.lines.find((l) => l.id === lineId)?.takes.map((t) => t.file) || []);
+    const started = (job.started || Date.now() / 1000) * 1000;
+    let current = job.line;
+    const before = current ? takesOf(current) : null;
+    if (job.kind === "generate" || job.kind === "convert") {
+      generating.set(current, started);
+      setMessage(message, `${job.kind === "convert" ? "Converting" : "Generating"} line ${number(current)}\u2026`);
+    } else if (job.kind === "batch") {
+      batch = job.id;
+      if (current) generating.set(current, started);
+      if (job.progress) setMessage(message, `${job.progress}\u2026`);
+    } else if (job.kind === "export") {
+      exporting = true;
+      setMessage(message, "Exporting\u2026");
     }
+    if (main.isConnected) draw();
+    let result = null;
+    let error = null;
+    let last = job.progress || "";
+    try {
+      result = await waitForJob(job.id, (update) => {
+        if (!mine() || job.kind !== "batch") return;
+        if (update.line && update.line !== current) { // the batch moved on to the next line
+          if (current) generating.delete(current);
+          current = update.line;
+          generating.set(current, Date.now());
+          refresh().catch(() => {});
+        }
+        if (update.progress && update.progress !== last) { last = update.progress; setMessage(message, `${last}\u2026`); }
+      });
+    } catch (failure) { error = failure; }
+    followed.delete(job.id);
+    if (!mine()) return;
+    if (job.kind === "export") {
+      exporting = false;
+      if (error) setMessage(message, error.message, "warn");
+      else { setMessage(message, `Exported ${result.split("/").pop()}.`); loadExports(); }
+      return;
+    }
+    if (current) generating.delete(current);
+    if (job.kind === "batch") batch = null;
+    if (error) fail(error);
+    else if (job.kind === "batch") {
+      const skipped = result.skipped_empty ? ` Skipped ${plural(result.skipped_empty, "empty line")}.` : "";
+      setMessage(message, last.startsWith("Stopped") ? last : `Generated ${plural(result.generated, "line")}.${skipped}`);
+    } else {
+      setMessage(message, `Line ${number(current)} done.`);
+    }
+    try { session = await api("GET", `/api/sessions/${owner}`); } catch { return; }
+    if (!mine()) return;
+    const fresh = current && before && session.lines.find((l) => l.id === current)?.takes.find((t) => !before.has(t.file));
+    if (fresh && job.kind !== "batch") justDone = { line: current, file: fresh.file };
+    if (main.isConnected) draw();
   }
 
   async function generateMissing() {
@@ -1062,21 +1145,8 @@ export async function renderStudio(root) {
     try {
       for (const id of pendingTextIds()) await pendingText[id]();
       const { id } = await api("POST", `/api/sessions/${sid()}/${endpoint}`, { ...body, seed: seed || null });
-      batch = id;
-      draw();
-      let last = "";
-      const result = await waitForJob(id, (job) => {
-        if (job.progress && job.progress !== last) {
-          last = job.progress;
-          setMessage(message, `${job.progress}…`);
-          refresh();
-        }
-      });
-      const skipped = result.skipped_empty ? ` Skipped ${plural(result.skipped_empty, "empty line")}.` : "";
-      setMessage(message, last.startsWith("Stopped") ? last : `Generated ${plural(result.generated, "line")}.${skipped}`);
+      follow({ id, kind: "batch", line: null, started: Date.now() / 1000 });
     } catch (error) { fail(error); }
-    batch = null;
-    await refresh();
   }
 
   const pendingTextIds = () => Object.keys(pendingText);
@@ -1085,7 +1155,7 @@ export async function renderStudio(root) {
   function exportButton() {
     const missing = session.lines.map((l, n) => (playableFile(l) ? null : n + 1)).filter(Boolean);
     const ready = session.lines.length && !missing.length;
-    const button = el("button", { class: "btn", "aria-haspopup": "dialog", disabled: !ready,
+    const button = el("button", { class: "btn", "aria-haspopup": "dialog", disabled: !ready || exporting,
       title: !session.lines.length ? "Add lines first."
         : missing.length ? `Every line needs a take before exporting. Missing: ${plural(missing.length, "line")} (${missing.join(", ")}).`
           : "Join the selected take of every line, with its pause, into one audio file." }, "Export");
@@ -1115,12 +1185,9 @@ export async function renderStudio(root) {
   }
 
   async function exportSession(fmt) {
-    setMessage(message, "Exporting\u2026");
     try {
       const { id } = await api("POST", `/api/sessions/${sid()}/export`, { format: fmt });
-      const file = await waitForJob(id);
-      setMessage(message, `Exported ${file.split("/").pop()}.`);
-      await loadExports();
+      follow({ id, kind: "export", started: Date.now() / 1000 });
     } catch (error) { setMessage(message, error.message, "warn"); }
   }
 

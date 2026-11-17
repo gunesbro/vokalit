@@ -38,9 +38,11 @@ class NotFound(Exception):
 # --- Jobs ---------------------------------------------------------------------------------------
 
 
-def _start_job(work):
-    """Runs work(job) in a thread; the UI polls GET /api/jobs/<id>."""
-    job = {"id": uuid.uuid4().hex, "state": "running", "progress": "", "log": "", "result": None, "error": ""}
+def _start_job(work, session=None, kind=None, line=None):
+    """Runs work(job) in a thread; the UI polls GET /api/jobs/<id>. Jobs tagged with a session are listed by
+    GET /api/sessions/<sid>/jobs, so a screen opened later (or after switching tabs) shows them again."""
+    job = {"id": uuid.uuid4().hex, "state": "running", "progress": "", "log": "", "result": None, "error": "",
+           "session": session, "kind": kind, "line": line, "started": time.time()}
     _jobs[job["id"]] = job
 
     def run():
@@ -460,7 +462,7 @@ def generate_line(req, sid, lid):
         raise ws.WorkspaceError("Choose at least one model to generate with.")
     seed = body.get("seed")
     seed = _random_seed() if seed in (None, "") else int(seed)
-    return _start_job(lambda job: _generate_line(sid, lid, model_names, seed))
+    return _start_job(lambda job: _generate_line(sid, lid, model_names, seed), session=sid, kind="generate", line=lid)
 
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)/convert")
@@ -480,7 +482,7 @@ def convert_line(req, sid, lid):
             "sample_label": sample_label, "source_recording": str(recording),
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "generation_seconds": seconds,
             "duration": round(ws.wav_duration(out), 2)})
-    return _start_job(work)
+    return _start_job(work, session=sid, kind="convert", line=lid)
 
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)/takes/select")
@@ -515,9 +517,10 @@ def _batch_job(req, sid, pick):
                 job["progress"] = f"Stopped after {number - 1} of {len(todo)} lines."
                 return {"generated": number - 1, "skipped_empty": skipped}
             job["progress"] = f"Line {number}/{len(todo)}"
+            job["line"] = line_id
             _generate_line(sid, line_id, model_names, _random_seed() if seed in (None, "") else int(seed))
         return {"generated": len(todo), "skipped_empty": skipped}
-    return _start_job(work)
+    return _start_job(work, session=sid, kind="batch")
 
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/generate-missing")
@@ -555,7 +558,15 @@ def stop_generation(req, sid):
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/export")
 def export_session(req, sid):
     fmt = req["json"].get("format", "wav")
-    return _start_job(lambda job: ws.export_session(sid, fmt).relative_to(ws.workspace_root()).as_posix())
+    return _start_job(lambda job: ws.export_session(sid, fmt).relative_to(ws.workspace_root()).as_posix(),
+                      session=sid, kind="export")
+
+
+@route("GET", "/api/sessions/(?P<sid>[0-9-]+)/jobs")
+def session_jobs(req, sid):
+    """Jobs of this session that are still running (generate, batch, convert, export)."""
+    return [{key: job[key] for key in ("id", "kind", "line", "started", "progress")}
+            for job in list(_jobs.values()) if job["session"] == sid and job["state"] == "running"]
 
 
 EXPORT_INFO = {
@@ -597,8 +608,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep the console for real problems
         pass
 
-    def _send(self, status, body=b"", content_type="application/json"):
+    def _send(self, status, body=b"", content_type="application/json", headers=None):
         self.send_response(status)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Content-Security-Policy", CSP)
@@ -622,7 +635,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path.startswith("/ui/"):
             return self._file(_ui_dir, unquote(path[len("/ui/"):]), STATIC_TYPES)
         if method == "GET" and path.startswith("/files/"):
-            return self._file(ws.workspace_root(), unquote(path[len("/files/"):]), AUDIO_TYPES)
+            return self._file(ws.workspace_root(), unquote(path[len("/files/"):]), AUDIO_TYPES, ranges=True)
         if not path.startswith("/api/"):
             return self._send(404)
         if not secrets.compare_digest(self.headers.get("X-Vokalit-Token", ""), _token):
@@ -653,12 +666,27 @@ class Handler(BaseHTTPRequestHandler):
         page = page.replace("</head>", f'<meta name="vokalit-token" content="{_token}">\n</head>', 1)
         self._send(200, page.encode("utf-8"), STATIC_TYPES[".html"])
 
-    def _file(self, root, relative, types):
+    def _file(self, root, relative, types, ranges=False):
         root = Path(root).resolve()
         target = (root / relative).resolve()
         if not target.is_relative_to(root) or not target.is_file() or target.suffix not in types:
             return self._send(404)
-        self._send(200, target.read_bytes(), types[target.suffix])
+        data = target.read_bytes()
+        if not ranges:
+            return self._send(200, data, types[target.suffix])
+        # Byte ranges let the <audio> element seek (clicking a waveform); without them it restarts from 0.
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
+        if not match or not (match.group(1) or match.group(2)):
+            return self._send(200, data, types[target.suffix], {"Accept-Ranges": "bytes"})
+        size = len(data)
+        if match.group(1):
+            start, end = int(match.group(1)), min(int(match.group(2) or size - 1), size - 1)
+        else:  # last N bytes
+            start, end = max(0, size - int(match.group(2))), size - 1
+        if start >= size or start > end:
+            return self._send(416, b"", types[target.suffix], {"Content-Range": f"bytes */{size}"})
+        self._send(206, data[start:end + 1], types[target.suffix],
+                   {"Accept-Ranges": "bytes", "Content-Range": f"bytes {start}-{end}/{size}"})
 
     def do_GET(self):
         self._handle("GET")
