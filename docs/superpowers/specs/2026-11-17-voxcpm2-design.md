@@ -1,6 +1,6 @@
 # VoxCPM2 model and GPU memory on the Models screen: design
 
-Status: draft, waiting for the user's approval.
+Status: approved by the user (2026-11-17).
 
 ## 1. Intent
 
