@@ -193,8 +193,9 @@ Nothing has to be installed beforehand except the NVIDIA driver.
   the other dependencies are listed in `workers/chatterbox/requirements.txt` with upstream pins.
 - **Shared uv cache:** `UV_CACHE_DIR=.local/shared/uv-cache`, `UV_LINK_MODE=hardlink`. Identical package files
   (PyTorch) are stored once and linked into every environment that needs them; an environment only gains or loses
-  links, so one install cannot change another's files. After every install, cancel and remove, cache files no
-  environment links to (link count 1) are deleted, and `.local/shared/` goes with the last component. The clean-up
+  links, so one install cannot change another's files. After every install, cancel and remove, unpacked packages
+  (`archive-v0/<id>/`) that no environment links to (every file has link count 1) are deleted; uv's small index files
+  stay, so the next model finds PyTorch in the cache. `.local/shared/` goes with the last component. The clean-up
   waits for a running install; only one install runs at a time. Where hard links are impossible uv copies, and the
   clean-up empties the cache (each environment has its own copy).
 - **Progress:** no percentage (download sizes are not known in advance). A bar with one segment per step: finished

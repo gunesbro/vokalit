@@ -393,23 +393,31 @@ def _wait_for_delete(path):
 
 
 def clean_shared_cache():
-    """Deletes cache files no venv uses any more (link count 1: downloaded archives, packages of removed
-    components), and the whole shared folder once nothing is installed. Waits for a running install, whose fresh
-    downloads are not linked yet."""
+    """Deletes unpacked packages in the cache that no venv uses any more (every file of the archive has a link
+    count of 1: downloads of a cancelled install, packages of removed components), and the whole shared folder once
+    nothing is installed. uv's small index files are kept: they are how it finds a package it already has (deleting
+    them would download PyTorch again for the next model). Waits for a running install, whose fresh downloads are
+    not linked yet."""
     with _install_lock:
         folder = shared_dir()
         if not any(is_installed(name) for name in _components()):
             shutil.rmtree(folder, ignore_errors=True)
             return
-        for path, dirs, files in os.walk(folder, topdown=False):
-            for file in files:
-                full = os.path.join(path, file)
-                with contextlib.suppress(OSError):
-                    if os.lstat(full).st_nlink == 1:
-                        os.remove(full)
+        archives = os.path.join(folder, "uv-cache", "archive-v0")
+        with contextlib.suppress(FileNotFoundError):
+            for entry in os.scandir(archives):
+                if entry.is_dir(follow_symlinks=False) and not _linked(entry.path):
+                    shutil.rmtree(entry.path, ignore_errors=True)
+
+
+def _linked(folder):
+    """Whether any file in `folder` is also linked from somewhere else (a venv)."""
+    for path, _, files in os.walk(folder):
+        for file in files:
             with contextlib.suppress(OSError):
-                if path != folder:
-                    os.rmdir(path)  # only when empty
+                if os.lstat(os.path.join(path, file)).st_nlink > 1:
+                    return True
+    return False
 
 
 def delete_removed():

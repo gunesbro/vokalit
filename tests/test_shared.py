@@ -21,18 +21,25 @@ def local(tmp_path, monkeypatch):
     gates = {}  # command word -> Event the fake waits for
 
     def fake_run(command, env):
+        # uv's cache layout: unpacked packages in archive-v0/<id>/ (hard-linked into venvs), small index files that
+        # point to them elsewhere (wheels-v5/...), and archives of downloads no venv ended up using.
         cache = Path(env["UV_CACHE_DIR"])
         if command[1] == "venv":
             Path(command[-1]).mkdir(parents=True)
         elif command[1] == "pip":
             package = command[-1]
             venv = Path(command[command.index("--python") + 1]).parent
-            cache.mkdir(parents=True, exist_ok=True)
-            archive = cache / f"{package}.zip"
-            archive.write_bytes(b"z" * 10)
+            archive = cache / "archive-v0" / package
+            unused = cache / "archive-v0" / f"unused-{package}"
+            unused.mkdir(parents=True, exist_ok=True)
+            (unused / "x.py").write_bytes(b"z" * 10)
+            index = cache / "wheels-v5" / f"{package}.http"
+            index.parent.mkdir(parents=True, exist_ok=True)
+            index.write_text(f"archive-v0/{package}")
             if package in gates:
                 gates[package].wait(5)
-            source = cache / f"{package}.py"
+            archive.mkdir(parents=True, exist_ok=True)
+            source = archive / f"{package}.py"
             if not source.exists():
                 source.write_bytes(package.encode() * 1000)
             os.link(source, venv / f"{package}.py")
@@ -54,12 +61,13 @@ def test_two_models_share_cache_files(local):
     tmp_path, _ = local
     install("a")
     install("b")
-    shared = Path(models.shared_dir()) / "uv-cache" / "torch.py"
+    shared = Path(models.shared_dir()) / "uv-cache" / "archive-v0" / "torch" / "torch.py"
     assert os.stat(shared).st_nlink == 3
     sizes = models.sizes()
     torch_gb = 5000 / 1e9
     assert sizes["frees"]["a"] == pytest.approx((6000 + 500) / 1e9)  # only-a.py + weights, not torch
-    assert sizes["total_gb"] == pytest.approx((torch_gb * 1e9 + 6000 + 6000 + 1000) / 1e9)
+    index_files = sum(f.stat().st_size for f in (Path(models.shared_dir()) / "uv-cache" / "wheels-v5").iterdir())
+    assert sizes["total_gb"] == pytest.approx((torch_gb * 1e9 + 6000 + 6000 + 1000 + index_files) / 1e9)
 
 
 def test_remove_keeps_files_another_model_uses(local):
@@ -70,9 +78,9 @@ def test_remove_keeps_files_another_model_uses(local):
     kept = Path(models.model_dir("b")) / "venv" / "torch.py"
     assert kept.read_bytes() == b"torch" * 1000
     assert os.stat(kept).st_nlink == 2
-    cache = Path(models.shared_dir()) / "uv-cache"
-    assert not (cache / "only-a.py").exists()
-    assert not list(cache.glob("*.zip"))
+    archives = Path(models.shared_dir()) / "uv-cache" / "archive-v0"
+    assert not (archives / "only-a").exists()
+    assert not list(archives.glob("unused-*"))
 
 
 def test_last_remove_deletes_the_shared_folder(local):
@@ -89,7 +97,7 @@ def test_cleanup_waits_for_a_running_install(local):
     gates["only-a"] = threading.Event()
     runner = threading.Thread(target=install, args=("a",))
     runner.start()
-    archive = Path(models.shared_dir()) / "uv-cache" / "only-a.zip"
+    archive = Path(models.shared_dir()) / "uv-cache" / "archive-v0" / "unused-only-a" / "x.py"
     for _ in range(100):
         if archive.exists():
             break
@@ -117,11 +125,17 @@ def test_second_install_is_refused(local):
     assert models.installing() is None
 
 
-def test_downloaded_archives_are_cleaned_after_install(local):
+def test_unused_archives_are_cleaned_after_install(local):
     install("a")
-    cache = Path(models.shared_dir()) / "uv-cache"
-    assert not list(cache.glob("*.zip"))
-    assert (cache / "torch.py").exists()
+    archives = Path(models.shared_dir()) / "uv-cache" / "archive-v0"
+    assert not list(archives.glob("unused-*"))
+    assert (archives / "torch" / "torch.py").exists()
+
+
+def test_cache_index_files_are_kept(local):
+    # uv finds a package it already has through these; deleting them would download PyTorch again for the next model
+    install("a")
+    assert (Path(models.shared_dir()) / "uv-cache" / "wheels-v5" / "torch.http").exists()
 
 
 def test_sizes_are_read_from_the_file_without_walking(local, monkeypatch):

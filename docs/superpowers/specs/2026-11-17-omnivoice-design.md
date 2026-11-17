@@ -112,9 +112,10 @@ All components: 15.2 GB
 - Why one model cannot break another: an environment holds links to cache files; installing, upgrading or
   removing packages in one environment adds or removes links, never changes a file's contents. A model that needs a
   different version simply gets other files.
-- **Automatic clean-up** after every install, cancel and remove, in the background: delete every cache file that
-  no environment uses any more (its hard-link count is 1: only the cache holds it — downloaded archives and packages
-  of removed models), then empty directories. When no component is installed, delete `.local/shared` entirely.
+- **Automatic clean-up** after every install, cancel and remove, in the background: delete every unpacked package
+  in the cache (`archive-v0/<id>/`) that no environment uses any more (all its files have a hard-link count of 1).
+  uv's small index files stay — they are how uv finds a package it already has. When no component is installed,
+  delete `.local/shared` entirely.
 - Where hard links are impossible uv copies; then every cache file has a link count of 1 and the clean-up removes
   the whole cache — the same as today's behaviour.
 - Two installs at the same time are not allowed (the Install buttons of other rows are disabled while one runs)
