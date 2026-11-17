@@ -52,6 +52,8 @@ def main():
     models.delete_removed()
     models._start_background(models.clean_shared_cache)  # e.g. after an install the app was closed during
     url, _ = server.start(UI_DIR)
+    if models.is_installed("whisper"):
+        server.transcribe_missing()  # samples added while it was missing, or left when the app closed
     _windows_app_id()
     window = webview.create_window("Vokalit", url, width=1440, height=900, min_size=(1100, 700),
                                    background_color="#111214")

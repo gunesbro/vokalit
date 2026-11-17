@@ -5,6 +5,7 @@ Host are refused (DNS rebinding); the page may load nothing from outside (CSP). 
 """
 import functools
 import json
+import queue
 import random
 import re
 import secrets
@@ -97,6 +98,24 @@ def _model_view(name):
             "accent_setting": info.get("accent_setting")}
 
 
+def _component_view(name):
+    """A row of the Models screen: Whisper (a tool) or a voice model."""
+    info = models.spec(name)
+    installed = models.is_installed(name)
+    view = _model_view(name) if name in models.MODELS else {
+        "name": name, "title": info["title"], "summary": info["summary"], "url": info["url"],
+        "license": info["license"], "disk_gb": info["disk_gb"], "installed": installed,
+        "frees_gb": round(models.sizes()["frees"].get(name, 0.0), 1) if installed else None}
+    return {**view, "kind": "model" if name in models.MODELS else "tool", "recommended": info.get("recommended", False)}
+
+
+def _check_component(name):
+    try:
+        models.spec(name)
+    except KeyError:
+        raise NotFound() from None
+
+
 def _check_language(code, allow_none=False):
     if code is None and allow_none:
         return None
@@ -152,6 +171,62 @@ def _generate_line(session_id, line_id, model_names, seed):
             "duration": round(ws.wav_duration(out), 2)})
     if errors:
         raise RuntimeError(" ".join(errors))
+
+
+# --- Transcripts ---------------------------------------------------------------------------------
+
+_transcribe_queue = queue.Queue()
+_transcribing = set()  # (character, session or None, sample) queued or being transcribed
+_transcribe_lock = threading.Lock()
+
+
+def _transcribe_sample(cid, session_id, sample_id):
+    sample = next(s for s in ws.load_character(cid, session_id)["samples"] if s["id"] == sample_id)
+    try:
+        text = models.transcribe(str(ws.sample_path(cid, sample_id, session_id)), sample.get("language"))
+    except RuntimeError as error:  # e.g. Whisper is not installed; shown to the user
+        raise ws.WorkspaceError(str(error)) from None
+    ws.set_sample_transcript(cid, sample_id, text, session_id)
+
+
+def _transcriber():
+    while True:
+        key = _transcribe_queue.get()
+        try:
+            _transcribe_sample(*key)
+        except Exception as error:  # the sample stays without a transcript; the user can type it
+            print(f"Transcribing sample {key} failed: {error}", file=sys.stderr)
+        finally:
+            with _transcribe_lock:
+                _transcribing.discard(key)
+            _transcribe_queue.task_done()
+
+
+def transcribe_missing():
+    """Writes down, one at a time in the background, every sample that has no transcript yet (after Whisper is
+    installed, and at start-up when it is)."""
+    with _transcribe_lock:
+        if not getattr(transcribe_missing, "started", False):
+            threading.Thread(target=_transcriber, daemon=True).start()
+            transcribe_missing.started = True
+        for key in ws.samples_without_transcript():
+            if key not in _transcribing:
+                _transcribing.add(key)
+                _transcribe_queue.put(key)
+
+
+def _transcriber_idle(timeout):
+    """For tests: waits until every queued sample is done."""
+    end = time.time() + timeout
+    while _transcribing and time.time() < end:
+        time.sleep(0.02)
+
+
+def _mark_transcribing(cid, session_id, data):
+    with _transcribe_lock:
+        keys = set(_transcribing)
+    return {**data, "samples": [{**s, "transcribing": True} if (cid, session_id, s["id"]) in keys else s
+                                for s in data["samples"]]}
 
 
 def _random_seed():
@@ -229,28 +304,56 @@ def list_models(req):
     return [_model_view(name) for name in models.MODELS]
 
 
+@route("GET", "/api/components")
+def list_components(req):
+    """The Models screen: tools (Whisper) first, then the voice models."""
+    names = list(models.TOOLS) + list(models.MODELS)
+    return {"items": [_component_view(name) for name in names], "total_gb": round(models.sizes()["total_gb"], 1),
+            "installing": models.installing()}
+
+
 @route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/install")
 def install_model(req, name):
+    _check_component(name)
+
     def work(job):
         for kind, text in models.install(name):
             if kind == "status":
                 job["progress"] = text
             else:
                 job["log"] += text
-        return _model_view(name)
+        if name == "whisper":
+            transcribe_missing()
+        return _component_view(name)
     return _start_job(work)
 
 
 @route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/cancel")
 def cancel_model(req, name):
+    _check_component(name)
     models.cancel_install(name)
     return {}
 
 
 @route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/remove")
 def remove_model(req, name):
+    _check_component(name)
     models.remove(name)
-    return _model_view(name)
+    return _component_view(name)
+
+
+@route("POST", "/api/transcribe")
+def transcribe_clip(req):
+    """What is said in a trimmed clip that is not saved yet (the add-sample step)."""
+    language = _check_language(req["query"].get("language"), allow_none=True)
+    clip = ws.workspace_temp_file(".wav")
+    clip.write_bytes(req["raw"])
+    try:
+        return {"text": models.transcribe(str(clip), language)}
+    except RuntimeError as error:
+        raise ws.WorkspaceError(str(error)) from None
+    finally:
+        clip.unlink(missing_ok=True)
 
 
 @route("GET", "/api/characters")
@@ -262,7 +365,7 @@ def list_characters(req):
 
     for cid, _ in ws.list_characters():
         ws.remove_missing_samples(cid)
-    return [{**data, "id": cid, "used_in": used(cid)} for cid, data in ws.list_characters()]
+    return [{**_mark_transcribing(cid, None, data), "id": cid, "used_in": used(cid)} for cid, data in ws.list_characters()]
 
 
 @route("POST", "/api/characters")
@@ -281,7 +384,8 @@ def get_character(req, cid):
         raise NotFound()
     if ws.remove_missing_samples(cid, _session_arg(req)):
         data = ws.load_character(cid, _session_arg(req))
-    return {**data, "id": cid, "used_in": [] if _session_arg(req) else ws.sessions_using(cid)}
+    return {**_mark_transcribing(cid, _session_arg(req), data), "id": cid,
+            "used_in": [] if _session_arg(req) else ws.sessions_using(cid)}
 
 
 @route("PATCH", "/api/characters/(?P<cid>[0-9-]+)")
@@ -298,10 +402,13 @@ def delete_character(req, cid):
 
 @route("POST", "/api/characters/(?P<cid>[0-9-]+)/samples")
 def add_sample(req, cid):
+    transcript = req["query"].get("transcript", "").strip()
+    if not transcript:
+        raise ws.WorkspaceError("Write what the sample says first.")
     upload = ws.workspace_temp_file(".wav")
     upload.write_bytes(req["raw"])
     try:
-        ws.add_sample(cid, str(upload), req["query"].get("source", "upload"), _session_arg(req))
+        ws.add_sample(cid, str(upload), req["query"].get("source", "upload"), _session_arg(req), transcript=transcript)
     finally:
         upload.unlink(missing_ok=True)
     return get_character(req, cid)
@@ -314,8 +421,16 @@ def update_sample(req, cid, sample_id):
     if "language" in req["json"]:
         ws.set_sample_language(cid, sample_id, _check_language(req["json"]["language"], allow_none=True),
                                _session_arg(req))
+    if "transcript" in req["json"]:
+        ws.set_sample_transcript(cid, sample_id, req["json"]["transcript"], _session_arg(req))
     if req["json"].get("default"):
         ws.set_default_sample(cid, sample_id, _session_arg(req))
+    return get_character(req, cid)
+
+
+@route("POST", "/api/characters/(?P<cid>[0-9-]+)/samples/(?P<sample_id>s[0-9]+)/transcribe")
+def transcribe_sample(req, cid, sample_id):
+    _transcribe_sample(cid, _session_arg(req), sample_id)
     return get_character(req, cid)
 
 

@@ -52,6 +52,27 @@ MODELS = {
     },
 }
 
+# Components that are not voice models. Whisper writes down what a voice sample says; some models need that.
+TOOLS = {
+    "whisper": {
+        "title": "Whisper",
+        "summary": "Writes down what each voice sample says. Some models copy a voice better with it; without Whisper "
+                   "you type it.",
+        "url": "https://github.com/SYSTRAN/faster-whisper",
+        "disk_gb": 1.7,  # estimate; measured on Windows at the first install
+        "license": "MIT",
+        "recommended": True,
+        # Runs on the CPU (int8): no PyTorch, and the GPU stays free for the voice models.
+        "pip_steps": [("faster-whisper", ["faster-whisper==1.2.1"])],
+    },
+}
+
+
+def spec(name):
+    """A voice model's or a tool's entry. KeyError for anything else."""
+    return MODELS[name] if name in MODELS else TOOLS[name]
+
+
 _workers = {}
 _cancelled = set()
 
@@ -87,7 +108,7 @@ def shared_dir():
 
 
 def _components():
-    return list(MODELS)
+    return list(TOOLS) + list(MODELS)
 
 
 def _inodes(folder):
@@ -237,7 +258,7 @@ def _install(name):
     env["UV_CACHE_DIR"] = os.path.join(shared_dir(), "uv-cache")
     env["UV_LINK_MODE"] = "hardlink"
     steps = [("Python environment", [UV, "venv", "--python", "3.11", os.path.join(model_dir(name), "venv")])]
-    for label, args in MODELS[name]["pip_steps"]:
+    for label, args in spec(name)["pip_steps"]:
         steps.append((label, [UV, "pip", "install", "--python", _python(name), *args]))
     steps.append(("Model weights", [_python(name), _worker_script(name), "--download"]))
     started = time.monotonic()
@@ -403,8 +424,9 @@ def validate_settings(name, settings):
     return {**default_settings(name), **settings}
 
 
-def _ask(name, message):
-    """Sends one request to the model's worker. The model is loaded on first use and stays loaded."""
+def _request(name, message):
+    """Sends one request to the component's worker and returns its reply. The worker is started on first use and
+    stays loaded."""
     try:
         if name not in _workers:
             _workers[name] = _Worker(name)
@@ -416,11 +438,22 @@ def _ask(name, message):
         if reply.get("restart"):
             stop(name)  # the worker exited; the next request starts a fresh one
             raise RuntimeError(
-                f"The GPU stopped with an internal error, so {MODELS[name]['title']} was restarted (the next take "
+                f"The GPU stopped with an internal error, so {spec(name)['title']} was restarted (the next take "
                 "loads it again). If it keeps happening with these settings, lower Variation or Expressiveness, or "
                 f"try another seed. Details: {reply['error']}")
         raise RuntimeError(reply["error"])
-    return reply["seconds"]
+    return reply
+
+
+def _ask(name, message):
+    return _request(name, message)["seconds"]
+
+
+def transcribe(audio, language):
+    """What is said in `audio`, written by Whisper (on the CPU). `language`: a code, or None to detect it."""
+    if not is_installed("whisper"):
+        raise RuntimeError("Whisper is not installed.")
+    return _request("whisper", {"task": "transcribe", "audio": audio, "language": language})["text"]
 
 
 def generate(name, text, ref, out, seed, settings, language):

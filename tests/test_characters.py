@@ -62,3 +62,29 @@ def test_session_only_character_lives_in_session(tmp_workspace):
     assert ws.character_dir(cid, "S") == tmp_workspace / "sessions" / "S" / "characters" / cid
     assert (ws.character_dir(cid, "S") / "character.json").exists()
     assert ws.list_characters() == []
+
+
+def test_sample_keeps_its_transcript(tmp_workspace, tmp_path):
+    cid = ws.create_character("Burak")
+    sid = ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording", transcript="Merhaba, dünya.")
+    assert ws.load_character(cid)["samples"][0]["transcript"] == "Merhaba, dünya."
+    ws.set_sample_transcript(cid, sid, "  Merhaba dünya  ")
+    assert ws.load_character(cid)["samples"][0]["transcript"] == "Merhaba dünya"
+
+
+def test_empty_transcript_is_refused(tmp_workspace, tmp_path):
+    cid = ws.create_character("Burak")
+    sid = ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording", transcript="Hi")
+    with pytest.raises(ws.WorkspaceError, match="A transcript cannot be empty"):
+        ws.set_sample_transcript(cid, sid, "   ")
+
+
+def test_samples_without_transcript_lists_library_and_session_characters(tmp_workspace, tmp_path):
+    library = ws.create_character("Burak")
+    ws.add_sample(library, str(make_wav(tmp_path / "a.wav", 11)), "recording")
+    ws.add_sample(library, str(make_wav(tmp_path / "b.wav", 11)), "recording", transcript="Done")
+    session = ws.create_session("Episode")
+    guest = ws.create_character("Guest", session_id=session)
+    ws.add_sample(guest, str(make_wav(tmp_path / "c.wav", 11)), "upload", session_id=session)
+    assert sorted(ws.samples_without_transcript(), key=str) == sorted(
+        [(library, None, "s1"), (guest, session, "s1")], key=str)

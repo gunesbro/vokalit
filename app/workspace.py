@@ -153,7 +153,8 @@ def rename_character(char_id: str, name: str, session_id: str | None = None) -> 
     _save_character(char_id, data, session_id)
 
 
-def add_sample(char_id: str, source_path: str, source: str, session_id: str | None = None) -> str:
+def add_sample(char_id: str, source_path: str, source: str, session_id: str | None = None,
+               transcript: str | None = None) -> str:
     audio, sample_rate = sf.read(source_path)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
@@ -170,6 +171,7 @@ def add_sample(char_id: str, source_path: str, source: str, session_id: str | No
     data["samples"].append({
         "id": sample_id, "label": f"sample {number}", "file": file,
         "duration": round(duration, 2), "source": source, "created": _now(),
+        **({"transcript": transcript.strip()} if transcript and transcript.strip() else {}),
     })
     data["next_sample"] = number + 1
     if data["default_sample"] is None:
@@ -192,6 +194,22 @@ def set_sample_language(char_id: str, sample_id: str, language: str | None, sess
     data = load_character(char_id, session_id)
     _find_sample(data, sample_id)["language"] = language
     _save_character(char_id, data, session_id)
+
+
+def set_sample_transcript(char_id: str, sample_id: str, text: str, session_id: str | None = None) -> None:
+    """What is said in the sample; some models use it to copy the voice."""
+    if not text.strip():
+        raise WorkspaceError("A transcript cannot be empty.")
+    data = load_character(char_id, session_id)
+    _find_sample(data, sample_id)["transcript"] = text.strip()
+    _save_character(char_id, data, session_id)
+
+
+def samples_without_transcript() -> list[tuple[str, str | None, str]]:
+    """(character, session or None for the library, sample) of every sample with no transcript."""
+    scopes = [None] + [sid for sid, _ in list_sessions()]
+    return [(cid, scope, sample["id"]) for scope in scopes for cid, data in list_characters(scope)
+            for sample in data["samples"] if not sample.get("transcript")]
 
 
 def set_default_sample(char_id: str, sample_id: str, session_id: str | None = None) -> None:
