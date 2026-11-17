@@ -181,9 +181,10 @@ Nothing has to be installed beforehand except the NVIDIA driver.
   the other dependencies are listed in `workers/chatterbox/requirements.txt` with upstream pins.
 - **Per-model uv cache:** `UV_CACHE_DIR=.local/<model>/uv-cache` during install, deleted afterwards, so "Remove"
   frees all of it. Cost: reinstalling downloads the packages again.
-- **Progress:** a status line updated every few seconds (`Step 2/5: PyTorch with CUDA · 37% · 1.42 of ~12.3 GB · 3m 12s`)
-  above a collapsible log. Size = the model folder (hard links counted once); percent = size / measured total, at
-  most 99%.
+- **Progress:** no percentage (download sizes are not known in advance). A bar with one segment per step: finished
+  steps filled, the running one animated. Under it a status line updated every few seconds
+  (`Step 2/5: PyTorch with CUDA · 1.42 GB on disk · 3m 12s`; size = the model folder, hard links counted once),
+  above a collapsible log.
 - **Cancel** stops the running process within seconds and deletes `.local/<model>/`. Install always clears leftovers
   of an interrupted install first. A finished install writes `.local/<model>/installed`.
 - **Remove** shows the folder and the space it frees, then, after confirmation, stops the worker and deletes

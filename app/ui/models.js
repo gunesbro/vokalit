@@ -2,7 +2,7 @@
 import { api, el, setMessage, waitForJob } from "./app.js";
 
 // Install jobs survive switching screens.
-const installs = {}; // name -> { progress, log, percent }
+const installs = {}; // name -> { progress, log, step, steps }
 let missedNotice = null; // how an install ended while another screen was open: [text, kind]
 
 export async function renderModels(root) {
@@ -50,7 +50,7 @@ export async function renderModels(root) {
   function row(model) {
     const job = installs[model.name];
     const state = job ? "installing" : model.installed ? "installed" : "";
-    const statusText = job ? `Installing · ${job.percent}%` : model.installed ? `Installed · ${model.size_gb} GB` : "Not installed";
+    const statusText = job ? installingText(job) : model.installed ? `Installed · ${model.size_gb} GB` : "Not installed";
     const actions = el("div", { class: "row", style: { justifyContent: "flex-end" } });
     const container = el("div", { class: "table-row", "data-model": model.name },
       el("div", {},
@@ -71,12 +71,28 @@ export async function renderModels(root) {
     return container;
   }
 
+  // Download sizes are not known in advance, so instead of a percentage: one segment per step, the running one
+  // animated, and the size on disk and time under it.
   function progress(job) {
     return el("div", { class: "progress-wrap" },
-      el("div", { class: "progress", role: "progressbar", "aria-valuenow": job.percent, "aria-valuemin": 0, "aria-valuemax": 100 },
-        el("div", { style: { width: `${job.percent}%` } })),
-      el("div", { class: "row muted small num" }, el("div", {}, job.progress || "Starting…")),
+      steps(job),
+      el("div", { class: "row muted small num" }, el("div", {}, job.progress || "Starting\u2026")),
       el("details", {}, el("summary", {}, "Show install log"), el("pre", { class: "log" }, job.log || "")));
+  }
+
+  function steps(job) {
+    const bar = el("div", { class: "steps", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": job.steps },
+      ...Array.from({ length: job.steps }, () => el("div")));
+    markSteps(bar, job);
+    return bar;
+  }
+
+  // Changes classes only, so the running segment's animation does not restart on every update.
+  function markSteps(bar, job) {
+    bar.setAttribute("aria-valuenow", Math.max(0, job.step - 1));
+    [...bar.children].forEach((segment, i) => {
+      segment.className = i + 1 < job.step ? "done" : i + 1 === job.step ? "running" : "";
+    });
   }
 
   function confirmInstall(container, model) {
@@ -112,11 +128,13 @@ export async function renderModels(root) {
     setMessage(message, "");
     try {
       const { id } = await api("POST", `/api/models/${model.name}/install`);
-      installs[model.name] = { progress: "", log: "", percent: 0 };
+      installs[model.name] = { progress: "", log: "", step: 1, steps: 5 };
       refresh();
       await waitForJob(id, (j) => {
-        const percent = Number((j.progress.match(/(\d+)%/) || [])[1] || installs[model.name].percent);
-        installs[model.name] = { progress: j.progress, log: j.log, percent };
+        const [, step, steps] = j.progress.match(/^Step (\d+)\/(\d+)/) || [];
+        const last = installs[model.name];
+        installs[model.name] = { progress: j.progress, log: j.log,
+          step: Number(step || last.step), steps: Number(steps || last.steps) };
         if (root.isConnected) updateProgress(model.name);
       });
       report(`${model.title} is installed.`, "info");
@@ -129,20 +147,25 @@ export async function renderModels(root) {
     }
   }
 
+  function installingText(job) {
+    return `Installing \u00b7 step ${job.step} of ${job.steps}`;
+  }
+
   // Updates the progress block in place so an open log stays open.
   function updateProgress(name) {
     const job = installs[name];
     const container = body.querySelector(`[data-model="${name}"]`);
     const wrap = container?.querySelector(".progress-wrap");
     if (!wrap) return refresh();
-    wrap.querySelector(".progress > div").style.width = `${job.percent}%`;
-    wrap.querySelector(".progress").setAttribute("aria-valuenow", job.percent);
+    const bar = wrap.querySelector(".steps");
+    if (bar.children.length === job.steps) markSteps(bar, job);
+    else bar.replaceWith(steps(job));
     wrap.querySelector(".row div").textContent = job.progress || "Starting…";
     const log = wrap.querySelector("pre.log");
     const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
     log.textContent = job.log;
     if (atBottom) log.scrollTop = log.scrollHeight;
-    container.querySelector(".status").lastChild.textContent = `Installing · ${job.percent}%`;
+    container.querySelector(".status").lastChild.textContent = installingText(job);
   }
 
   async function cancel(model) {

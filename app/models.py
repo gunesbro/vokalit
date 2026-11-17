@@ -170,26 +170,27 @@ def install(name):
     for label, args in MODELS[name]["pip_steps"]:
         steps.append((label, [UV, "pip", "install", "--python", _python(name), *args]))
     steps.append(("Model weights", [_python(name), _worker_script(name), "--download"]))
-    started = last_status = time.monotonic()
+    started = time.monotonic()
+
+    def status(number, label):
+        elapsed = int(time.monotonic() - started)
+        return "status", (f"Step {number}/{len(steps)}: {label} \u00b7 {size_gb(name):.2f} GB on disk \u00b7 "
+                          f"{elapsed // 60}m {elapsed % 60:02d}s")
+
     try:
         for number, (label, command) in enumerate(steps, 1):
             yield "log", f"--- Step {number}/{len(steps)}: {label}\n"
+            yield status(number, label)
+            last_status = time.monotonic()
             with contextlib.closing(_run(command, env)) as output:
                 for line in output:
                     if name in _cancelled:
                         raise Cancelled()
                     if line:
                         yield "log", line
-                    now = time.monotonic()
-                    if now - last_status >= 3:
-                        last_status = now
-                        elapsed = int(now - started)
-                        size = size_gb(name)
-                        percent = min(99, int(100 * size / MODELS[name]["disk_gb"]))
-                        yield "status", (
-                            f"Step {number}/{len(steps)}: {label} · {percent}% · "
-                            f"{size:.2f} of ~{MODELS[name]['disk_gb']} GB · {elapsed // 60}m {elapsed % 60:02d}s"
-                        )
+                    if time.monotonic() - last_status >= 3:
+                        last_status = time.monotonic()
+                        yield status(number, label)
     except Exception:
         remove(name)
         raise
