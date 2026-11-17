@@ -3,6 +3,7 @@ import contextlib
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,20 @@ MODELS = {
         ],
     },
 }
+
+# Sounds written into a line's text as [tag] (OmniVoice performs them). Models without "supports_tags" get the text
+# without them; they would read them aloud.
+TAGS = ["laughter", "sigh", "confirmation-en", "question-en", "question-ah", "question-oh", "question-ei", "question-yi",
+        "surprise-ah", "surprise-oh", "surprise-wa", "surprise-yo", "dissatisfaction-hnn"]
+_TAG = re.compile(r"\[(?:" + "|".join(re.escape(tag) for tag in TAGS) + r")\]")
+
+
+def text_for(name, text):
+    """The line's text as `name` should get it: known tags removed unless the model performs them."""
+    if MODELS[name].get("supports_tags"):
+        return text
+    return re.sub(r"\s+", " ", _TAG.sub(" ", text)).strip()
+
 
 # Components that are not voice models. Whisper writes down what a voice sample says; some models need that.
 TOOLS = {

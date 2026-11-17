@@ -2,7 +2,7 @@
 import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
-import { commonLanguages, findPlayable, formatTime, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
+import { commonLanguages, findPlayable, formatTime, insertTag, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
 import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
 import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 
@@ -12,6 +12,14 @@ const ICON_SCISSORS = ["M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21a3 3 0 1 0 0-6
 const ICON_PREV = ["M18 6l-8 6 8 6z", "M6 6v12"];
 const ICON_NEXT = ["M6 6l8 6-8 6z", "M18 6v12"];
 const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
+
+// Names for the sound tags in the "Add sound" menu (the server sends the tags a model performs).
+const TAG_LABELS = {
+  laughter: "Laughter", sigh: "Sigh", "confirmation-en": "\u201cYes\u201d (agreeing)", "question-en": "Question (English)",
+  "question-ah": "Question \u201cah?\u201d", "question-oh": "Question \u201coh?\u201d", "question-ei": "Question \u201cei?\u201d",
+  "question-yi": "Question \u201cyi?\u201d", "surprise-ah": "Surprise \u201cah!\u201d", "surprise-oh": "Surprise \u201coh!\u201d",
+  "surprise-wa": "Surprise \u201cwa!\u201d", "surprise-yo": "Surprise \u201cyo!\u201d", "dissatisfaction-hnn": "Dissatisfied \u201chnn\u201d",
+};
 
 // Lines longer than this get a note and a "Split" action: models work best with sentence-sized lines.
 const LONG_LINE = 300;
@@ -736,6 +744,24 @@ export async function renderStudio(root) {
       draw();
       justClosed = null;
     };
+    // "Add sound": a [tag] at the cursor. Only models that perform tags get them; others get the text without.
+    function soundButton(field, save) {
+      const tags = [...new Set(installed().flatMap((m) => m.tags || []))];
+      if (!tags.length) return null;
+      const button = el("button", { class: "btn btn-ghost btn-small", title: "Only OmniVoice performs these sounds; other models skip them." },
+        "Add sound");
+      button.onclick = () => popover(button, el("div", { class: "menu" }, ...tags.map((tag) => el("button", { class: "menu-item",
+        onclick: () => {
+          document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+          const { value, caret } = insertTag(field.value, field.selectionStart, field.selectionEnd, tag);
+          field.value = value;
+          field.focus();
+          field.setSelectionRange(caret, caret);
+          field.dispatchEvent(new Event("input"));
+          save();
+        } }, TAG_LABELS[tag] || tag))));
+      return el("div", { class: "pop-holder" }, button);
+    }
     const counter = el("span", { class: "faint small num" }, `${line.text.length} characters`);
     text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
     const head = el("div", { class: "detail-head", title: "Click an empty spot to close" },
@@ -758,7 +784,7 @@ export async function renderStudio(root) {
       "data-line": line.id,
       onkeydown: (e) => { if (e.key === "Escape" && !e.target.closest(".popover")) { e.preventDefault(); close(); } } },
       head,
-      el("div", { class: "detail-text" }, text, el("div", { class: "row" }, el("div", { class: "spacer" }), counter)),
+      el("div", { class: "detail-text" }, text, el("div", { class: "row" }, soundButton(text, saveText), el("div", { class: "spacer" }), counter)),
       el("div", { class: "detail-row row wrap" },
         el("div", { class: "muted", title: TIP_MODELS }, "Generate with"), picker.element,
         el("label", { class: "row muted", title: TIP_SEED }, "Seed", lineSeed),

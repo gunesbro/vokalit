@@ -599,3 +599,45 @@ def test_transcript_is_sent_with_the_sample(api, monkeypatch, tmp_path):
     _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{line['id']}/generate", {"models": ["omnivoice"]})
     assert _wait(api, job["id"])["state"] == "done"
     assert calls == [("omnivoice", "Merhaba")]
+
+
+def test_line_of_only_tags_is_skipped_for_chatterbox(api, monkeypatch):
+    generated = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        assert text.strip(), "an empty text reached a model"
+        generated.append((name, text))
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, lid, _ = _session_with_line(api, "[laughter]")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox", "omnivoice"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Chatterbox Multilingual: Line 1 is empty" in done["error"]
+    assert generated == [("omnivoice", "[laughter]")]
+
+
+def test_chatterbox_gets_the_text_without_tags_and_the_take_keeps_them(api, monkeypatch):
+    generated = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        generated.append(text)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, lid, _ = _session_with_line(api, "Well [sigh] fine.")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert generated == ["Well fine."]
+    _, view, _ = api("GET", f"/api/sessions/{sid}")
+    assert view["lines"][0]["takes"][0]["text"] == "Well [sigh] fine."
+
+
+def test_models_list_their_tags(api):
+    _, listed, _ = api("GET", "/api/models")
+    tags = {m["name"]: m["tags"] for m in listed}
+    assert tags["chatterbox"] == [] and tags["omnivoice"] == models.TAGS

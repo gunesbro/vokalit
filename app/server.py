@@ -95,7 +95,8 @@ def _model_view(name):
             "frees_gb": round(models.sizes()["frees"].get(name, 0.0), 1) if installed else None,
             "settings": info["settings"], "supports_convert": info.get("supports_convert", False),
             "languages": [{"code": c, "name": models.LANGUAGE_NAMES[c]} for c in info.get("languages", [])],
-            "accent_setting": info.get("accent_setting")}
+            "accent_setting": info.get("accent_setting"),
+            "tags": models.TAGS if info.get("supports_tags") else []}
 
 
 def _component_view(name):
@@ -163,10 +164,15 @@ def _generate_line(session_id, line_id, model_names, seed):
             errors.append(f"{models.MODELS[name]['title']}: This sample has no transcript. Add it on the Characters "
                           "screen or install Whisper.")
             continue
+        text = models.text_for(name, line["text"])
+        if not text:  # only sound tags, which this model does not perform
+            number = next(i for i, l in enumerate(session["lines"], 1) if l["id"] == line_id)
+            errors.append(f"{models.MODELS[name]['title']}: Line {number} is empty without its sound tags.")
+            continue
         settings = ws.effective_settings(session, line, name, models.default_settings(name))
         out = ws.new_take_path(session_id, line_id, name)
         try:
-            seconds = models.generate(name, line["text"], str(ref) if ref else None, str(out), seed, settings, language,
+            seconds = models.generate(name, text, str(ref) if ref else None, str(out), seed, settings, language,
                                       ref_text=transcript)
         except Exception as error:
             errors.append(f"{models.MODELS[name]['title']}: {error}")

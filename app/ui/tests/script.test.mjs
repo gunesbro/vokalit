@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatTime, moveLine, pickerLabel, settingsChanges, takeNumber } from "../script.js";
+import { formatTime, insertTag, moveLine, pickerLabel, settingsChanges, takeNumber } from "../script.js";
 
 test("moveLine places a line before or after the target", () => {
   assert.deepEqual(moveLine(["a", "b", "c", "d"], "d", "b", false), ["a", "d", "b", "c"]);
@@ -71,4 +71,11 @@ test("findPlayable walks to the next or previous line with a selected take", asy
   assert.deepEqual(findPlayable(lines, 2, -1), { index: 0, skipped: [2, 1] });
   assert.deepEqual(findPlayable(lines, 4, 1), { index: -1, skipped: [] });
   assert.deepEqual(findPlayable([{ selected: null }], 0, 1), { index: -1, skipped: [0] });
+});
+
+test("insertTag puts the tag at the cursor with spaces around it", () => {
+  assert.deepEqual(insertTag("Hello world", 5, 5, "laughter"), { value: "Hello [laughter] world", caret: 16 });
+  assert.deepEqual(insertTag("", 0, 0, "laughter"), { value: "[laughter] ", caret: 11 });
+  assert.deepEqual(insertTag("Hi ", 3, 3, "sigh"), { value: "Hi [sigh] ", caret: 10 });
+  assert.deepEqual(insertTag("Hi there", 3, 8, "sigh"), { value: "Hi [sigh] ", caret: 10 }); // replaces a selection
 });

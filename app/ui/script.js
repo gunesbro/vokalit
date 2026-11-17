@@ -76,3 +76,14 @@ export function findPlayable(lines, from, step) {
   }
   return { index: -1, skipped };
 }
+
+// Puts "[tag]" where the cursor is (replacing a selection), with a space on each side unless one is already there.
+// Returns the new text and the cursor position after the tag (and an added space).
+export function insertTag(value, start, end, tag) {
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const trail = !after || !/^\s/.test(after) ? " " : "";
+  const inserted = `${lead}[${tag}]${trail}`;
+  return { value: before + inserted + after, caret: before.length + inserted.length };
+}
