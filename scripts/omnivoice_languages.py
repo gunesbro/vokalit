@@ -1,7 +1,9 @@
 """Throwaway: finds the language tables inside the installed omnivoice package (without importing it) and prints
 them as JSON. Run from the repo root with OmniVoice installed:
 
-    .\\.local\\omnivoice\\venv\\Scripts\\python.exe scripts\\omnivoice_languages.py > omnivoice-languages.json
+    .\\.local\\omnivoice\\venv\\Scripts\\python.exe scripts\\omnivoice_languages.py
+
+It writes omnivoice-languages.json (UTF-8) in the current folder.
 """
 import ast
 import json
@@ -38,4 +40,7 @@ for folder, _, files in os.walk(package):
 # Language data files shipped with the package, if any.
 data_files = [os.path.relpath(os.path.join(folder, f), package) for folder, _, files in os.walk(package)
               for f in files if f.endswith((".json", ".tsv", ".csv", ".txt", ".md"))]
-print(json.dumps({"tables": found, "data_files": data_files}, ensure_ascii=False, indent=1))
+# Written as UTF-8 by the script itself: the Windows console's code page cannot print every language name.
+with open("omnivoice-languages.json", "w", encoding="utf-8") as f:
+    json.dump({"tables": found, "data_files": data_files}, f, ensure_ascii=False, indent=1)
+print(f"Wrote omnivoice-languages.json ({len(found)} tables).")
