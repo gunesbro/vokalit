@@ -52,7 +52,7 @@ file. Everything is done by clicking in a desktop window.
 | Languages | 23 (Turkish via `language_id="tr"`) | 646, from its `utils/lang_map.py` (kept in `app/omnivoice_languages.json`); Vokalit's `ar` is sent as `arb` |
 | Size | ~500M parameters | ~0.6B parameters |
 | Measured disk use | 12.3 GB on Windows (libraries + weights) | ~9 GB estimate; PyTorch is shared with Chatterbox |
-| VRAM | ~3.5–4 GB | ~8 GB is enough (RTX 4090 test) |
+| VRAM | ~4.1 GB (measured, Windows) | ~2.6 GB (measured, Windows) |
 | Reference | Audio file | Audio file + its transcript (`needs_transcript`; stored with every sample) |
 | Sound tags (`[laughter]`, `[sigh]`, …) | No: removed from its text | Yes (`sounds`: each tag as itself) |
 | Code license | MIT | Apache 2.0 |

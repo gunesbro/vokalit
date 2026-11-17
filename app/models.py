@@ -47,7 +47,7 @@ MODELS = {
         "license": "MIT",
         "supports_convert": True,
         "needs_transcript": False,
-        "vram_gb": 4.0,  # measured: ~3.5-4 GB (SPEC.md \u00a74); used to make room before loading
+        "vram_gb": 4.1,  # measured on an RTX 4070 SUPER (Windows): ~4.1 GB; used to make room before loading
         "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
                       "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
         # When the sample's language differs from the line's, this setting value reduces the carried-over accent
@@ -74,7 +74,7 @@ MODELS = {
         "disk_gb": 9.0,  # estimate until measured on Windows
         "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
         "supports_convert": False,
-        "vram_gb": 3.0,  # estimate (0.6B in fp16 with its audio codec); replace with a measurement
+        "vram_gb": 2.7,  # measured on an RTX 4070 SUPER (Windows): ~2.6 GB
         "sounds": {tag: f"[{tag}]" for tag in TAGS},  # Vokalit's sound tags are OmniVoice's
         "needs_transcript": True,  # it copies a voice from the sample and what is said in it
         # Every language it lists, and "ar" (Chatterbox's Arabic), which it calls Standard Arabic.
