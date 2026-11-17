@@ -721,14 +721,17 @@ export async function renderStudio(root) {
     const picker = modelPicker(installed(), chosen, (names) => { lineModels[line.id] = names; draw(); });
     const lineSeed = el("input", { class: "input seed", placeholder: "Random", value: lineSeeds[line.id] ?? seed, inputmode: "numeric",
       "aria-label": "Seed for this line", oninput: () => { lineSeeds[line.id] = lineSeed.value.replace(/\D/g, ""); lineSeed.value = lineSeeds[line.id]; } });
-    const count = picker.get().length;
+    // Models that cannot speak the line's language are skipped (the note under the line says so).
+    const speaks = (name) => modelInfo(name)?.languages.some((l) => l.code === lineLanguage(line));
+    const usable = picker.get().filter(speaks);
+    const count = usable.length;
     const busy = generating.has(line.id);
     const deleteButton = el("button", { class: "btn btn-ghost icon-btn", "aria-label": `Delete line ${i + 1}`, title: "Delete line" },
       icon(ICONS.trash));
     deleteButton.onclick = () => confirmDeleteLine(deleteButton, line, i);
     const generateButton = el("button", { class: "btn btn-primary", disabled: busy || !count || !line.text.trim(),
-      title: line.text.trim() ? "" : "Write the line first",
-      onclick: () => generate(line, picker.get(), lineSeeds[line.id] ?? seed) },
+      title: !line.text.trim() ? "Write the line first" : !count && picker.get().length ? "No selected model speaks this language" : "",
+      onclick: () => generate(line, usable, lineSeeds[line.id] ?? seed) },
     busy ? busyLabel(line.id, "Generating\u2026") : `Generate ${plural(count || 0, "take")}`);
     text.addEventListener("input", () => {
       generateButton.disabled = busy || !count || !text.value.trim();
@@ -752,7 +755,7 @@ export async function renderStudio(root) {
     function soundButton(field, save) {
       const tags = [...new Set(installed().flatMap((m) => m.tags || []))];
       if (!tags.length) return null;
-      const button = el("button", { class: "btn btn-small sound-btn", title: "Only OmniVoice performs these sounds; other models skip them." },
+      const button = el("button", { class: "btn btn-small sound-btn", title: "Insert a sound at the cursor. Models that cannot perform sounds skip them." },
         icon(["M12 5v14", "M5 12h14"], 12), "Add sound");
       button.onclick = () => popover(button, el("div", { class: "menu" }, ...tags.map((tag) => el("button", { class: "menu-item",
         onclick: () => {
@@ -760,8 +763,14 @@ export async function renderStudio(root) {
           field.insertSound(tag);
           save();
         } }, TAG_LABELS[tag] || tag))));
+      const names = (list) => list.map((m) => m.title.split(" ")[0]).join(", ");
+      const performers = installed().filter((m) => m.tags?.length);
+      const skippers = installed().filter((m) => !m.tags?.length);
       return el("div", { class: "row sound-tools" }, el("div", { class: "pop-holder" }, button),
-        el("span", { class: "faint small" }, "Laughter, sighs and more, written into the text (OmniVoice; clearer with a higher Quality)"));
+        el("span", { class: "faint small" }, "or type [laughter], [sigh]\u2026 in the text. ",
+          `${names(performers)} ${performers.length === 1 ? "performs" : "perform"} them`
+          + (skippers.length ? `; ${names(skippers)} ${skippers.length === 1 ? "skips" : "skip"} them` : "")
+          + ". OmniVoice: clearer with a higher Quality."));
     }
     const counter = el("span", { class: "faint small num" }, `${line.text.length} characters`);
     text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
@@ -772,8 +781,8 @@ export async function renderStudio(root) {
       el("label", { class: "row field", title: "Which recording of the voice to clone. Samples recorded in different moods steer "
         + "the delivery. Without samples the model's default voice is used (random for OmniVoice unless a seed is set)." },
         "Sample", sampleSelect),
-      el("label", { class: "row field", title: "The language the text is read in. \u201cSession\u201d follows the session's "
-        + "language; only languages every selected model supports are listed." }, "Language",
+      el("label", { class: "row field", title: "The language the text is written in. Models read the text in that "
+        + "language; they do not translate it. \u201cSession\u201d follows the session's language." }, "Language",
         languageSelect(picker.get(), line.language, (code) => patch({ language: code }), session.language, true)),
       el("label", { class: "row field", title: "Silence after this line in the export, in seconds." }, "Pause", pause, "s"),
       el("div", { class: "spacer" }),
@@ -845,7 +854,7 @@ export async function renderStudio(root) {
     for (const name of names) {
       const info = modelInfo(name);
       if (info && !info.languages.some((l) => l.code === language)) {
-        notes.push(el("div", { class: "warn small" }, `${info.title} does not support ${languageName(language)}.`));
+        notes.push(el("div", { class: "warn small" }, `${info.title} does not support ${languageName(language)}, so it is skipped.`));
       }
     }
     return notes.length ? el("div", { class: "detail-row language-notes" }, notes) : null;

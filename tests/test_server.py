@@ -641,3 +641,20 @@ def test_models_list_their_tags(api):
     _, listed, _ = api("GET", "/api/models")
     tags = {m["name"]: m["tags"] for m in listed}
     assert tags["chatterbox"] == [] and tags["omnivoice"] == models.TAGS
+
+
+def test_model_without_the_language_is_skipped_when_another_speaks_it(api, monkeypatch):
+    generated = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        generated.append(name)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, lid, _ = _session_with_line(api, "Hello")
+    api("PATCH", f"/api/sessions/{sid}/lines/{lid}", {"language": "mhr"})  # Eastern Mari: OmniVoice only
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox", "omnivoice"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert generated == ["omnivoice"]

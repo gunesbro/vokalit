@@ -161,6 +161,10 @@ def _generate_line(session_id, line_id, model_names, seed):
         raise ws.WorkspaceError(f"Line {number} is empty. Write its text first.")
     language = ws.effective_language(session, line)
     errors = []
+    # A model that cannot speak the line's language is skipped, unless no chosen model can (then it is an error).
+    speaking = [n for n in model_names if language in models.MODELS[n].get("languages", [])]
+    if speaking:
+        model_names = speaking
     for name in model_names:
         if not models.is_installed(name):
             errors.append(f"{models.MODELS[name]['title']} is not installed.")
