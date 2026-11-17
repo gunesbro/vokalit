@@ -658,3 +658,27 @@ def test_model_without_the_language_is_skipped_when_another_speaks_it(api, monke
     _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox", "omnivoice"]})
     assert _wait(api, job["id"])["state"] == "done"
     assert generated == ["omnivoice"]
+
+
+def test_batch_generates_model_by_model(api, monkeypatch):
+    # Each model loads once: all lines with the first model, then all with the next (no swapping per line when the
+    # models do not fit on the GPU together). A line keeps one seed across models.
+    calls = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        calls.append((name, text, seed))
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, first, cid = _session_with_line(api, "One")
+    api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "Two"})
+    _, third, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "Three"})
+    api("PATCH", f"/api/sessions/{sid}/lines/{third['id']}", {"language": "mhr"})  # Eastern Mari: OmniVoice only
+    _, job, _ = api("POST", f"/api/sessions/{sid}/generate-missing", {"models": ["chatterbox", "omnivoice"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert [(n, t) for n, t, _ in calls] == [("chatterbox", "One"), ("chatterbox", "Two"),
+                                             ("omnivoice", "One"), ("omnivoice", "Two"), ("omnivoice", "Three")]
+    seeds = {t: {s for n, tt, s in calls if tt == t} for t in ("One", "Two", "Three")}
+    assert all(len(s) == 1 for s in seeds.values())

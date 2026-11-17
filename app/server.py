@@ -152,6 +152,14 @@ def _line_context(session_id, line_id):
     return session, line, character, ref, sample
 
 
+def _line_models(session, line, model_names):
+    """The chosen models that speak the line's language: the others are skipped. If none does, all of them (each then
+    reports that it does not support the language)."""
+    language = ws.effective_language(session, line)
+    speaking = [n for n in model_names if language in models.MODELS[n].get("languages", [])]
+    return speaking or list(model_names)
+
+
 def _generate_line(session_id, line_id, model_names, seed):
     session, line, character, ref, sample = _line_context(session_id, line_id)
     sample_label = sample["label"] if sample else "default voice"
@@ -161,10 +169,7 @@ def _generate_line(session_id, line_id, model_names, seed):
         raise ws.WorkspaceError(f"Line {number} is empty. Write its text first.")
     language = ws.effective_language(session, line)
     errors = []
-    # A model that cannot speak the line's language is skipped, unless no chosen model can (then it is an error).
-    speaking = [n for n in model_names if language in models.MODELS[n].get("languages", [])]
-    if speaking:
-        model_names = speaking
+    model_names = _line_models(session, line, model_names)
     for name in model_names:
         if not models.is_installed(name):
             errors.append(f"{models.MODELS[name]['title']} is not installed.")
@@ -662,17 +667,26 @@ def _batch_job(req, sid, pick):
     stop.clear()
 
     def work(job):
-        chosen = pick(ws.load_session(sid))
-        todo = [line["id"] for line in chosen if line["text"].strip()]
-        skipped = len(chosen) - len(todo)
-        for number, line_id in enumerate(todo, 1):
+        session = ws.load_session(sid)
+        chosen = pick(session)
+        lines = [line for line in chosen if line["text"].strip()]
+        skipped = len(chosen) - len(lines)
+        seeds = {line["id"]: _random_seed() if seed in (None, "") else int(seed) for line in lines}  # one per line
+        # Model by model: each model loads once and does all its lines, then makes room for the next, instead of
+        # swapping models on every line when they do not fit on the GPU together.
+        steps = [(name, line["id"]) for name in model_names for line in lines
+                 if name in _line_models(session, line, model_names)]
+        done_lines = set()
+        for number, (name, line_id) in enumerate(steps, 1):
             if stop.is_set():
-                job["progress"] = f"Stopped after {number - 1} of {len(todo)} lines."
-                return {"generated": number - 1, "skipped_empty": skipped}
-            job["progress"] = f"Line {number}/{len(todo)}"
+                job["progress"] = f"Stopped after {number - 1} of {len(steps)} takes."
+                return {"generated": len(done_lines), "skipped_empty": skipped}
+            title = models.MODELS[name]["title"].split(" ")[0]
+            job["progress"] = f"{title} \u00b7 take {number}/{len(steps)}"
             job["line"] = line_id
-            _generate_line(sid, line_id, model_names, _random_seed() if seed in (None, "") else int(seed))
-        return {"generated": len(todo), "skipped_empty": skipped}
+            _generate_line(sid, line_id, [name], seeds[line_id])
+            done_lines.add(line_id)
+        return {"generated": len(lines), "skipped_empty": skipped}
     return _start_job(work, session=sid, kind="batch")
 
 
