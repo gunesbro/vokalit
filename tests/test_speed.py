@@ -85,3 +85,40 @@ def test_leftovers_of_an_interrupted_remove_are_deleted(tmp_path, monkeypatch):
         time.sleep(0.02)
     assert not leftover.exists()
     assert (tmp_path / "chatterbox").exists()
+
+
+def test_remove_does_not_wait_when_a_file_is_still_locked(tmp_path, monkeypatch):
+    # Windows: a cancelled install's processes or the antivirus can hold a file for a while, so the rename fails.
+    _fake_install(tmp_path, monkeypatch, "1.00")
+    monkeypatch.setattr(models.os, "rename", lambda *a: (_ for _ in ()).throw(PermissionError()))
+    monkeypatch.setattr(models.time, "sleep", lambda s: None)
+    deleted = []
+    monkeypatch.setattr(models, "_delete_in_background", lambda path: deleted.append(path))
+
+    models.remove("chatterbox")
+
+    assert not models.is_installed("chatterbox")
+    assert deleted == [str(tmp_path / "chatterbox")]
+
+
+def test_install_waits_for_a_delete_of_its_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path))
+    order = []
+
+    class Slow:
+        def join(self):
+            order.append("deleted")
+
+    models._deleting[models.model_dir("chatterbox")] = Slow()
+
+    def run(command, env):
+        order.append("step")
+        os.makedirs(models.model_dir("chatterbox"), exist_ok=True)
+        yield from ()
+
+    monkeypatch.setattr(models, "_run", run)
+    monkeypatch.setattr(models, "size_gb", lambda name: 0.0)
+    (tmp_path / "chatterbox").mkdir()
+    list(models.install("chatterbox"))
+
+    assert order[0] == "deleted"

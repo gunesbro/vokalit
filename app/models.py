@@ -142,14 +142,25 @@ def _run(command, env):
         returncode = process.wait()
     finally:
         if process.poll() is None:  # stopped early (cancel or error)
-            process.kill()
+            _kill_tree(process)
     if returncode != 0:
         raise RuntimeError(f"Command failed: {' '.join(command)}")
 
 
+def _kill_tree(process):
+    """Also stops the command's child processes (uv's installers, downloads), which would keep files open."""
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True)
+    process.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=5)
+
+
 def install(name):
     """Yields ("log", line) and ("status", text). On failure or cancel removes the half-installed model and raises."""
+    _wait_for_delete(model_dir(name))
     remove(name)  # leftovers of an interrupted install
+    _wait_for_delete(model_dir(name))
     _cancelled.discard(name)
     env = _env(name, offline=False)
     # A per-model uv cache: its growth shows download progress, and it is deleted after the install.
@@ -201,21 +212,33 @@ def remove(name):
     folder = model_dir(name)
     if not os.path.exists(folder):
         return
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(_marker(name))  # not installed from now on, whatever happens below
     trash = os.path.join(LOCAL, f".removing-{name}-{time.time_ns()}")
-    for _ in range(20):  # the killed worker may hold its files for a moment
+    for _ in range(8):  # a killed process may hold its files for a moment
         try:
             os.rename(folder, trash)
             break
         except PermissionError:
             time.sleep(0.25)
     else:
-        shutil.rmtree(folder, ignore_errors=True)
-        return
+        trash = folder  # still locked: delete it in place; an install waits for that (_wait_for_delete)
     _delete_in_background(trash)
 
 
+_deleting = {}  # folder -> thread deleting it in place
+
+
 def _delete_in_background(path):
-    threading.Thread(target=shutil.rmtree, args=(path,), kwargs={"ignore_errors": True}, daemon=True).start()
+    thread = threading.Thread(target=shutil.rmtree, args=(path,), kwargs={"ignore_errors": True}, daemon=True)
+    _deleting[path] = thread
+    thread.start()
+
+
+def _wait_for_delete(path):
+    thread = _deleting.pop(path, None)
+    if thread:
+        thread.join()
 
 
 def delete_removed():
