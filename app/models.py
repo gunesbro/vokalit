@@ -450,10 +450,12 @@ def _ask(name, message):
 
 
 def transcribe(audio, language):
-    """What is said in `audio`, written by Whisper (on the CPU). `language`: a code, or None to detect it."""
+    """What is said in `audio`, written by Whisper (on the CPU): {"text", "language"}. `language`: a code, or None to
+    detect it."""
     if not is_installed("whisper"):
         raise RuntimeError("Whisper is not installed.")
-    return _request("whisper", {"task": "transcribe", "audio": audio, "language": language})["text"]
+    reply = _request("whisper", {"task": "transcribe", "audio": audio, "language": language})
+    return {"text": reply["text"], "language": reply.get("language")}
 
 
 def generate(name, text, ref, out, seed, settings, language):

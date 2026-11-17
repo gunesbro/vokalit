@@ -34,9 +34,9 @@ def test_download_loads_turbo_on_cpu(installed):
     assert "stub whisper large-v3-turbo loaded on cpu as int8" in installed
 
 
-def test_transcribe_returns_text(installed):
-    assert models.transcribe("/samples/s1.wav", "tr") == "heard:s1.wav :tr"
-    assert models.transcribe("/samples/s2.wav", None) == "heard:s2.wav :None"
+def test_transcribe_returns_text_and_language(installed):
+    assert models.transcribe("/samples/s1.wav", "en") == {"text": "heard:s1.wav :en", "language": "en"}
+    assert models.transcribe("/samples/s2.wav", None) == {"text": "heard:s2.wav :None", "language": "tr"}
 
 
 def test_network_blocked_in_whisper_worker(installed):

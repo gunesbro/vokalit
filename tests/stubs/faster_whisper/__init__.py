@@ -15,5 +15,11 @@ class WhisperModel:
         if "NET" in audio:
             import socket
             socket.create_connection(("1.1.1.1", 443), timeout=1)
-        # Two segments, as Whisper splits longer speech; their texts start with a space.
-        return iter([_Segment(f" heard:{os.path.basename(audio)}"), _Segment(f" :{language}")]), None
+        # Two segments, as Whisper splits longer speech; their texts start with a space. Without a language it
+        # "detects" Turkish.
+        return iter([_Segment(f" heard:{os.path.basename(audio)}"), _Segment(f" :{language}")]), _Info(language or "tr")
+
+
+class _Info:
+    def __init__(self, language):
+        self.language = language

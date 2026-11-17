@@ -50,9 +50,10 @@ def main():
         request = json.loads(line)
         try:
             start = time.perf_counter()
-            segments, _ = model.transcribe(request["audio"], language=request.get("language"), beam_size=5)
+            segments, info = model.transcribe(request["audio"], language=request.get("language"), beam_size=5)
             text = " ".join(segment.text.strip() for segment in segments).strip()
-            send(ok=True, text=text, seconds=round(time.perf_counter() - start, 1))
+            # The language it heard (detected when none was given).
+            send(ok=True, text=text, language=info.language, seconds=round(time.perf_counter() - start, 1))
         except Exception as error:
             send(ok=False, error=str(error))
 

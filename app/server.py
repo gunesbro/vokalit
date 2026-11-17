@@ -183,10 +183,18 @@ _transcribe_lock = threading.Lock()
 def _transcribe_sample(cid, session_id, sample_id):
     sample = next(s for s in ws.load_character(cid, session_id)["samples"] if s["id"] == sample_id)
     try:
-        text = models.transcribe(str(ws.sample_path(cid, sample_id, session_id)), sample.get("language"))
+        heard = models.transcribe(str(ws.sample_path(cid, sample_id, session_id)), sample.get("language"))
     except RuntimeError as error:  # e.g. Whisper is not installed; shown to the user
         raise ws.WorkspaceError(str(error)) from None
-    ws.set_sample_transcript(cid, sample_id, text, session_id)
+    ws.set_sample_transcript(cid, sample_id, heard["text"], session_id)
+    language = _known_language(heard["language"])
+    if language and not sample.get("language"):  # a language the user chose is kept
+        ws.set_sample_language(cid, sample_id, language, session_id)
+
+
+def _known_language(code):
+    """Whisper hears ~100 languages; samples keep only the ones Vokalit lists."""
+    return code if code in models.LANGUAGE_NAMES else None
 
 
 def _transcriber():
@@ -349,7 +357,8 @@ def transcribe_clip(req):
     clip = ws.workspace_temp_file(".wav")
     clip.write_bytes(req["raw"])
     try:
-        return {"text": models.transcribe(str(clip), language)}
+        heard = models.transcribe(str(clip), language)
+        return {"text": heard["text"], "language": _known_language(heard["language"])}
     except RuntimeError as error:
         raise ws.WorkspaceError(str(error)) from None
     finally:
@@ -405,12 +414,16 @@ def add_sample(req, cid):
     transcript = req["query"].get("transcript", "").strip()
     if not transcript:
         raise ws.WorkspaceError("Write what the sample says first.")
+    language = _check_language(req["query"].get("language"), allow_none=True)
     upload = ws.workspace_temp_file(".wav")
     upload.write_bytes(req["raw"])
     try:
-        ws.add_sample(cid, str(upload), req["query"].get("source", "upload"), _session_arg(req), transcript=transcript)
+        sample_id = ws.add_sample(cid, str(upload), req["query"].get("source", "upload"), _session_arg(req),
+                                  transcript=transcript)
     finally:
         upload.unlink(missing_ok=True)
+    if language:
+        ws.set_sample_language(cid, sample_id, language, _session_arg(req))
     return get_character(req, cid)
 
 

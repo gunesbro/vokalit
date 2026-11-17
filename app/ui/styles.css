@@ -180,6 +180,11 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .meter > div { height: 100%; width: 0; background: var(--ok); transition: width .15s; }
 .warn { color: var(--warn); }
 .review-box { display: flex; flex-direction: column; gap: 10px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 4px; }
+.transcript-input { width: 100%; resize: vertical; }
+.sample-transcript { grid-column: 3 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
+.sample-transcript .transcript-input { flex: 1 1 100%; }
+.transcript-text { overflow-wrap: anywhere; }
 .range { display: flex; flex-direction: column; gap: 8px; }
 .range-track { position: relative; padding: 4px 0; user-select: none; touch-action: none; }
 .range-selection { position: absolute; top: 0; bottom: 0; background: rgba(233, 161, 91, .12);

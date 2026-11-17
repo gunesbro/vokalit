@@ -166,6 +166,9 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
 
   const path = (suffix = "") => `/api/characters/${charId}${suffix}${query(sessionId)}`;
   const fail = (error) => setMessage(message, error.message, "error");
+  // Whisper writes transcripts; without it they are typed. Checked when the panel opens.
+  const whisper = api("GET", "/api/components")
+    .then(({ items }) => Boolean(items.find((c) => c.name === "whisper")?.installed)).catch(() => false);
 
   let shown = null;
   async function refresh(data) {
@@ -174,6 +177,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     shown = JSON.stringify(character);
     draw(character);
     onChange(character);
+    // Whisper is writing transcripts in the background: look again shortly.
+    if (character.samples.some((s) => s.transcribing)) setTimeout(() => root.isConnected && refresh().catch(() => {}), 2000);
   }
 
   // Coming back to the window (e.g. after deleting a file in File Explorer) reloads the character; the server
@@ -226,8 +231,44 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       el("div", { class: "muted num" }, `${sample.duration.toFixed(1)} s · ${sample.source === "recording" ? "recorded" : "uploaded"}`),
       el("div", { class: "row end" }, revealButton(url.slice("/files/".length)),
         el("button", { class: "btn btn-ghost icon-btn", title: "Delete sample", "aria-label": "Delete sample",
-        onclick: () => confirmDeleteSample(row, sample) }, icon(ICONS.trash))));
+        onclick: () => confirmDeleteSample(row, sample) }, icon(ICONS.trash))),
+      transcriptLine(sample));
     return row;
+  }
+
+  // What the sample says: shown, corrected by hand, or written again by Whisper.
+  function transcriptLine(sample) {
+    const box = el("div", { class: "sample-transcript" });
+    const again = (label) => el("button", { class: "btn btn-ghost btn-small", title: "Let Whisper write it again from the recording",
+      onclick: async (event) => {
+        event.currentTarget.disabled = true;
+        event.currentTarget.textContent = "Transcribing\u2026";
+        api("POST", path(`/samples/${sample.id}/transcribe`)).then(refresh, (error) => { fail(error); refresh(); });
+      } }, label);
+    const edit = () => {
+      const field = el("textarea", { class: "textarea transcript-input", rows: 2, value: sample.transcript || "",
+        "aria-label": "What the sample says" });
+      const save = el("button", { class: "btn btn-primary btn-small", disabled: !field.value.trim(), onclick: () =>
+        api("PATCH", path(`/samples/${sample.id}`), { transcript: field.value }).then(refresh, fail) }, "Save");
+      field.addEventListener("input", () => { save.disabled = !field.value.trim(); });
+      box.replaceChildren(field, el("div", { class: "row" }, save,
+        el("button", { class: "btn btn-ghost btn-small", onclick: paint }, "Cancel")));
+      field.focus();
+    };
+    const paint = () => {
+      if (sample.transcribing) return box.replaceChildren(el("span", { class: "muted small" }, "Transcribing\u2026"));
+      const pencil = el("button", { class: "btn btn-ghost icon-btn", title: "Correct the transcript", "aria-label": "Edit transcript",
+        onclick: edit }, icon(["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"]));
+      box.replaceChildren(
+        sample.transcript
+          ? el("span", { class: "muted small transcript-text", title: "What the sample says. Some models use it to copy the voice." },
+            `\u201c${sample.transcript}\u201d`)
+          : el("span", { class: "faint small" }, "No transcript"),
+        sample.transcript ? pencil : el("button", { class: "btn btn-ghost btn-small", onclick: edit }, "Add"));
+      whisper.then((ok) => ok && box.append(again(sample.transcript ? "Transcribe again" : "Transcribe")));
+    };
+    paint();
+    return box;
   }
 
   function confirmDeleteSample(row, sample) {
@@ -331,18 +372,70 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
 
     function showReview(samples, sampleRate, source) {
       const status = el("span", { class: "small" });
-      const save = el("button", { class: "btn btn-primary" }, "Add sample");
+      const save = el("button", { class: "btn btn-primary", disabled: true }, "Add sample");
+      // What the sample says: Whisper writes it (and hears the language) when installed, otherwise it is typed.
+      const field = el("textarea", { class: "textarea transcript-input", rows: 2, "aria-label": "What does this sample say?",
+        placeholder: "Type what is said in the sample" });
+      const fieldNote = el("div", { class: "muted small" });
+      const againButton = el("button", { class: "btn btn-ghost btn-small", hidden: true, title: "Let Whisper write it again",
+        onclick: () => transcribe() }, "Transcribe again");
+      let typed = false; // the user's own text is not replaced by a later automatic transcription
+      let language = null; // what Whisper heard
+      let lengthOk = false;
+      let request = 0;
+      let pending = null; // the automatic transcription after the trim settles
+      const paintSave = () => { save.disabled = !lengthOk || !field.value.trim(); };
+      field.addEventListener("input", () => { typed = true; paintSave(); });
+
+      async function transcribe() {
+        const mine = ++request;
+        const [start, end] = range.getRange();
+        field.disabled = true;
+        againButton.disabled = true;
+        fieldNote.className = "muted small";
+        fieldNote.textContent = "Transcribing\u2026";
+        try {
+          const heard = await api("POST", "/api/transcribe", encodeWav(trim(samples, sampleRate, start, end), sampleRate));
+          if (mine !== request) return;
+          field.value = heard.text;
+          language = heard.language;
+          typed = false;
+          fieldNote.textContent = "Written by Whisper. Correct it if something is wrong.";
+        } catch (error) {
+          if (mine !== request) return;
+          fieldNote.className = "warn small";
+          fieldNote.textContent = `Whisper could not write it (${error.message}). Type it instead.`;
+        } finally {
+          if (mine === request) {
+            field.disabled = false;
+            againButton.disabled = false;
+            paintSave();
+          }
+        }
+      }
+
       const range = rangeEditor(samples, sampleRate, (start, end) => {
-        const ok = end - start >= MIN_SECONDS;
-        save.disabled = !ok;
-        status.textContent = ok ? "" : `Select at least ${MIN_SECONDS} seconds.`;
-        status.className = ok ? "small" : "warn small";
+        lengthOk = end - start >= MIN_SECONDS;
+        paintSave();
+        status.textContent = lengthOk ? "" : `Select at least ${MIN_SECONDS} seconds.`;
+        status.className = lengthOk ? "small" : "warn small";
+        clearTimeout(pending);
+        pending = setTimeout(() => whisper.then((ok) => ok && !typed && lengthOk && field.isConnected && transcribe()), 800);
+      });
+      whisper.then((ok) => {
+        againButton.hidden = !ok;
+        if (ok) return;
+        fieldNote.className = "muted small";
+        fieldNote.replaceChildren("Type exactly what is said in the sample. Some models use it to copy the voice. Install Whisper on the ",
+          el("a", { href: "#/models" }, "Models screen"), " to have it written for you.");
       });
       save.onclick = async () => {
         const [start, end] = range.getRange();
         save.disabled = true;
         try {
-          const data = await api("POST", `${path("/samples")}${sessionId ? "&" : "?"}source=${source}`,
+          const extra = `source=${source}&transcript=${encodeURIComponent(field.value.trim())}`
+            + (language ? `&language=${language}` : "");
+          const data = await api("POST", `${path("/samples")}${sessionId ? "&" : "?"}${extra}`,
             encodeWav(trim(samples, sampleRate, start, end), sampleRate));
           review.replaceChildren();
           timer.textContent = "0:00";
@@ -356,6 +449,9 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       review.replaceChildren(el("div", { class: "review-box" },
         el("div", { class: "muted small" }, "Drag the handles to cut silence or mistakes from the start and end."),
         range.element,
+        el("label", { class: "field-label" }, "What does this sample say?"),
+        field,
+        el("div", { class: "row" }, fieldNote, el("div", { class: "spacer" }), againButton),
         el("div", { class: "row" }, save, el("button", { class: "btn btn-ghost", onclick: () => review.replaceChildren() }, "Discard"), status)));
     }
 

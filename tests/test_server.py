@@ -487,10 +487,25 @@ def test_transcribe_endpoint_without_whisper(api, tmp_path, monkeypatch):
 
 def test_transcribe_endpoint_passes_the_language(api, tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(models, "transcribe", lambda audio, language: calls.append(language) or "Hello")
+    monkeypatch.setattr(models, "transcribe",
+                        lambda audio, language: calls.append(language) or {"text": "Hello", "language": "tr"})
     status, body, _ = api("POST", "/api/transcribe?language=tr", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
                           content_type="audio/wav")
-    assert status == 200 and body == {"text": "Hello"} and calls == ["tr"]
+    assert status == 200 and body == {"text": "Hello", "language": "tr"} and calls == ["tr"]
+
+
+def test_unknown_detected_language_is_dropped(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(models, "transcribe", lambda audio, language: {"text": "Salve", "language": "la"})
+    status, body, _ = api("POST", "/api/transcribe", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
+                          content_type="audio/wav")
+    assert status == 200 and body == {"text": "Salve", "language": None}
+
+
+def test_new_sample_takes_the_detected_language(api, tmp_path):
+    _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
+    status, body, _ = api("POST", f"/api/characters/{character['id']}/samples?source=upload&transcript=Hi&language=tr",
+                          raw=make_wav(tmp_path / "s.wav", 11).read_bytes(), content_type="audio/wav")
+    assert status == 200 and body["samples"][0]["language"] == "tr"
 
 
 def test_saved_sample_can_be_transcribed_again(api, tmp_path, monkeypatch):
@@ -499,7 +514,8 @@ def test_saved_sample_can_be_transcribed_again(api, tmp_path, monkeypatch):
     api("POST", f"/api/characters/{cid}/samples?source=upload&transcript=Old", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
         content_type="audio/wav")
     api("PATCH", f"/api/characters/{cid}/samples/s1", {"language": "en"})
-    monkeypatch.setattr(models, "transcribe", lambda audio, language: f"New {language} {Path(audio).name}")
+    monkeypatch.setattr(models, "transcribe",
+                        lambda audio, language: {"text": f"New {language} {Path(audio).name}", "language": language})
     status, body, _ = api("POST", f"/api/characters/{cid}/samples/s1/transcribe")
     assert status == 200 and body["samples"][0]["transcript"] == "New en s1.wav"
 
@@ -519,11 +535,12 @@ def test_missing_transcripts_are_written_in_the_background(api, tmp_workspace, t
     cid = ws.create_character("Burak")
     ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording")
     ws.add_sample(cid, str(make_wav(tmp_path / "b.wav", 11)), "recording")
+    ws.set_sample_language(cid, "s2", "en")
     release = threading.Event()
 
     def fake(audio, language):
         release.wait(5)
-        return f"heard {Path(audio).name}"
+        return {"text": f"heard {Path(audio).name}", "language": "tr"}
 
     monkeypatch.setattr(models, "transcribe", fake)
     server.transcribe_missing()
@@ -533,4 +550,5 @@ def test_missing_transcripts_are_written_in_the_background(api, tmp_workspace, t
     server._transcriber_idle(5)
     _, body, _ = api("GET", f"/api/characters/{cid}")
     assert [s["transcript"] for s in body["samples"]] == ["heard s1.wav", "heard s2.wav"]
+    assert [s.get("language") for s in body["samples"]] == ["tr", "en"]  # a chosen language is kept
     assert not any(s.get("transcribing") for s in body["samples"])
