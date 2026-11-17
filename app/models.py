@@ -195,8 +195,35 @@ def cancel_install(name):
 
 
 def remove(name):
+    """Deleting tens of thousands of files takes minutes on Windows, so the folder is renamed (instant) and
+    deleted in the background."""
     stop(name)
-    shutil.rmtree(model_dir(name), ignore_errors=True)
+    folder = model_dir(name)
+    if not os.path.exists(folder):
+        return
+    trash = os.path.join(LOCAL, f".removing-{name}-{time.time_ns()}")
+    for _ in range(20):  # the killed worker may hold its files for a moment
+        try:
+            os.rename(folder, trash)
+            break
+        except PermissionError:
+            time.sleep(0.25)
+    else:
+        shutil.rmtree(folder, ignore_errors=True)
+        return
+    _delete_in_background(trash)
+
+
+def _delete_in_background(path):
+    threading.Thread(target=shutil.rmtree, args=(path,), kwargs={"ignore_errors": True}, daemon=True).start()
+
+
+def delete_removed():
+    """Deletes what a remove left behind when the app closed before it finished."""
+    with contextlib.suppress(FileNotFoundError):
+        for entry in os.scandir(LOCAL):
+            if entry.name.startswith(".removing-") and entry.is_dir():
+                _delete_in_background(entry.path)
 
 
 class _Worker:

@@ -49,6 +49,7 @@ def _windows_window_icon(window):
 
 def main():
     shutil.rmtree(workspace.workspace_root() / ".tmp", ignore_errors=True)  # leftovers from a crash
+    models.delete_removed()
     url, _ = server.start(UI_DIR)
     _windows_app_id()
     window = webview.create_window("Vokalit", url, width=1440, height=900, min_size=(1100, 700),

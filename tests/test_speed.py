@@ -1,5 +1,6 @@
 """The screens must open fast: no folder walks or subprocesses per request."""
 import os
+import time
 
 os.environ.setdefault("VOKALIT_UV", "uv")
 import models  # noqa: E402
@@ -56,3 +57,31 @@ def test_character_list_reads_sessions_once(tmp_workspace, monkeypatch):
     listed = {c["id"]: c["used_in"] for c in server.list_characters({})}
     assert listed == {a: ["Episode"], b: []}
     assert len(reads) == 1
+
+
+def test_remove_returns_before_the_files_are_deleted(tmp_path, monkeypatch):
+    _fake_install(tmp_path, monkeypatch, "1.00")
+    deleted = []
+    monkeypatch.setattr(models, "_delete_in_background", lambda path: deleted.append(path))
+
+    models.remove("chatterbox")
+
+    assert not models.is_installed("chatterbox")
+    assert not (tmp_path / "chatterbox").exists()  # a new install can start right away
+    assert len(deleted) == 1 and os.path.isdir(deleted[0])  # the slow delete happens later
+
+
+def test_leftovers_of_an_interrupted_remove_are_deleted(tmp_path, monkeypatch):
+    _fake_install(tmp_path, monkeypatch, "1.00")
+    leftover = tmp_path / ".removing-chatterbox-1"
+    leftover.mkdir()
+    (leftover / "weights.bin").write_bytes(b"x")
+
+    models.delete_removed()
+
+    for _ in range(100):  # deleted in the background
+        if not leftover.exists():
+            break
+        time.sleep(0.02)
+    assert not leftover.exists()
+    assert (tmp_path / "chatterbox").exists()

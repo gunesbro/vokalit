@@ -91,7 +91,11 @@ export async function renderModels(root) {
         el("span", { class: "muted" }, `This permanently deletes .local/${model.name}/ and frees ${model.size_gb} GB.`)),
       el("div", { class: "spacer" }),
       el("button", { class: "btn", onclick: () => refresh() }, "Keep"),
-      el("button", { class: "btn btn-danger", onclick: () => remove(model) }, "Remove")));
+      el("button", { class: "btn btn-danger", onclick: (event) => {
+        for (const button of container.querySelectorAll(".confirm button")) button.disabled = true;
+        event.currentTarget.textContent = "Removing…";
+        remove(model);
+      } }, "Remove")));
   }
 
   async function install(model) {
