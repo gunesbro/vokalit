@@ -236,7 +236,8 @@ export async function renderStudio(root) {
     if (listed && listed.lines !== session.lines.length) { listed.lines = session.lines.length; drawList(); }
     const scroll = main.querySelector(".main-body")?.scrollTop || 0;
     const card = editing && castEntry(editing)?.name ? sessionCharacterEditor(castEntry(editing)) : null;
-    main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, card, script()), footer());
+    const divider = card && el("div", { class: "script-divider", role: "separator" }, `Script \u00b7 ${plural(session.lines.length, "line")}`);
+    main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, card, divider, script()), footer());
     main.querySelector(".main-body").scrollTop = scroll;
     paintTransport();
   }
