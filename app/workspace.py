@@ -210,6 +210,22 @@ def delete_sample(char_id: str, sample_id: str, session_id: str | None = None) -
     _save_character(char_id, data, session_id)
 
 
+def remove_missing_samples(char_id: str, session_id: str | None = None) -> bool:
+    """Forgets samples whose file was deleted outside the app (e.g. in File Explorer). Returns True if any."""
+    data = load_character(char_id, session_id)
+    if data is None:
+        return False
+    folder = character_dir(char_id, session_id)
+    kept = [s for s in data["samples"] if (folder / s["file"]).exists()]
+    if len(kept) == len(data["samples"]):
+        return False
+    data["samples"] = kept
+    if not any(s["id"] == data["default_sample"] for s in kept):
+        data["default_sample"] = kept[0]["id"] if kept else None
+    _save_character(char_id, data, session_id)
+    return True
+
+
 def sample_path(char_id: str, sample_id: str | None, session_id: str | None = None) -> Path | None:
     """The sample's file; a missing or `None` sample falls back to the default; no samples gives None."""
     data = load_character(char_id, session_id)
@@ -615,6 +631,29 @@ def delete_take(session_id: str, line_id: str, file: str) -> None:
     if line["selected"] == file:
         line["selected"] = line["takes"][-1]["file"] if line["takes"] else None
     save_session(session_id, data)
+
+
+def remove_missing_takes(session_id: str) -> bool:
+    """Forgets takes whose file was deleted outside the app; the selection moves to the newest remaining take.
+    A file that is mid-rename (sync_file_names) is not missing. Returns True if any take was removed."""
+    data = load_session(session_id)
+    folder = session_dir(session_id)
+    changed = False
+    for line in data["lines"]:
+        kept = [t for t in line["takes"]
+                if (folder / t["file"]).exists() or (folder / f"{t['file']}.renaming").exists()]
+        if len(kept) == len(line["takes"]):
+            continue
+        for take in line["takes"]:
+            if take not in kept and take.get("source_recording"):
+                (folder / take["source_recording"]).unlink(missing_ok=True)
+        line["takes"] = kept
+        if not any(t["file"] == line["selected"] for t in kept):
+            line["selected"] = kept[-1]["file"] if kept else None
+        changed = True
+    if changed:
+        save_session(session_id, data)
+    return changed
 
 
 def take_text_changed(line: dict, take: dict) -> bool:

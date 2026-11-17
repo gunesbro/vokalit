@@ -141,6 +141,12 @@ export async function renderCharacters(root) {
     showSelected();
   };
   window.addEventListener("hashchange", onHash);
+  // Sample counts in the list follow files deleted in File Explorer (the server drops them on read).
+  const onFocus = () => {
+    if (!root.isConnected) return window.removeEventListener("focus", onFocus);
+    refreshList().catch(() => {});
+  };
+  window.addEventListener("focus", onFocus);
   await refreshList();
   showSelected();
 }
@@ -170,7 +176,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     onChange(character);
   }
 
-  // Coming back to the window (e.g. after deleting a file in File Explorer) re-checks the samples.
+  // Coming back to the window (e.g. after deleting a file in File Explorer) reloads the character; the server
+  // drops samples whose file is gone.
   const onFocus = () => {
     if (!root.isConnected) return window.removeEventListener("focus", onFocus);
     if (root.querySelector(".review-box, .confirm") || root.querySelector(".record-btn.recording")) return;
@@ -207,11 +214,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       language.value = sample.language || "";
     });
     const url = sampleUrl(charId, sample.file, sessionId);
-    const wave = sample.missing
-      ? el("span", { class: "file-missing", title: "This sample's file was deleted outside Vokalit. Delete it here, or add it again." },
-        "File missing")
-      : player(url, { buckets: 140, showTime: false });
-    const play = sample.missing ? el("span") : wave.querySelector(".play");
+    const wave = player(url, { buckets: 140, showTime: false });
+    const play = wave.querySelector(".play");
     row.append(
       el("button", { class: `star ${isDefault ? "on" : ""}`,
         title: isDefault ? "Default sample: used by lines that do not choose a sample" : "Make this the default sample",
@@ -220,7 +224,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       icon(["M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"], 16)),
       play, label, language, wave,
       el("div", { class: "muted num" }, `${sample.duration.toFixed(1)} s · ${sample.source === "recording" ? "recorded" : "uploaded"}`),
-      el("div", { class: "row end" }, sample.missing ? el("span") : revealButton(url.slice("/files/".length)),
+      el("div", { class: "row end" }, revealButton(url.slice("/files/".length)),
         el("button", { class: "btn btn-ghost icon-btn", title: "Delete sample", "aria-label": "Delete sample",
         onclick: () => confirmDeleteSample(row, sample) }, icon(ICONS.trash))));
     return row;

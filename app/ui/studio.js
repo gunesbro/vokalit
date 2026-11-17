@@ -152,13 +152,11 @@ export async function renderStudio(root) {
     draw();
   }
 
-  // A take whose file was deleted outside the app (e.g. in File Explorer) cannot be played or exported.
-  const playableFile = (line) => {
-    const take = line.takes.find((t) => t.file === line.selected);
-    return take && !take.missing ? take.file : null;
-  };
+  // The selected take's file. Takes deleted in File Explorer are dropped by the server when the session loads.
+  const playableFile = (line) => line.selected;
 
-  // Coming back to the window (e.g. after deleting files in File Explorer) re-checks the session's files.
+  // Coming back to the window (e.g. after deleting files in File Explorer) reloads the session, which drops
+  // takes and samples whose files are gone.
   function onFocus() {
     if (!main.isConnected || !session || Object.keys(pendingText).length || generating.size || batch || performing
         || document.querySelector(".popover, .trim-box, .review-box") || document.activeElement?.matches("input, textarea")) return;
@@ -505,10 +503,6 @@ export async function renderStudio(root) {
     const right = el("div", { class: "row line-right" });
     if (generating.has(line.id)) {
       right.append(busyLabel(line.id, "Generating\u2026"));
-    } else if (selected?.missing) {
-      right.append(el("span", { class: "file-missing", title: "The selected take's file was deleted outside Vokalit." },
-        icon(ICONS.trash, 12), "Take file missing"),
-        el("button", { class: "btn btn-ghost btn-takes", onclick: () => open(line.id) }, plural(takes.length, "take")));
     } else if (selected) {
       right.append(player(`/files/sessions/${sid()}/${selected.file}`, { buckets: 30, showTime: false, label: "Play selected take" }),
         el("button", { class: "btn btn-ghost btn-takes", onclick: () => open(line.id) },
@@ -890,10 +884,7 @@ export async function renderStudio(root) {
       el("input", { type: "radio", name: `take-${line.id}`, checked: isSelected, "aria-label": `Use take ${takeNumber(take.file)}`,
         title: "The selected take is the one used in the export.",
         onchange: () => api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/select`, { file: take.file }).then(apply, fail) }),
-      take.missing
-        ? el("span", { class: "file-missing", title: "This take's file was deleted outside Vokalit. Remove it from the list." },
-          "File missing")
-        : player(`/files/sessions/${sid()}/${take.file}`, { buckets: 60, showTime: false, selected: isSelected }),
+      player(`/files/sessions/${sid()}/${take.file}`, { buckets: 60, showTime: false, selected: isSelected }),
       el("div", { class: "take-info" },
         el("div", { class: "row" }, dot(modelColor(take.model)), el("span", {}, model),
           el("span", { class: "muted" }, `· take ${takeNumber(take.file) ?? "?"}`)),
@@ -903,10 +894,10 @@ export async function renderStudio(root) {
           take.text_changed && [" · ", el("span", { class: "warn", title: `The line's text changed after this take. The take says: \u201c${take.text}\u201d` }, "text changed")])),
       !converted && take.settings && el("button", { class: "btn btn-small btn-ghost", title: "Copy this take's seed and settings to the line",
         onclick: () => useSettings(line, take) }, "Use these settings") || el("span"),
-      take.missing ? el("span") : el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Trim take", "aria-expanded": "false",
+      el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Trim take", "aria-expanded": "false",
         title: "Trim: cut silence or noise from the start and end (saved as a new take)",
         onclick: (e) => toggleTrim(e.currentTarget, rowNode, line, take) }, icon(ICON_SCISSORS)),
-      take.missing ? el("span") : revealButton(`sessions/${sid()}/${take.file}`),
+      revealButton(`sessions/${sid()}/${take.file}`),
       el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Delete take", title: "Delete take", onclick: () => {
         rowNode.querySelector(".confirm")?.remove();
         rowNode.append(el("div", { class: "confirm" },

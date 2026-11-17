@@ -452,5 +452,4 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 @keyframes just-done { from { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); } to { background: transparent; box-shadow: inset 3px 0 0 transparent; } }
 .line.just-done, .line-details.just-done { animation: just-done 1.4s ease-out; }
 .take.just-done { animation: just-done 1.4s ease-out; border-radius: 6px; }
-.file-missing { color: var(--warn); font-size: 12px; display: flex; align-items: center; gap: 6px; }
 @media (prefers-reduced-motion: reduce) { .line.just-done, .line-details.just-done, .take.just-done { animation: none; } }

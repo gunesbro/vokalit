@@ -339,7 +339,7 @@ def test_exports_and_trim_endpoints(api, monkeypatch):
     assert status == 200 and body == []
 
 
-def test_missing_files_are_reported(api, monkeypatch, tmp_path):
+def test_files_deleted_outside_the_app_are_removed(api, monkeypatch, tmp_path):
     def fake_generate(name, text, ref, out, seed, settings, language):
         make_wav(out, 1)
         return 0.1
@@ -347,22 +347,38 @@ def test_missing_files_are_reported(api, monkeypatch, tmp_path):
     monkeypatch.setattr(models, "is_installed", lambda name: True)
     monkeypatch.setattr(models, "generate", fake_generate)
     sid, lid, cid = _session_with_line(api, "one")
-    api("POST", f"/api/characters/{cid}/samples?source=upload", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
-        content_type="audio/wav")
-    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
-    _wait(api, job["id"])
+    for name in ("s.wav", "t.wav"):
+        api("POST", f"/api/characters/{cid}/samples?source=upload", raw=make_wav(tmp_path / name, 11).read_bytes(),
+            content_type="audio/wav")
+    for _ in range(2):
+        _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+        _wait(api, job["id"])
     _, view, _ = api("GET", f"/api/sessions/{sid}")
-    take = view["lines"][0]["takes"][0]
-    assert take["missing"] is False and view["cast"][0]["samples"][0]["missing"] is False
-    (ws.session_dir(sid) / take["file"]).unlink()
-    (ws.character_dir(cid) / "samples" / "s1.wav").unlink()
+    first, second = view["lines"][0]["takes"]
+    api("POST", f"/api/sessions/{sid}/lines/{lid}/takes/select", {"file": second["file"]})
+    (ws.session_dir(sid) / second["file"]).unlink()  # the selected take
+    (ws.character_dir(cid) / "samples" / "s1.wav").unlink()  # the default sample
     _, view, _ = api("GET", f"/api/sessions/{sid}")
-    assert view["lines"][0]["takes"][0]["missing"] is True
-    assert view["cast"][0]["samples"][0]["missing"] is True
+    line = view["lines"][0]
+    assert [t["file"] for t in line["takes"]] == [first["file"]] and line["selected"] == first["file"]
+    assert [x["id"] for x in view["cast"][0]["samples"]] == ["s2"] and view["cast"][0]["default_sample"] == "s2"
+    assert [t["file"] for t in ws.load_session(sid)["lines"][0]["takes"]] == [first["file"]]  # saved, not just hidden
+    (ws.character_dir(cid) / "samples" / "s2.wav").unlink()
     _, character, _ = api("GET", f"/api/characters/{cid}")
-    assert character["samples"][0]["missing"] is True
-    _, listed, _ = api("GET", "/api/characters")
-    assert listed[0]["samples"][0]["missing"] is True
+    assert character["samples"] == [] and character["default_sample"] is None
+
+
+def test_file_being_renamed_is_not_removed(tmp_workspace):
+    sid = ws.create_session("E")
+    cid = ws.create_character("Burak")
+    ws.add_to_cast(sid, cid, "library")
+    lid = ws.add_line(sid, cid, "one")
+    out = ws.new_take_path(sid, lid, "chatterbox")
+    make_wav(out, 1)
+    ws.add_take(sid, lid, {"file": str(out), "kind": "tts", "model": "chatterbox"})
+    out.rename(out.with_name(out.name + ".renaming"))  # mid-way through sync_file_names
+    assert ws.remove_missing_takes(sid) is False
+    assert len(ws.load_session(sid)["lines"][0]["takes"]) == 1
 
 
 def test_running_jobs_of_a_session_are_listed(api, monkeypatch):
