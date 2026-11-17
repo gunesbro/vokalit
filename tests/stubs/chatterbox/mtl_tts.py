@@ -30,6 +30,8 @@ class ChatterboxMultilingualTTS:
                  temperature=0.8):
         if text == "CRASH":  # what a CUDA device-side assert looks like from Python
             raise RuntimeError("CUDA error: device-side assert triggered")
+        if text == "OOM":  # what torch.cuda.OutOfMemoryError says
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
         if audio_prompt_path:
             self.conds = f"CLONE:{audio_prompt_path}"
         return _Wav(f"voice={self.conds}|language={language_id}|seed={torch.last_seed}|exaggeration={exaggeration}"

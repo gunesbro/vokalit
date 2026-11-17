@@ -47,6 +47,7 @@ MODELS = {
         "license": "MIT",
         "supports_convert": True,
         "needs_transcript": False,
+        "vram_gb": 4.0,  # measured: ~3.5-4 GB (SPEC.md \u00a74); used to make room before loading
         "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
                       "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
         # When the sample's language differs from the line's, this setting value reduces the carried-over accent
@@ -73,6 +74,7 @@ MODELS = {
         "disk_gb": 9.0,  # estimate until measured on Windows
         "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
         "supports_convert": False,
+        "vram_gb": 3.0,  # estimate (0.6B in fp16 with its audio codec); replace with a measurement
         "sounds": {tag: f"[{tag}]" for tag in TAGS},  # Vokalit's sound tags are OmniVoice's
         "needs_transcript": True,  # it copies a voice from the sample and what is said in it
         # Every language it lists, and "ar" (Chatterbox's Arabic), which it calls Standard Arabic.
@@ -488,6 +490,8 @@ class _Worker:
         ready = self._read()
         if not ready.get("ready"):
             self.process.kill()
+            if ready.get("oom"):
+                raise OutOfGpuMemory(ready.get("error", ""))
             raise RuntimeError(ready.get("error", "The model failed to start."))
 
     def _read(self):
@@ -542,20 +546,75 @@ def validate_settings(name, settings):
     return {**default_settings(name), **settings}
 
 
-def _request(name, message):
-    """Sends one request to the component's worker and returns its reply. The worker is started on first use and
-    stays loaded."""
+class OutOfGpuMemory(RuntimeError):
+    """A model could not load: the GPU has no room for it."""
+
+
+def _free_vram_gb():
+    """Free memory of the first NVIDIA GPU in GB, or None when it cannot be read."""
+    try:
+        result = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                                capture_output=True, text=True, timeout=5)
+        return int(result.stdout.strip().splitlines()[0]) / 1024 if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
+        return None
+
+
+def _make_room(name, need=None):
+    """Stops other workers that are not busy, least recently used first: until `need` GB are free on the GPU, or
+    (need None, after an out-of-memory error) all of them."""
+    for other, worker in sorted(list(_workers.items()), key=lambda item: item[1].last_used):
+        if other == name:
+            continue
+        if need is not None:
+            free = _free_vram_gb()
+            if free is None or free >= need:
+                return
+        if worker.lock.acquire(blocking=False):  # a busy model keeps its memory
+            try:
+                if _workers.get(other) is worker:
+                    stop(other)
+            finally:
+                worker.lock.release()
+
+
+def _out_of_memory(name):
+    return RuntimeError(
+        f"Not enough GPU memory for {spec(name)['title']}, even after unloading the other models. Close other programs "
+        "that use the GPU (games, video editors, other AI tools), or generate with one model at a time.")
+
+
+def _send(name, message):
     try:
         if name not in _workers:
+            need = spec(name).get("vram_gb")
+            if need:
+                _make_room(name, need + 0.5)  # make room before loading, not after failing
             _workers[name] = _Worker(name)
             global _watcher
             if _watcher is None:  # unloads idle models from now on
                 _watcher = threading.Thread(target=_watch_idle, daemon=True)
                 _watcher.start()
-        reply = _workers[name].request(message)
+        return _workers[name].request(message)
     except Exception:
         stop(name)
         raise
+
+
+def _request(name, message):
+    """Sends one request to the component's worker and returns its reply. The worker is started on first use and
+    stopped after IDLE_SECONDS unused. Out of GPU memory: the other idle models are unloaded and it is tried once more;
+    if it still does not fit, a clear message."""
+    for attempt in (1, 2):
+        try:
+            reply = _send(name, message)
+        except OutOfGpuMemory:
+            reply = {"ok": False, "oom": True}
+        if reply["ok"] or not reply.get("oom"):
+            break
+        if attempt == 2:
+            raise _out_of_memory(name)
+        _make_room(name)
     if not reply["ok"]:
         if reply.get("restart"):
             stop(name)  # the worker exited; the next request starts a fresh one

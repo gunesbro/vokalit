@@ -72,3 +72,12 @@ def test_arabic_is_sent_as_standard_arabic(installed):
     out = str(Path(local) / "arabic.wav")
     models.generate("omnivoice", "marhaba", None, out, seed=1, settings={}, language="ar")
     assert "language=arb" in _read(out)
+
+
+def test_out_of_memory_keeps_the_worker(installed):
+    _, local = installed
+    models.generate("omnivoice", "warm up", None, str(Path(local) / "w.wav"), seed=1, settings={}, language="en")
+    process = models._workers["omnivoice"].process
+    with pytest.raises(RuntimeError, match="Not enough GPU memory for OmniVoice"):
+        models.generate("omnivoice", "OOM", None, str(Path(local) / "oom.wav"), seed=1, settings={}, language="en")
+    assert models._workers["omnivoice"].process is process and process.poll() is None

@@ -13,6 +13,8 @@ class OmniVoice:
             print("stub omnivoice would load its own Whisper")
         if text == "CRASH":
             raise RuntimeError("CUDA error: device-side assert triggered")
+        if text == "OOM":
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
         extra = "|".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
         return [f"text={text}|language={language}|ref_audio={ref_audio}|ref_text={ref_text}|speed={speed}|{extra}"
                 f"|seed={torch.last_seed}"]

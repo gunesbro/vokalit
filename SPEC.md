@@ -147,6 +147,10 @@ user presses "Install" and confirms, to download packages and model weights.
   (`socket.socket.connect`, `connect_ex`, `sendto`, `socket.getaddrinfo` raise). The `socket.socket` class itself
   is not replaced, because modules such as `ssl` subclass it at import. A library that tries the network stops
   with a clear error.
+- GPU memory: before a model loads, other models that are not generating are unloaded (least recently used first)
+  until `vram_gb` + 0.5 GB are free (`nvidia-smi`). An out-of-memory error, while loading or generating, does not
+  crash the worker: the app unloads the other idle models and tries once more, then says "Not enough GPU memory for
+  <model>…" with what to do.
 - A worker starts on its first request and is stopped after 5 minutes without one (`IDLE_SECONDS`), so models do
   not hold GPU memory while unused; the next request loads it again. A worker also exits when the app is gone,
   however it ended (its stdin closes).

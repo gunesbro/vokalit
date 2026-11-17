@@ -21,6 +21,11 @@ def block_network():
     socket.getaddrinfo = blocked
 
 
+def _out_of_memory(error):
+    """torch.cuda.OutOfMemoryError (and the same text from libraries that wrap it)."""
+    return "out of memory" in str(error).lower()
+
+
 def main():
     if "--download" in sys.argv:
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
@@ -45,7 +50,11 @@ def main():
     if not torch.cuda.is_available():
         send(ready=False, error="No NVIDIA GPU with CUDA was found.")
         return
-    model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
+    try:
+        model = ChatterboxMultilingualTTS.from_pretrained(device="cuda")
+    except Exception as error:  # e.g. no room on the GPU: the app makes room and tries again
+        send(ready=False, error=str(error), oom=_out_of_memory(error))
+        return
     # Cloning replaces model.conds (the active voice); keep the built-in voice to restore it.
     default_conds = model.conds
     send(ready=True)
@@ -76,6 +85,11 @@ def main():
             sf.write(request["out"], wav.squeeze(0).cpu().numpy(), sample_rate, subtype="PCM_16")
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1))
         except Exception as error:
+            if _out_of_memory(error):  # recoverable: free the cache and let the app make room
+                if hasattr(torch.cuda, "empty_cache"):
+                    torch.cuda.empty_cache()
+                send(ok=False, error=str(error), oom=True)
+                continue
             # A CUDA error (e.g. "device-side assert triggered") leaves the GPU context unusable for the rest of this
             # process: every later request would fail too. Report it and exit; the app starts a fresh worker.
             if "CUDA" in str(error) or "device-side assert" in str(error):

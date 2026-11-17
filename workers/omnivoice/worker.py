@@ -28,6 +28,11 @@ def block_network():
     socket.getaddrinfo = blocked
 
 
+def _out_of_memory(error):
+    """torch.cuda.OutOfMemoryError (and the same text from libraries that wrap it)."""
+    return "out of memory" in str(error).lower()
+
+
 def main():
     if "--download" in sys.argv:
         import torch
@@ -51,7 +56,11 @@ def main():
     if not torch.cuda.is_available():
         send(ready=False, error="No NVIDIA GPU with CUDA was found.")
         return
-    model = OmniVoice.from_pretrained(MODEL, device_map="cuda:0", dtype=torch.float16)
+    try:
+        model = OmniVoice.from_pretrained(MODEL, device_map="cuda:0", dtype=torch.float16)
+    except Exception as error:  # e.g. no room on the GPU: the app makes room and tries again
+        send(ready=False, error=str(error), oom=_out_of_memory(error))
+        return
     send(ready=True)
 
     for line in sys.stdin:
@@ -69,6 +78,11 @@ def main():
             sf.write(request["out"], audio[0], SAMPLE_RATE, subtype="PCM_16")
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1))
         except Exception as error:
+            if _out_of_memory(error):  # recoverable: free the cache and let the app make room
+                if hasattr(torch.cuda, "empty_cache"):
+                    torch.cuda.empty_cache()
+                send(ok=False, error=str(error), oom=True)
+                continue
             # A CUDA error leaves the GPU context unusable for the rest of this process. Report it and exit; the app
             # starts a fresh worker.
             if "CUDA" in str(error) or "device-side assert" in str(error):

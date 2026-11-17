@@ -158,3 +158,16 @@ def test_busy_model_is_not_unloaded(installed):
     with worker.lock:  # a take is being generated
         models._unload_idle(now=worker.last_used + models.IDLE_SECONDS + 1)
     assert "chatterbox" in models._workers
+
+
+def test_out_of_memory_keeps_the_worker_and_says_so(installed):
+    _, local = installed
+    models.generate("chatterbox", "warm up", None, _out(local, "oom-warm.wav"), seed=1, settings={}, language="tr")
+    process = models._workers["chatterbox"].process
+    with pytest.raises(RuntimeError, match="Not enough GPU memory for Chatterbox Multilingual") as error:
+        models.generate("chatterbox", "OOM", None, _out(local, "oom.wav"), seed=1, settings={}, language="tr")
+    assert "Variation" not in str(error.value)
+    assert models._workers["chatterbox"].process is process and process.poll() is None  # still loaded, still usable
+    out = _out(local, "after-oom.wav")
+    models.generate("chatterbox", "fits again", None, out, seed=1, settings={}, language="tr")
+    assert "text=fits again" in _read(out)
