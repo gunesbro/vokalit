@@ -777,6 +777,13 @@ def take_has_custom_settings(session: dict, take: dict, defaults: dict) -> bool:
 # --- Export -------------------------------------------------------------------------------------
 
 
+def _resample(samples: np.ndarray, src: int, dst: int) -> np.ndarray:
+    """16-bit samples at `src` Hz converted to `dst` Hz by linear interpolation (used for upsampling)."""
+    count = round(len(samples) * dst / src)
+    positions = np.arange(count) * (src / dst)
+    return np.round(np.interp(positions, np.arange(len(samples)), samples)).astype("<i2")
+
+
 # Export formats other than WAV are written by libsndfile (soundfile): (format, subtype).
 EXPORT_ENCODINGS = {"flac": ("FLAC", "PCM_16"), "mp3": ("MP3", "MPEG_LAYER_III"), "ogg": ("OGG", "VORBIS")}
 
@@ -803,19 +810,19 @@ def export_session(session_id: str, fmt: str = "wav") -> Path:
         raise WorkspaceError(f"Lines {', '.join(missing)} have no takes yet.")
     if not data["lines"]:
         raise WorkspaceError("The script is empty.")
-    chunks, rate = [], None
+    takes = []
     for n, line in enumerate(data["lines"], 1):
         path = session_dir(session_id) / line["selected"]
         if not path.exists():
             raise WorkspaceError(f"Line {n}: the selected take file is missing ({line['selected']}). "
                                  "Generate it again or choose another take.")
         with wave.open(str(path), "rb") as w:
-            if rate is None:
-                rate = w.getframerate()
-            elif w.getframerate() != rate:
-                raise WorkspaceError(f"Line {n} has a different sample rate than line 1 "
-                                     f"({rate} Hz and {w.getframerate()} Hz), so they cannot be joined.")
-            chunks.append(np.frombuffer(w.readframes(w.getnframes()), dtype="<i2"))
+            takes.append((w.getframerate(), np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")))
+    # Models write different sample rates (VoxCPM2 48 kHz, others 24 kHz): join at the highest, so nothing is lost.
+    rate = max(take_rate for take_rate, _ in takes)
+    chunks = []
+    for line, (take_rate, samples) in zip(data["lines"], takes):
+        chunks.append(samples if take_rate == rate else _resample(samples, take_rate, rate))
         chunks.append(np.zeros(round(line["pause_after"] * rate), dtype="<i2"))
     folder = session_dir(session_id) / "exports"
     folder.mkdir(exist_ok=True)

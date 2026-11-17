@@ -93,12 +93,24 @@ def test_export_reports_missing_take_file(tmp_workspace):
         ws.export_session(sid)
 
 
-def test_export_refuses_mixed_sample_rates(tmp_workspace):
+def test_resample_doubles_length():
+    import numpy as np
+    out = ws._resample(np.array([0, 100, 200], "<i2"), 24000, 48000)
+    assert len(out) == 6 and out.dtype == np.int16 and out[0] == 0
+    assert all(b >= a for a, b in zip(out, out[1:]))
+
+
+def test_export_joins_mixed_sample_rates_at_the_highest(tmp_workspace):
+    import wave
     sid, (l1, l2) = _session_with_lines(["one", "two"])
+    ws.update_line(sid, l1, pause_after=0.5)
+    ws.update_line(sid, l2, pause_after=0.5)
     _add_take(sid, l1, "chatterbox", 1.0, sr=24000)
-    _add_take(sid, l2, "chatterbox", 1.0, sr=16000)
-    with pytest.raises(ws.WorkspaceError, match="24000.*16000"):
-        ws.export_session(sid)
+    _add_take(sid, l2, "voxcpm", 1.0, sr=48000)
+    out = ws.export_session(sid)
+    with wave.open(str(out)) as w:
+        assert w.getframerate() == 48000
+        assert w.getnframes() == 48000 * 3
 
 
 def test_effective_settings_layers(tmp_workspace):
