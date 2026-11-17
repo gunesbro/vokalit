@@ -743,8 +743,12 @@ def reset_session_settings(session_id: str, model: str) -> None:
 
 
 def set_line_settings(session_id: str, line_id: str, model: str, overrides: dict) -> None:
+    """The line's own values for `model`; empty overrides give that model back the session's settings."""
     data = load_session(session_id)
-    _line(data, line_id)["settings"][model] = dict(overrides)
+    if overrides:
+        _line(data, line_id)["settings"][model] = dict(overrides)
+    else:
+        _line(data, line_id)["settings"].pop(model, None)
     save_session(session_id, data)
 
 

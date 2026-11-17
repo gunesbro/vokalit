@@ -290,3 +290,14 @@ def test_line_of_a_character_without_samples_follows_its_first_sample(tmp_worksp
     assert ws.load_session(sid)["lines"][0]["sample"] is None  # default voice
     ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording", transcript="A")
     assert ws.load_session(sid)["lines"][0]["sample"] == "s1"
+
+
+def test_clearing_one_models_line_settings_keeps_the_others(tmp_workspace):
+    cid = ws.create_character("Burak")
+    sid = ws.create_session("Episode")
+    ws.add_to_cast(sid, cid, "library")
+    lid = ws.add_line(sid, cid, "Hello")
+    ws.set_line_settings(sid, lid, "chatterbox", {"exaggeration": 0.9})
+    ws.set_line_settings(sid, lid, "omnivoice", {"speed": 1.2})
+    ws.set_line_settings(sid, lid, "omnivoice", {})
+    assert ws.load_session(sid)["lines"][0]["settings"] == {"chatterbox": {"exaggeration": 0.9}}

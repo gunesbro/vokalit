@@ -469,3 +469,8 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line.just-done, .line-details.just-done { animation: just-done 1.4s ease-out; }
 .take.just-done { animation: just-done 1.4s ease-out; border-radius: 6px; }
 @media (prefers-reduced-motion: reduce) { .line.just-done, .line-details.just-done, .take.just-done { animation: none; } }
+
+/* Add sound (tags) under a line's text; the accent note inside a model's line settings */
+.sound-tools { gap: 10px; }
+.sound-btn { gap: 6px; }
+.accent-note { margin: 4px 0 12px; gap: 10px; }

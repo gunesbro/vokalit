@@ -68,10 +68,14 @@ export function modelPicker(installed, selected, onChange) {
 }
 
 // Tabs, one per model: tabs(names, titles, render(name) -> Node).
-export function modelTabs(names, titles, render) {
+// Which tab was open, per place (`key`), so redrawing after a change keeps the same model open.
+const openTabs = new Map();
+
+export function modelTabs(names, titles, render, key = null) {
   const body = el("div");
   const bar = el("div", { class: "tabs", role: "tablist" });
   const show = (name) => {
+    if (key) openTabs.set(key, name);
     for (const tab of bar.children) tab.setAttribute("aria-selected", tab.dataset.model === name ? "true" : "false");
     body.replaceChildren(render(name));
   };
@@ -79,7 +83,7 @@ export function modelTabs(names, titles, render) {
     bar.append(el("button", { class: "tab", role: "tab", "data-model": name, onclick: () => show(name) },
       dot(modelColor(name)), titles[name] || name));
   }
-  if (names.length) show(names[0]);
+  if (names.length) show(names.includes(openTabs.get(key)) ? openTabs.get(key) : names[0]);
   return el("div", {}, names.length > 1 ? bar : null, body);
 }
 
@@ -89,10 +93,11 @@ export function sliders(schema, values, base, note, onCommit) {
   if (!schema.length) return el("p", { class: "muted small" }, "This model has no generation settings.");
   return el("div", { class: "sliders" }, schema.map((spec) => {
     const changed = values[spec.key] !== base[spec.key];
-    const number = el("div", { class: `num ${changed ? "accent" : "muted"}` }, Number(values[spec.key]).toFixed(2));
+    const shown = (v) => Number(v).toFixed(spec.step >= 1 ? 0 : 2); // whole-number settings (steps) without decimals
+    const number = el("div", { class: `num ${changed ? "accent" : "muted"}` }, shown(values[spec.key]));
     const input = el("input", { type: "range", min: spec.min, max: spec.max, step: spec.step, value: values[spec.key],
       "aria-label": spec.label,
-      oninput: () => { number.textContent = Number(input.value).toFixed(2); },
+      oninput: () => { number.textContent = shown(input.value); },
       onchange: () => onCommit(spec.key, Number(input.value)) });
     return el("div", { class: `slider ${changed ? "changed" : ""}` },
       el("div", { class: "row" }, el("label", {}, spec.label), el("div", { class: "spacer" }), number),

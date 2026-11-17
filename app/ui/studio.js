@@ -348,7 +348,7 @@ export async function renderStudio(root) {
             el("button", { class: "btn btn-small", disabled: !session.settings[name], onclick: () =>
               api("DELETE", `/api/sessions/${sid()}/settings/${name}`).then((data) => { session = data; paint(); }, fail) },
             "Reset to model defaults")));
-      }));
+      }, "session"));
     if (!names.length) {
       box.append(el("p", { class: "muted small" }, "Install a model in the Models tab."));
       return box;
@@ -748,8 +748,8 @@ export async function renderStudio(root) {
     function soundButton(field, save) {
       const tags = [...new Set(installed().flatMap((m) => m.tags || []))];
       if (!tags.length) return null;
-      const button = el("button", { class: "btn btn-ghost btn-small", title: "Only OmniVoice performs these sounds; other models skip them." },
-        "Add sound");
+      const button = el("button", { class: "btn btn-small sound-btn", title: "Only OmniVoice performs these sounds; other models skip them." },
+        icon(["M12 5v14", "M5 12h14"], 12), "Add sound");
       button.onclick = () => popover(button, el("div", { class: "menu" }, ...tags.map((tag) => el("button", { class: "menu-item",
         onclick: () => {
           document.querySelector(".popover")?.dispatchEvent(new Event("close"));
@@ -760,7 +760,8 @@ export async function renderStudio(root) {
           field.dispatchEvent(new Event("input"));
           save();
         } }, TAG_LABELS[tag] || tag))));
-      return el("div", { class: "pop-holder" }, button);
+      return el("div", { class: "row sound-tools" }, el("div", { class: "pop-holder" }, button),
+        el("span", { class: "faint small" }, "Laughter, sighs and more, written into the text (OmniVoice)"));
     }
     const counter = el("span", { class: "faint small num" }, `${line.text.length} characters`);
     text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
@@ -837,7 +838,7 @@ export async function renderStudio(root) {
     } catch (error) { fail(error); }
   }
 
-  // Warns when a chosen model cannot speak the line's language, or the sample is in another language.
+  // Warns when a chosen model cannot speak the line's language.
   function languageNotes(line, names) {
     const language = lineLanguage(line);
     const notes = [];
@@ -847,23 +848,27 @@ export async function renderStudio(root) {
         notes.push(el("div", { class: "warn small" }, `${info.title} does not support ${languageName(language)}.`));
       }
     }
-    const sample = sampleOf(line);
-    if (sample?.language && sample.language !== language) {
-      const fixes = names.map(modelInfo).filter((info) => info?.accent_setting).filter((info) => {
-        const { key, value } = info.accent_setting;
-        return ({ ...sessionValues(info.name), ...(line.settings[info.name] || {}) })[key] !== value;
-      });
-      notes.push(el("div", { class: "row small wrap" },
-        el("span", { class: "warn" }, `The sample \u201c${sample.label}\u201d is ${languageName(sample.language)} and the line is `
-          + `${languageName(language)}, so the voice may keep a ${languageName(sample.language)} accent.`),
-        fixes.map((info) => el("button", { class: "btn btn-small", onclick: () => {
-          const { key, value } = info.accent_setting;
-          const label = info.settings.find((x) => x.key === key)?.label || key;
-          api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${info.name}`, { ...(line.settings[info.name] || {}), [key]: value })
-            .then((data) => { apply(data); setMessage(message, `${label} set to ${value} for this line.`); }, fail);
-        } }, `Reduce accent (${titles()[info.name]})`))));
-    }
     return notes.length ? el("div", { class: "detail-row language-notes" }, notes) : null;
+  }
+
+  // When the sample is in another language than the line, the voice may keep the sample's accent. Shown in the tab of
+  // a model that has a setting against it (Chatterbox), with a button that sets it for this line.
+  function accentNote(line, name) {
+    const info = modelInfo(name);
+    const sample = sampleOf(line);
+    const language = lineLanguage(line);
+    if (!info?.accent_setting || !sample?.language || sample.language === language) return null;
+    const { key, value } = info.accent_setting;
+    const label = info.settings.find((x) => x.key === key)?.label || key;
+    const applied = ({ ...sessionValues(name), ...(line.settings[name] || {}) })[key] === value;
+    return el("div", { class: "row small wrap accent-note" },
+      el("span", { class: applied ? "muted" : "warn" }, `The sample \u201c${sample.label}\u201d is ${languageName(sample.language)} `
+        + `and the line is ${languageName(language)}, so the voice may keep a ${languageName(sample.language)} accent.`
+        + (applied ? ` ${label} is ${value} to reduce it.` : "")),
+      applied ? null : el("button", { class: "btn btn-small", onclick: () =>
+        api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${name}`, { ...(line.settings[name] || {}), [key]: value })
+          .then((data) => { apply(data); setMessage(message, `${label} set to ${value} for this line.`); }, fail) },
+      "Reduce accent"));
   }
 
   function lineSettings(line, names) {
@@ -873,22 +878,27 @@ export async function renderStudio(root) {
       el("div", { class: "row" },
         el("h3", {}, "Settings for this line"),
         el("div", { class: `small ${changes ? "accent" : "faint"}` },
-          changes ? `${plural(changes, "change")} from session settings` : "Same as session settings"),
-        el("div", { class: "spacer" }),
-        el("button", { class: "btn btn-small", disabled: !Object.keys(line.settings).length, onclick: () =>
-          api("DELETE", `/api/sessions/${sid()}/lines/${line.id}/settings`).then(apply, fail),
-          title: "Forget this line's own settings and use the session's." }, "Reset to session settings")),
+          changes ? `${plural(changes, "change")} from session settings` : "Same as session settings")),
       modelTabs(names, titles(), (name) => {
         const base = sessionValues(name);
         const values = { ...base, ...(line.settings[name] || {}) };
-        return sliders(modelInfo(name)?.settings || [], values, base,
-          (spec, value, baseValue) => (value === baseValue ? "Same as session" : `Session: ${Number(baseValue).toFixed(2)}`),
-          (key, value) => {
-            const overrides = { ...(line.settings[name] || {}), [key]: value };
-            if (value === base[key]) delete overrides[key];
-            api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${name}`, overrides).then(apply, fail);
-          });
-      }));
+        const own = settingsChanges(line.settings[name], base).length;
+        return el("div", {},
+          accentNote(line, name),
+          sliders(modelInfo(name)?.settings || [], values, base,
+            (spec, value, baseValue) => (value === baseValue ? "Same as session" : `Session: ${Number(baseValue).toFixed(spec.step >= 1 ? 0 : 2)}`),
+            (key, value) => {
+              const overrides = { ...(line.settings[name] || {}), [key]: value };
+              if (value === base[key]) delete overrides[key];
+              api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${name}`, overrides).then(apply, fail);
+            }),
+          el("div", { class: "row settings-foot" },
+            el("div", { class: "spacer" }),
+            el("button", { class: "btn btn-small", disabled: !own,
+              title: `Forget this line's own ${titles()[name] || name} settings and use the session's.`,
+              onclick: () => api("PUT", `/api/sessions/${sid()}/lines/${line.id}/settings/${name}`, {}).then(apply, fail) },
+            "Reset to session settings")));
+      }, `line:${line.id}`));
   }
 
   function takesList(line) {
