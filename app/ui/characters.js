@@ -223,7 +223,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     const play = wave.querySelector(".play");
     row.append(
       el("button", { class: `star ${isDefault ? "on" : ""}`,
-        title: isDefault ? "Default sample: used by lines that do not choose a sample" : "Make this the default sample",
+        title: isDefault ? "Default sample: new lines start with it. Lines already written keep their sample."
+          : "Make this the default sample for new lines",
         "aria-label": isDefault ? "Default sample" : "Make default", "aria-pressed": isDefault ? "true" : "false",
         onclick: () => isDefault || api("PATCH", path(`/samples/${sample.id}`), { default: true }).then(refresh, fail) },
       icon(["M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"], 16)),

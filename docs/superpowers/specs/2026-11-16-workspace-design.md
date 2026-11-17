@@ -197,7 +197,10 @@ workspace/
 }
 ```
 
-- `line.sample`: `null` = the character's default sample; otherwise a sample ID.
+- `line.sample`: a sample ID. A new line, or a line given another character, gets that character's default sample
+  written in, so moving the default (★) later changes only lines added after it (user's decision, 2026-11-17).
+  `null` only while the character has no samples (default voice); it is filled once the character gets one. Lines
+  saved before this rule get the then-current default the next time their session is read.
 - `line.settings`: only the keys that override the session, per model; `{}` = follow the session. Effective settings = model defaults ← session ← line.
 - **A take record is a snapshot:** text, character name, sample label, model and seed are stored as they were at generation time. History stays correct if the line is edited or the character/sample is deleted later.
 - **File name** *(proposal)*: `<line no, 2 digits>-<character-slug>-<model>-take<n>.wav`. The line number is the position at generation time and is not updated if lines move (a hint only; `session.json` is authoritative). Slug: lowercase, ASCII-folded, non-alphanumerics → `-`.

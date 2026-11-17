@@ -234,3 +234,59 @@ def test_paste_can_keep_long_speeches(tmp_workspace):
     speech = "word " * 200
     added, split = ws.paste_script(sid, f"Guest: {speech}", split_over=None)
     assert (added, split) == (1, 0)
+
+
+def _character_with_two_samples(tmp_path):
+    cid = ws.create_character("Burak")
+    ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording", transcript="A")
+    ws.add_sample(cid, str(make_wav(tmp_path / "b.wav", 11)), "recording", transcript="B")
+    return cid  # default sample: s1
+
+
+def test_new_line_keeps_the_sample_that_was_default_when_it_was_added(tmp_workspace, tmp_path):
+    cid = _character_with_two_samples(tmp_path)
+    sid = ws.create_session("Episode")
+    ws.add_to_cast(sid, cid, "library")
+    lid = ws.add_line(sid, cid, "Hello")
+    ws.set_default_sample(cid, "s2")
+    assert ws.load_session(sid)["lines"][0]["sample"] == "s1"
+    assert ws.load_session(sid)["lines"][0]["id"] == lid
+    ws.add_line(sid, cid, "Later")
+    assert ws.load_session(sid)["lines"][1]["sample"] == "s2"
+
+
+def test_changing_a_lines_character_takes_that_characters_default(tmp_workspace, tmp_path):
+    first = _character_with_two_samples(tmp_path)
+    second = _character_with_two_samples(tmp_path)
+    ws.set_default_sample(second, "s2")
+    sid = ws.create_session("Episode")
+    ws.add_to_cast(sid, first, "library")
+    ws.add_to_cast(sid, second, "library")
+    lid = ws.add_line(sid, first, "Hello")
+    ws.update_line(sid, lid, character=second, sample=None)
+    assert ws.load_session(sid)["lines"][0]["sample"] == "s2"
+    ws.update_lines(sid, [lid], character=first, sample=None)
+    assert ws.load_session(sid)["lines"][0]["sample"] == "s1"
+
+
+def test_lines_from_before_get_the_current_default_once(tmp_workspace, tmp_path):
+    cid = _character_with_two_samples(tmp_path)
+    sid = ws.create_session("Episode")
+    ws.add_to_cast(sid, cid, "library")
+    lid = ws.add_line(sid, cid, "Hello")
+    data = ws.load_session(sid)
+    data["lines"][0]["sample"] = None  # how lines were saved before
+    ws.save_session(sid, data)
+    assert ws.load_session(sid)["lines"][0]["sample"] == "s1"
+    ws.set_default_sample(cid, "s2")
+    assert ws.load_session(sid)["lines"][0]["sample"] == "s1"
+
+
+def test_line_of_a_character_without_samples_follows_its_first_sample(tmp_workspace, tmp_path):
+    cid = ws.create_character("Guest")
+    sid = ws.create_session("Episode")
+    ws.add_to_cast(sid, cid, "library")
+    ws.add_line(sid, cid, "Hello")
+    assert ws.load_session(sid)["lines"][0]["sample"] is None  # default voice
+    ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording", transcript="A")
+    assert ws.load_session(sid)["lines"][0]["sample"] == "s1"

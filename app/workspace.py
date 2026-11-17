@@ -290,7 +290,27 @@ def load_session(session_id: str) -> dict:
     data = _read_json(_session_file(session_id))
     if data is not None:
         data.setdefault("language", "tr")  # sessions from before languages were all generated in Turkish
+        if _pin_samples(data):
+            save_session(session_id, data)
     return data
+
+
+def _pin_samples(data: dict) -> bool:
+    """A line without a sample gets its character's default sample written in, so moving the default (the star)
+    later changes only lines added after it. Lines of a character without samples stay empty (default voice) until it
+    gets one. Returns whether a line changed."""
+    defaults = {}
+    changed = False
+    for line in data["lines"]:
+        if line.get("sample") is not None:
+            continue
+        if line["character"] not in defaults:
+            character = cast_character(data, line["character"])
+            defaults[line["character"]] = character and character.get("default_sample")
+        if defaults[line["character"]]:
+            line["sample"] = defaults[line["character"]]
+            changed = True
+    return changed
 
 
 def save_session(session_id: str, data: dict) -> None:
@@ -395,6 +415,7 @@ def add_line(session_id: str, char_id: str, text: str = "", pause_after: float =
             "settings": {}, "selected": None, "takes": [], "language": None}
     position = len(data["lines"]) if after is None else _line_index(data, after) + 1
     data["lines"].insert(position, line)
+    _pin_samples(data)
     save_session(session_id, data)
     if after is not None:
         sync_file_names(session_id)  # lines below moved down one place
@@ -409,6 +430,7 @@ def update_lines(session_id: str, line_ids: list[str], **fields) -> None:
     data = load_session(session_id)
     for line_id in line_ids:
         data["lines"][_line_index(data, line_id)].update(fields)
+    _pin_samples(data)  # a new character's lines get its default sample
     save_session(session_id, data)
 
 
@@ -418,6 +440,7 @@ def update_line(session_id: str, line_id: str, **fields) -> None:
         raise ValueError(f"Unknown line fields: {sorted(unknown)}")
     data = load_session(session_id)
     data["lines"][_line_index(data, line_id)].update(fields)
+    _pin_samples(data)  # a new character's lines get its default sample
     save_session(session_id, data)
 
 
