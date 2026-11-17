@@ -54,7 +54,7 @@ file. Everything is done by clicking in a desktop window.
 | Code license | MIT | Apache 2.0 |
 | **Weights license** | MIT | **CC-BY-NC (no commercial use)** |
 | Without a reference | Built-in default voice | "Auto Voice": random unless a seed is set |
-| Settings | Expressiveness, Pace control, Variation | Speed, Quality (diffusion steps 16–64) |
+| Settings | Expressiveness, Pace control, Variation | Speed, Quality (diffusion steps, any whole number 16–64) |
 | Voice conversion | Yes (`ChatterboxVC`) | No |
 | Note | Adds a PerTh watermark to outputs | |
 

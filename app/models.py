@@ -75,7 +75,7 @@ MODELS = {
         "settings": [
             {"key": "speed", "label": "Speed", "min": 0.5, "max": 2.0, "step": 0.05, "default": 1.0,
              "help": "Above 1 is faster."},
-            {"key": "num_step", "label": "Quality", "min": 16, "max": 64, "step": 16, "default": 32,
+            {"key": "num_step", "label": "Quality", "min": 16, "max": 64, "step": 1, "default": 32,
              "help": "Higher sounds better but takes longer; 16 is quick. Sounds such as [laughter] come out clearer "
                      "when it is higher."},
         ],
