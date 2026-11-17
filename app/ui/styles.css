@@ -1,23 +1,23 @@
 /* Vokalit UI. Tokens follow the design canvas. No external fonts or assets. */
 :root {
-  --bg: #111214;
-  --surface: #15161a;
-  --raised: #17181b;
-  --hover: #1e2024;
-  --line: #23252a;
-  --line-soft: #1c1e22;
-  --border: #2a2c31;
-  --text: #e8e9ec;
-  --muted: #8b8f99;
-  --faint: #6b6f78;
-  --accent: #e9a15b;
+  --bg: #131418;
+  --surface: #1a1b20;
+  --raised: #1f2126;
+  --hover: #282a31;
+  --line: #2e3138;
+  --line-soft: #25272d;
+  --border: #3a3d45;
+  --text: #f0f1f4;
+  --muted: #a6abb5;
+  --faint: #838995;
+  --accent: #eba65f;
   --accent-ink: #141414;
-  --accent-soft: #1f1a14;
-  --accent-line: #5c4126;
-  --warn: #e5c07b;
-  --danger: #e5807a;
-  --ok: #6fbf8a;
-  --record: #d9534f;
+  --accent-soft: #261f17;
+  --accent-line: #6b4a2a;
+  --warn: #ebc77f;
+  --danger: #ec8b85;
+  --ok: #74c98f;
+  --record: #e05a55;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 13px;
   line-height: 1.45;
@@ -125,7 +125,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
 details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line);
-          font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: #a3a7b0;
+          font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; color: var(--muted);
           white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
 
 /* Characters */
@@ -152,7 +152,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .player .time { color: var(--muted); font-size: 12px; min-width: 32px; }
 .wave { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 1px;
   height: 24px; overflow: hidden; }
-.wave > span { flex: 0 1 2px; min-width: 1px; border-radius: 1px; background: #5a5e68; }
+.wave > span { flex: 0 1 2px; min-width: 1px; border-radius: 1px; background: #737885; }
 .wave > span.played, .wave.selected > span { background: var(--accent); }
 .wave.big { height: 56px; }
 
@@ -182,7 +182,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .dot { display: inline-block; flex: none; border-radius: 50%; }
 .pop-holder { position: relative; }
 .popover { position: absolute; top: calc(100% + 6px); z-index: 20; min-width: 220px; padding: 6px; border-radius: 8px;
-  border: 1px solid var(--border); background: #1a1b1f; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); }
+  border: 1px solid var(--border); background: #22242a; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); }
 .menu { display: flex; flex-direction: column; gap: 2px; min-width: 220px; }
 .menu-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; border: none; background: none;
   text-align: left; cursor: pointer; white-space: nowrap; }
@@ -203,7 +203,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .tab[aria-selected="true"] { background: var(--hover); color: var(--text); }
 .sliders { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px 24px; }
 .slider { display: flex; flex-direction: column; gap: 6px; }
-.slider input[type=range] { width: 100%; accent-color: #5a5e68; margin: 0; }
+.slider input[type=range] { width: 100%; accent-color: #737885; margin: 0; }
 .slider.changed input[type=range] { accent-color: var(--accent); }
 .settings-panel { width: 460px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
 .settings-panel .sliders { grid-template-columns: 1fr; }
@@ -223,9 +223,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .chip-x { width: 24px; height: 24px; border: none; border-radius: 4px; background: transparent; color: var(--faint);
   display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .chip-x:hover { color: var(--text); background: var(--hover); }
-.cast-editor { border-bottom: 1px solid var(--line); background: var(--surface); padding: 12px 24px 0; }
-.cast-editor .samples { padding: 12px 0 16px; }
-.cast-editor .add-sample { margin-top: 16px; }
 .script-wrap { padding: 12px 24px 24px; }
 .script { max-width: 1400px; }
 .script-empty { padding: 24px 8px; }
@@ -245,7 +242,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .gap { display: flex; align-items: center; gap: 12px; height: 20px; padding: 0 8px 0 44px; }
 .gap-line { flex: 1 1 0; height: 1px; background: var(--line-soft); }
-.gap .insert { height: 20px; padding: 0 8px; border-radius: 10px; border: none; background: var(--hover); color: #a3a7b0;
+.gap .insert { height: 20px; padding: 0 8px; border-radius: 10px; border: none; background: var(--hover); color: var(--muted);
   font-size: 11px; cursor: pointer; visibility: hidden; }
 .gap:hover .insert, .gap .insert:focus-visible { visibility: visible; }
 .gap:hover .gap-line { background: var(--border); }
@@ -290,7 +287,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 
 /* Busy states */
 @keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse { 0%, 100% { background: var(--raised); } 50% { background: #1d1a16; } }
+@keyframes pulse { 0%, 100% { background: var(--raised); } 50% { background: #2a2219; } }
 .spinner { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid rgba(233, 161, 91, .25);
   border-top-color: var(--accent); animation: spin .8s linear infinite; display: inline-block; }
 .btn-primary .spinner { border-color: rgba(20, 20, 20, .25); border-top-color: var(--accent-ink); }
@@ -357,7 +354,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .transport-play { border-radius: 50%; width: 32px !important; height: 32px !important; border-color: var(--border); }
 .transport-label { color: var(--text); margin-left: 6px; white-space: nowrap; }
 .transport-clock { margin-left: 4px; }
-.line.now-playing, .line-details.now-playing { box-shadow: inset 3px 0 0 var(--accent); background: #1b1813; }
+.line.now-playing, .line-details.now-playing { box-shadow: inset 3px 0 0 var(--accent); background: #241e16; }
 .paste-option { gap: 8px; cursor: pointer; }
 .paste-option input { accent-color: var(--accent); margin: 0; }
 
@@ -366,7 +363,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line .pick { margin: 0; accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; opacity: 0;
   transition: opacity .15s ease; }
 .line:hover .pick, .script.picking .pick, .pick:focus-visible { opacity: 1; }
-.line:has(.pick:checked) { background: #1a1d24; box-shadow: inset 0 0 0 1px #2c3240; }
+.line:has(.pick:checked) { background: #1f2430; box-shadow: inset 0 0 0 1px #3a4458; }
 .gap { padding-left: 86px; }
 .selection-bar { display: flex; align-items: center; gap: 6px; margin-right: 8px; }
 .selection-count { color: var(--text); font-weight: 600; margin-right: 6px; white-space: nowrap; }
@@ -431,3 +428,15 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 
 /* App icon in the rail (replaces the "V" box) */
 .rail img.logo { width: 36px; height: 36px; background: none; padding: 0; border-radius: 9px; display: block; }
+
+/* Session-only character card (same frame as an open line) */
+.character-card { max-width: 1400px; margin: 0 0 12px; }
+.character-card .detail-head { padding: 10px 16px; }
+.character-card.collapsed .detail-head { cursor: pointer; }
+.character-card .field .input { width: 200px; height: 28px; }
+.scope-badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; }
+.character-body { border-top: 1px solid var(--line); }
+.character-body .samples { padding: 12px 16px 16px 60px; max-width: none; }
+.character-body .add-sample { margin-top: 16px; background: var(--bg); }
+.character-card + .script-wrap { padding-top: 0; }
+.main-body > .character-card { margin: 12px 24px; }

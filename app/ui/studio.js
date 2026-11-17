@@ -49,7 +49,8 @@ export async function renderStudio(root) {
   const picked = new Set(); // lines ticked for bulk actions
   let lastPicked = null; // anchor for Shift+click ranges
   let justClosed = null; // the row that replaces closed details fades in
-  let editing = null; // session-only character whose samples are open
+  let editing = null; // session-only character whose card is shown
+  let editingOpen = true; // that card expanded (samples visible) or collapsed to its header
   let seed = "";
   let batch = null;
   let pasting = false;
@@ -234,7 +235,8 @@ export async function renderStudio(root) {
     const listed = sessions.find((s) => s.id === session.id);
     if (listed && listed.lines !== session.lines.length) { listed.lines = session.lines.length; drawList(); }
     const scroll = main.querySelector(".main-body")?.scrollTop || 0;
-    main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, script()), footer());
+    const card = editing && castEntry(editing)?.name ? sessionCharacterEditor(castEntry(editing)) : null;
+    main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, card, script()), footer());
     main.querySelector(".main-body").scrollTop = scroll;
     paintTransport();
   }
@@ -324,8 +326,7 @@ export async function renderStudio(root) {
       el("div", { class: "muted" }, "Cast"),
       session.cast.map(chip),
       el("div", { class: "pop-holder" }, add));
-    if (!editing || !castEntry(editing)) return section;
-    return el("div", {}, section, sessionCharacterEditor(castEntry(editing)));
+    return section;
   }
 
   function chip(entry) {
@@ -335,7 +336,7 @@ export async function renderStudio(root) {
     const meta = deleted ? "" : sessionOnly ? "this session"
       : entry.samples.length ? plural(entry.samples.length, "sample") : "default voice";
     const nameNode = deleted ? el("span", { class: "warn" }, label)
-      : sessionOnly ? el("button", { class: "link-btn", title: "Edit samples", onclick: () => { editing = editing === entry.character ? null : entry.character; draw(); } }, label)
+      : sessionOnly ? el("button", { class: "link-btn", title: "Edit samples", onclick: () => { editing = editing === entry.character ? null : entry.character; editingOpen = true; draw(); } }, label)
         : el("a", { class: "link-btn", href: `#/characters/${entry.character}`, title: "Open in Characters" }, label);
     return el("div", { class: "chip" },
       avatar(entry.character, deleted ? "?" : entry.name, 24), nameNode,
@@ -376,22 +377,61 @@ export async function renderStudio(root) {
       el("div", { class: "row menu-note" }, nameInput, el("button", { class: "btn", onclick: createInSession }, "Create")));
   }
 
+  // A session-only character as a card in the same style as an open line: a header row (name, scope,
+  // Save to library, collapse, close) and, when expanded, its samples.
   function sessionCharacterEditor(entry) {
     const name = el("input", { class: "input", value: entry.name, "aria-label": "Character name", onchange: () => {
       const value = name.value.trim();
       if (!value) { name.value = entry.name; return; }
       api("PATCH", `/api/characters/${entry.character}?session=${sid()}`, { name: value }).then(refresh, fail);
     } });
-    let first = true;
-    return el("div", { class: "cast-editor" },
-      el("div", { class: "row" }, avatar(entry.character, entry.name, 24), name,
-        el("span", { class: "muted small" }, "Only in this session. Save to library to reuse it elsewhere."),
-        el("div", { class: "spacer" }),
-        el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close", onclick: () => { editing = null; draw(); } }, icon(ICONS.close))),
-      samplePanel(null, entry.character, sid(), async () => {
+    const count = entry.samples.length;
+    const summary = count
+      ? `${plural(count, "sample")} \u00b7 default \u201c${(entry.samples.find((x) => x.id === entry.default_sample) || entry.samples[0]).label}\u201d`
+      : "No samples \u00b7 default voice";
+    const toggle = el("button", { class: "btn btn-ghost icon-btn close-details", "aria-expanded": String(editingOpen),
+      "aria-label": editingOpen ? "Collapse" : "Expand", title: editingOpen ? "Collapse" : "Show samples",
+      onclick: () => setOpen(!editingOpen) }, icon(editingOpen ? ICON_CLOSE : ICON_OPEN, 16));
+    const card = el("section", { class: `line-details character-card ${editingOpen ? "" : "collapsed"}`, "aria-label": `Character ${entry.name}` });
+    const head = el("div", { class: "detail-head", title: editingOpen ? "Click an empty spot to collapse" : "Click to show samples" },
+      avatar(entry.character, entry.name, 28),
+      el("label", { class: "row field", title: "Only in this session. Save to library to reuse it in other sessions." },
+        "Character", name),
+      el("span", { class: "scope-badge", title: "Only in this session" }, "this session"),
+      el("span", { class: "faint small" }, summary),
+      el("div", { class: "spacer" }),
+      el("button", { class: "btn btn-small", title: "Move this character to your library so other sessions can use it too.",
+        onclick: () => api("POST", `/api/sessions/${sid()}/cast/${entry.character}/save`, {}).then((data) => {
+          editing = null; apply(data); setMessage(message, `${entry.name} is now in your character library.`);
+        }, fail) }, "Save to library"),
+      toggle,
+      el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Close", title: "Close",
+        onclick: () => close(() => { editing = null; }) }, icon(ICONS.close)));
+    head.addEventListener("click", (e) => {
+      if (e.target === head || e.target.classList.contains("spacer") || e.target.classList.contains("faint")) setOpen(!editingOpen);
+    });
+    async function close(after) {
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        card.classList.add("closing");
+        await new Promise((done) => { card.addEventListener("animationend", done, { once: true }); setTimeout(done, 300); });
+      }
+      after();
+      draw();
+    }
+    function setOpen(value) {
+      if (!value) return close(() => { editingOpen = false; });
+      editingOpen = true;
+      draw();
+    }
+    card.append(head);
+    if (editingOpen) {
+      let first = true;
+      card.append(el("div", { class: "character-body" }, samplePanel(null, entry.character, sid(), async () => {
         if (first) { first = false; return; }
         session = await api("GET", `/api/sessions/${sid()}`); // keep the panel; chips update on the next redraw
-      }));
+      })));
+    }
+    return card;
   }
 
   // --- Script --------------------------------------------------------------------------------
