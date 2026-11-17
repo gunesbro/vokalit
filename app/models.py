@@ -469,9 +469,13 @@ def delete_removed():
             remove(name)
 
 
+IDLE_SECONDS = 5 * 60  # a model unused this long leaves the GPU (or, for Whisper, memory); the next request loads it
+
+
 class _Worker:
     def __init__(self, name):
         self.lock = threading.Lock()
+        self.last_used = time.monotonic()
         # stderr is inherited, so the worker's logs appear in the console window.
         self.process = subprocess.Popen(
             [_python(name), _worker_script(name)],
@@ -494,9 +498,33 @@ class _Worker:
 
     def request(self, message):
         with self.lock:
-            self.process.stdin.write(json.dumps(message) + "\n")
-            self.process.stdin.flush()
-            return self._read()
+            try:
+                self.process.stdin.write(json.dumps(message) + "\n")
+                self.process.stdin.flush()
+                return self._read()
+            finally:
+                self.last_used = time.monotonic()
+
+
+def _unload_idle(now=None):
+    """Stops workers that have not been used for IDLE_SECONDS, unless one is busy right now."""
+    now = time.monotonic() if now is None else now
+    for name, worker in list(_workers.items()):
+        if now - worker.last_used > IDLE_SECONDS and worker.lock.acquire(blocking=False):
+            try:
+                if _workers.get(name) is worker:
+                    stop(name)
+            finally:
+                worker.lock.release()
+
+
+def _watch_idle():
+    while True:
+        time.sleep(30)
+        _unload_idle()
+
+
+_watcher = None
 
 
 def default_settings(name):
@@ -520,6 +548,10 @@ def _request(name, message):
     try:
         if name not in _workers:
             _workers[name] = _Worker(name)
+            global _watcher
+            if _watcher is None:  # unloads idle models from now on
+                _watcher = threading.Thread(target=_watch_idle, daemon=True)
+                _watcher.start()
         reply = _workers[name].request(message)
     except Exception:
         stop(name)

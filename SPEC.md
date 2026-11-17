@@ -147,6 +147,9 @@ user presses "Install" and confirms, to download packages and model weights.
   (`socket.socket.connect`, `connect_ex`, `sendto`, `socket.getaddrinfo` raise). The `socket.socket` class itself
   is not replaced, because modules such as `ssl` subclass it at import. A library that tries the network stops
   with a clear error.
+- A worker starts on its first request and is stopped after 5 minutes without one (`IDLE_SECONDS`), so models do
+  not hold GPU memory while unused; the next request loads it again. A worker also exits when the app is gone,
+  however it ended (its stdin closes).
 - Everything needed at generation time (Whisper's model and Chatterbox's voice conversion model included) is
   downloaded **during install**. OmniVoice always gets the sample's transcript, so it never needs its own Whisper.
 

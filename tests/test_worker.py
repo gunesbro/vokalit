@@ -123,3 +123,38 @@ def test_gpu_error_restarts_the_worker(installed):
     out = _out(local, "after.wav")
     models.generate("chatterbox", "works again", None, out, seed=1, settings={}, language="tr")
     assert "text=works again" in _read(out)
+
+
+def test_worker_exits_when_the_app_is_gone(installed):
+    # If the app is killed (e.g. from Task Manager), the OS closes its end of the worker's stdin; the worker must then
+    # exit and free the GPU memory.
+    _, local = installed
+    models.generate("chatterbox", "warm up", None, _out(local, "warm2.wav"), seed=1, settings={}, language="tr")
+    process = models._workers["chatterbox"].process
+    process.stdin.close()  # what the OS does when the app dies
+    assert process.wait(timeout=10) == 0
+    models._workers.pop("chatterbox", None)
+
+
+def test_idle_model_is_unloaded(installed):
+    # A model not used for IDLE_SECONDS leaves the GPU; the next take loads it again.
+    _, local = installed
+    models.generate("chatterbox", "warm up", None, _out(local, "idle.wav"), seed=1, settings={}, language="tr")
+    worker = models._workers["chatterbox"]
+    models._unload_idle(now=worker.last_used + models.IDLE_SECONDS - 1)
+    assert "chatterbox" in models._workers  # not idle long enough
+    models._unload_idle(now=worker.last_used + models.IDLE_SECONDS + 1)
+    assert "chatterbox" not in models._workers
+    assert worker.process.wait(timeout=10) is not None
+    out = _out(local, "after-idle.wav")
+    models.generate("chatterbox", "loaded again", None, out, seed=1, settings={}, language="tr")
+    assert "text=loaded again" in _read(out)
+
+
+def test_busy_model_is_not_unloaded(installed):
+    _, local = installed
+    models.generate("chatterbox", "warm up", None, _out(local, "busy.wav"), seed=1, settings={}, language="tr")
+    worker = models._workers["chatterbox"]
+    with worker.lock:  # a take is being generated
+        models._unload_idle(now=worker.last_used + models.IDLE_SECONDS + 1)
+    assert "chatterbox" in models._workers
