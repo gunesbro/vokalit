@@ -492,3 +492,10 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .line-text .sound-chip { padding: 0 8px; }
 .chip-x { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 3px; font-size: 1.05em; line-height: 1; opacity: .7; }
 .chip-x:hover { opacity: 1; }
+
+/* Sound suggestions after "[" and in Add sound: the name, and the models that perform it */
+.suggest-menu { position: fixed; z-index: 50; min-width: 260px; max-height: 280px; overflow-y: auto; padding: 6px;
+  border-radius: 8px; border: 1px solid var(--border); background: #2a2c33; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); }
+.suggest-head { padding: 4px 10px 2px; }
+.suggest-item { display: flex; justify-content: space-between; gap: 16px; }
+.suggest-item.active { background: var(--hover); }

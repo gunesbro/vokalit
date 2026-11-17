@@ -25,7 +25,9 @@ export function joinParts(parts) {
 // A text field for a line: plain text, with known sound tags shown as chips (× removes one). Behaves like a
 // textarea for the code around it: `.value` is the canonical text and it fires "input" when that changes.
 // `insertSound(tag)` puts a chip at the caret. Paste is plain text; formatting commands are ignored.
-export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "Text", placeholder = "", el }) {
+// Typing "[" opens a list of sounds (`suggestions`: [{ tag, label, note }], note = which models perform it); typing
+// narrows it, arrows move, Enter or Tab takes one, Esc closes.
+export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "Text", placeholder = "", suggestions = [], el }) {
   const field = el("div", { class: "textarea sound-editor", contenteditable: "true", role: "textbox", "aria-multiline": "true",
     "aria-label": ariaLabel, "data-placeholder": placeholder, spellcheck: "true" });
   let current = value;
@@ -95,6 +97,46 @@ export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "T
     selection.addRange(range);
   };
 
+  // --- "[" suggestions -------------------------------------------------------------------------------------
+  let menu = null; // { box, items, active, start } while open; start = offset of the "["
+  const closeMenu = () => { menu?.box.remove(); menu = null; };
+  const choose = (tag) => {
+    const caret = caretOffset() ?? current.length;
+    const before = current.slice(0, menu.start);
+    const after = current.slice(caret);
+    closeMenu();
+    const { value: text, caret: at } = insertTag(before + after, before.length, before.length, tag);
+    render(text, at);
+    current = text;
+    lastCaret = at;
+    record(text, at);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const paintMenu = () => menu.items.forEach((item, i) => item.classList.toggle("active", i === menu.active));
+  function suggest() {
+    const caret = caretOffset();
+    const typed = caret === null ? null : current.slice(0, caret).match(/\[([a-z-]*)$/i);
+    const matches = typed ? suggestions.filter((s) => s.tag.startsWith(typed[1].toLowerCase())
+      || s.label.toLowerCase().includes(typed[1].toLowerCase())) : [];
+    if (!matches.length) return closeMenu();
+    const start = caret - typed[0].length;
+    if (!menu) {
+      menu = { box: el("div", { class: "menu suggest-menu", role: "listbox" }), items: [], active: 0, start };
+      document.body.append(menu.box);
+    }
+    menu.start = start;
+    menu.items = matches.map((s) => el("button", { type: "button", class: "menu-item suggest-item", role: "option",
+      onmousedown: (e) => { e.preventDefault(); choose(s.tag); } },
+    el("span", {}, s.label), s.note && el("span", { class: "faint small" }, s.note)));
+    menu.active = Math.min(menu.active, matches.length - 1);
+    menu.box.replaceChildren(el("div", { class: "faint small suggest-head" }, "Sounds"), ...menu.items);
+    paintMenu();
+    const rect = document.getSelection().getRangeAt(0).getBoundingClientRect();
+    const fallback = field.getBoundingClientRect();
+    const left = Math.min(rect.left || fallback.left, window.innerWidth - menu.box.offsetWidth - 8); // stays on screen
+    Object.assign(menu.box.style, { left: `${Math.max(8, left)}px`, top: `${(rect.bottom || fallback.top + 24) + 4}px` });
+  }
+
   function update() {
     const text = read();
     // A tag typed or pasted as text becomes a chip.
@@ -105,6 +147,7 @@ export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "T
     current = text;
     record(text, caretOffset() ?? text.length, true);
     field.dispatchEvent(new Event("input", { bubbles: true }));
+    suggest();
   }
 
   field.addEventListener("input", (e) => { if (e.isTrusted) { e.stopImmediatePropagation(); update(); } }, true);
@@ -116,6 +159,15 @@ export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "T
     }
   });
   field.addEventListener("keydown", (e) => {
+    if (menu) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        menu.active = (menu.active + (e.key === "ArrowDown" ? 1 : -1) + menu.items.length) % menu.items.length;
+        return paintMenu();
+      }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); return menu.items[menu.active].dispatchEvent(new MouseEvent("mousedown")); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); return closeMenu(); }
+    }
     if (e.key === "Enter") { e.preventDefault(); document.execCommand("insertText", false, "\n"); }
     const key = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && (key === "z" || key === "y")) {
@@ -131,7 +183,7 @@ export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "T
   const remember = () => { const at = caretOffset(); if (at !== null) lastCaret = at; };
   field.addEventListener("keyup", remember);
   field.addEventListener("mouseup", remember);
-  field.addEventListener("blur", remember);
+  field.addEventListener("blur", () => { remember(); closeMenu(); });
 
   Object.defineProperty(field, "value", { get: () => current, set: (text) => { current = text; render(text); } });
   field.insertSound = (tag) => {

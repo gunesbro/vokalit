@@ -93,6 +93,10 @@ export async function renderStudio(root) {
   const modelInfo = (name) => models.find((m) => m.name === name);
   // Every sound tag some model performs: shown as chips wherever a line's text is shown.
   const soundTags = () => [...new Set(models.flatMap((m) => m.tags || []))];
+  // Sounds to offer (installed models), each with the models that perform it: [{ tag, label, note }].
+  const soundChoices = () => [...new Set(installed().flatMap((m) => m.tags || []))].map((tag) => ({
+    tag, label: TAG_LABELS[tag] || tag,
+    note: installed().filter((m) => m.tags?.includes(tag)).map((m) => m.title.split(" ")[0]).join(", ") }));
   const defaults = (name) => Object.fromEntries((modelInfo(name)?.settings || []).map((s) => [s.key, s.default]));
   const sessionValues = (name) => ({ ...defaults(name), ...(session.settings[name] || {}) });
   const languageName = (code) =>
@@ -705,7 +709,7 @@ export async function renderStudio(root) {
     };
     // Plain text with sound tags shown as chips; behaves like a textarea (.value, "input").
     const text = soundEditor({ value: line.text, tags: soundTags(), labels: TAG_LABELS, ariaLabel: "Line text", el,
-      placeholder: "Write what this character says" });
+      placeholder: "Write what this character says", suggestions: soundChoices() });
     text.classList.add("line-input");
     text.addEventListener("input", () => { clearTimeout(typing); pendingText[line.id] = saveText; typing = setTimeout(saveText, 600); });
     text.addEventListener("blur", () => saveText());
@@ -757,12 +761,12 @@ export async function renderStudio(root) {
       if (!tags.length) return null;
       const button = el("button", { class: "btn btn-small sound-btn", title: "Insert a sound at the cursor. Models that cannot perform sounds skip them." },
         icon(["M12 5v14", "M5 12h14"], 12), "Add sound");
-      button.onclick = () => popover(button, el("div", { class: "menu" }, ...tags.map((tag) => el("button", { class: "menu-item",
-        onclick: () => {
+      button.onclick = () => popover(button, el("div", { class: "menu" }, ...soundChoices().map((s) => el("button", {
+        class: "menu-item suggest-item", onclick: () => {
           document.querySelector(".popover")?.dispatchEvent(new Event("close"));
-          field.insertSound(tag);
+          field.insertSound(s.tag);
           save();
-        } }, TAG_LABELS[tag] || tag))));
+        } }, el("span", {}, s.label), el("span", { class: "faint small" }, s.note)))));
       const names = (list) => list.map((m) => m.title.split(" ")[0]).join(", ");
       const performers = installed().filter((m) => m.tags?.length);
       const skippers = installed().filter((m) => !m.tags?.length);
