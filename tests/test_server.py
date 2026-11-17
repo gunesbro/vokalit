@@ -460,7 +460,7 @@ def test_new_sample_needs_a_transcript(api, tmp_path):
 
 def test_turkish_transcript_arrives_intact(api, tmp_path):
     from urllib.parse import quote
-    text = "Merhaba, çok güzel & 100% doğru?"
+    text = "Merhaba, \u00e7ok g\u00fczel & 100% do\u011fru?"
     _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
     status, body, _ = api("POST", f"/api/characters/{character['id']}/samples?source=upload&transcript={quote(text)}",
                           raw=make_wav(tmp_path / "s.wav", 11).read_bytes(), content_type="audio/wav")

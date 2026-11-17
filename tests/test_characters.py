@@ -66,10 +66,10 @@ def test_session_only_character_lives_in_session(tmp_workspace):
 
 def test_sample_keeps_its_transcript(tmp_workspace, tmp_path):
     cid = ws.create_character("Burak")
-    sid = ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording", transcript="Merhaba, dünya.")
-    assert ws.load_character(cid)["samples"][0]["transcript"] == "Merhaba, dünya."
-    ws.set_sample_transcript(cid, sid, "  Merhaba dünya  ")
-    assert ws.load_character(cid)["samples"][0]["transcript"] == "Merhaba dünya"
+    sid = ws.add_sample(cid, str(make_wav(tmp_path / "a.wav", 11)), "recording", transcript="Merhaba, d\u00fcnya.")
+    assert ws.load_character(cid)["samples"][0]["transcript"] == "Merhaba, d\u00fcnya."
+    ws.set_sample_transcript(cid, sid, "  Merhaba d\u00fcnya  ")
+    assert ws.load_character(cid)["samples"][0]["transcript"] == "Merhaba d\u00fcnya"
 
 
 def test_empty_transcript_is_refused(tmp_workspace, tmp_path):
