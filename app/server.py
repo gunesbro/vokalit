@@ -96,7 +96,7 @@ def _model_view(name):
             "settings": info["settings"], "supports_convert": info.get("supports_convert", False),
             "languages": [{"code": c, "name": models.LANGUAGE_NAMES[c]} for c in info.get("languages", [])],
             "accent_setting": info.get("accent_setting"),
-            "tags": models.TAGS if info.get("supports_tags") else []}
+            "tags": list(info.get("sounds") or {})}
 
 
 def _round(gb):

@@ -2,7 +2,8 @@
 import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
-import { commonLanguages, findPlayable, formatTime, insertTag, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
+import { soundEditor, soundText } from "./editor.js";
+import { commonLanguages, findPlayable, formatTime, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
 import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, searchSelect, sliders } from "./settings.js";
 import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 
@@ -29,7 +30,6 @@ const SPLIT_SIZE = 250;
 const ICON_OPEN = ["M6 9l6 6 6-6"]; // chevron down: open the line
 const ICON_CLOSE = ["M6 15l6-6 6 6"]; // chevron up: close it
 
-const textRows = (text) => Math.min(10, Math.max(2, Math.ceil(text.length / 140) + (text.match(/\n/g) || []).length));
 const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 const when = (created) => created.slice(0, 16).replace("T", " ");
 
@@ -91,6 +91,8 @@ export async function renderStudio(root) {
   // Short names ("Chatterbox") keep the header and take labels compact; menus show the full title.
   const titles = () => Object.fromEntries(models.flatMap((m) => [[m.name, m.title.split(" ")[0]], [`${m.name}-vc`, "Converted"]]));
   const modelInfo = (name) => models.find((m) => m.name === name);
+  // Every sound tag some model performs: shown as chips wherever a line's text is shown.
+  const soundTags = () => [...new Set(models.flatMap((m) => m.tags || []))];
   const defaults = (name) => Object.fromEntries((modelInfo(name)?.settings || []).map((s) => [s.key, s.default]));
   const sessionValues = (name) => ({ ...defaults(name), ...(session.settings[name] || {}) });
   const languageName = (code) =>
@@ -166,7 +168,7 @@ export async function renderStudio(root) {
   // takes and samples whose files are gone.
   function onFocus() {
     if (!main.isConnected || !session || Object.keys(pendingText).length || generating.size || batch || performing
-        || document.querySelector(".popover, .trim-box, .review-box") || document.activeElement?.matches("input, textarea")) return;
+        || document.querySelector(".popover, .trim-box, .review-box") || document.activeElement?.matches("input, textarea, [contenteditable]")) return;
     refresh().catch(() => {});
     loadExports();
   }
@@ -535,7 +537,8 @@ export async function renderStudio(root) {
       title: "Click to edit the line and its takes" },
     pickBox(line), handle(line), speaker(line),
     el("div", { class: "line-body" },
-      el("div", { class: `line-text ${line.text ? "" : "faint"}` }, line.text || "Empty line \u2014 click to write it"),
+      el("div", { class: `line-text ${line.text ? "" : "faint"}` },
+        line.text ? soundText(line.text, soundTags(), TAG_LABELS, el) : "Empty line \u2014 click to write it"),
       long && el("div", { class: "faint small" }, `${line.text.length} characters \u00b7 click to see all or split it`)),
     right);
     node.addEventListener("click", (e) => { if (!e.target.closest("button, a, input, select, .player, .popover")) open(line.id); });
@@ -641,7 +644,7 @@ export async function renderStudio(root) {
       const result = await api("POST", `/api/sessions/${sid()}/lines`, { character, after: after?.id || null });
       openLine = result.id;
       apply(result);
-      main.querySelector(".line-details textarea")?.focus();
+      main.querySelector(".line-details .sound-editor")?.focus();
     } catch (error) { fail(error); }
   }
 
@@ -700,9 +703,12 @@ export async function renderStudio(root) {
       line.text = text.value;
       return api("PATCH", `/api/sessions/${sid()}/lines/${line.id}`, { text: text.value }).then((data) => { session = data; }, fail);
     };
-    const text = el("textarea", { class: "textarea line-input", rows: textRows(line.text), "aria-label": "Line text", value: line.text,
-      oninput: () => { clearTimeout(typing); pendingText[line.id] = saveText; typing = setTimeout(saveText, 600); },
-      onchange: saveText });
+    // Plain text with sound tags shown as chips; behaves like a textarea (.value, "input").
+    const text = soundEditor({ value: line.text, tags: soundTags(), labels: TAG_LABELS, ariaLabel: "Line text", el,
+      placeholder: "Write what this character says" });
+    text.classList.add("line-input");
+    text.addEventListener("input", () => { clearTimeout(typing); pendingText[line.id] = saveText; typing = setTimeout(saveText, 600); });
+    text.addEventListener("blur", () => saveText());
     const pause = el("input", { class: "input pause", value: line.pause_after, inputmode: "decimal", "aria-label": "Pause after the line in seconds",
       onchange: () => {
         const value = Number(pause.value.replace(",", "."));
@@ -727,7 +733,6 @@ export async function renderStudio(root) {
     text.addEventListener("input", () => {
       generateButton.disabled = busy || !count || !text.value.trim();
       generateButton.title = text.value.trim() ? "" : "Write the line first";
-      text.rows = textRows(text.value);
     });
 
     // Plays the closing animation, then shows the row again (which fades in).
@@ -752,11 +757,7 @@ export async function renderStudio(root) {
       button.onclick = () => popover(button, el("div", { class: "menu" }, ...tags.map((tag) => el("button", { class: "menu-item",
         onclick: () => {
           document.querySelector(".popover")?.dispatchEvent(new Event("close"));
-          const { value, caret } = insertTag(field.value, field.selectionStart, field.selectionEnd, tag);
-          field.value = value;
-          field.focus();
-          field.setSelectionRange(caret, caret);
-          field.dispatchEvent(new Event("input"));
+          field.insertSound(tag);
           save();
         } }, TAG_LABELS[tag] || tag))));
       return el("div", { class: "row sound-tools" }, el("div", { class: "pop-holder" }, button),

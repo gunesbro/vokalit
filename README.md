@@ -19,8 +19,9 @@ Your voice, your text and the generated audio never leave your machine.
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.
-- **Sound tags** — write `[laughter]`, `[sigh]` and other sounds into a line (*Add sound*); OmniVoice performs them,
-  models that cannot are given the text without them.
+- **Sound tags** — laughter, sighs and other sounds as chips inside a line's text (*Add sound*, or type
+  `[laughter]`; × removes one). Each model gets them in its own syntax; models that cannot perform them get the text
+  without them. OmniVoice performs them, more clearly with a higher Quality.
 - **Transcripts** — every sample keeps what is said in it, which some models use to copy the voice. The optional
   Whisper component writes it for you (and detects the language); otherwise you type it.
 

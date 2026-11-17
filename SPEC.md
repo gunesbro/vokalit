@@ -18,6 +18,10 @@ file. Everything is done by clicking in a desktop window.
 - Models: **Chatterbox Multilingual** (Resemble AI) and **OmniVoice** (k2-fsa); the optional **Whisper** component
   (faster-whisper on the CPU) writes sample transcripts. Design: `docs/superpowers/specs/2026-11-17-omnivoice-design.md`.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
+  - A line's text is edited in our own small editor: plain text with sound tags shown as chips (× removes one,
+    typed `[laughter]` becomes a chip, paste is plain text, own undo history). Stored text keeps canonical tags;
+    `MODELS[name]["sounds"]` converts each for the model, models without it drop them
+    (`docs/superpowers/specs/2026-11-17-sound-chips-design.md`).
   - Language fields are search boxes (OmniVoice lists 646 languages); only languages every chosen model speaks are
     offered.
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
@@ -50,7 +54,7 @@ file. Everything is done by clicking in a desktop window.
 | Measured disk use | 12.3 GB on Windows (libraries + weights) | ~9 GB estimate; PyTorch is shared with Chatterbox |
 | VRAM | ~3.5–4 GB | ~8 GB is enough (RTX 4090 test) |
 | Reference | Audio file | Audio file + its transcript (`needs_transcript`; stored with every sample) |
-| Sound tags (`[laughter]`, `[sigh]`, …) | No: removed from its text | Yes (`supports_tags`) |
+| Sound tags (`[laughter]`, `[sigh]`, …) | No: removed from its text | Yes (`sounds`: each tag as itself) |
 | Code license | MIT | Apache 2.0 |
 | **Weights license** | MIT | **CC-BY-NC (no commercial use)** |
 | Without a reference | Built-in default voice | "Auto Voice": random unless a seed is set |

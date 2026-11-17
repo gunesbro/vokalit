@@ -31,6 +31,13 @@ with open(os.path.join(os.path.dirname(__file__), "omnivoice_languages.json"), e
 LANGUAGE_NAMES = {**_OMNIVOICE_LANGUAGES, **LANGUAGE_NAMES}
 
 
+# Sounds written into a line's text as [tag] (Vokalit's names, which are OmniVoice's). Each model gets them in its own
+# syntax ("sounds"); models without a sound get the text without it, since they would read the tag aloud.
+TAGS = ["laughter", "sigh", "confirmation-en", "question-en", "question-ah", "question-oh", "question-ei", "question-yi",
+        "surprise-ah", "surprise-oh", "surprise-wa", "surprise-yo", "dissatisfaction-hnn"]
+_TAG = re.compile(r"\[(" + "|".join(re.escape(tag) for tag in TAGS) + r")\]")
+
+
 MODELS = {
     "chatterbox": {
         "title": "Chatterbox Multilingual",
@@ -39,7 +46,6 @@ MODELS = {
         "disk_gb": 12.3,  # measured on Windows (SPEC.md §6.1)
         "license": "MIT",
         "supports_convert": True,
-        "supports_tags": False,  # [laughter] and the like would be read aloud: they are removed from its text
         "needs_transcript": False,
         "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
                       "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
@@ -67,7 +73,7 @@ MODELS = {
         "disk_gb": 9.0,  # estimate until measured on Windows
         "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
         "supports_convert": False,
-        "supports_tags": True,
+        "sounds": {tag: f"[{tag}]" for tag in TAGS},  # Vokalit's sound tags are OmniVoice's
         "needs_transcript": True,  # it copies a voice from the sample and what is said in it
         # Every language it lists, and "ar" (Chatterbox's Arabic), which it calls Standard Arabic.
         "languages": sorted(set(_OMNIVOICE_LANGUAGES) | {"ar"}),
@@ -87,18 +93,12 @@ MODELS = {
     },
 }
 
-# Sounds written into a line's text as [tag] (OmniVoice performs them). Models without "supports_tags" get the text
-# without them; they would read them aloud.
-TAGS = ["laughter", "sigh", "confirmation-en", "question-en", "question-ah", "question-oh", "question-ei", "question-yi",
-        "surprise-ah", "surprise-oh", "surprise-wa", "surprise-yo", "dissatisfaction-hnn"]
-_TAG = re.compile(r"\[(?:" + "|".join(re.escape(tag) for tag in TAGS) + r")\]")
-
-
 def text_for(name, text):
-    """The line's text as `name` should get it: known tags removed unless the model performs them."""
-    if MODELS[name].get("supports_tags"):
-        return text
-    return re.sub(r"\s+", " ", _TAG.sub(" ", text)).strip()
+    """The line's text as `name` should get it: each sound tag in the model's own syntax ("sounds"), or removed when
+    the model does not perform it."""
+    sounds = MODELS[name].get("sounds") or {}
+    converted = _TAG.sub(lambda m: f" {sounds[m.group(1)]} " if m.group(1) in sounds else " ", text)
+    return re.sub(r"[ \t]+", " ", converted).strip() if converted != text else text
 
 
 # Components that are not voice models. Whisper writes down what a voice sample says; some models need that.
