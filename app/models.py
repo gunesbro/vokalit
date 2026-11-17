@@ -478,6 +478,7 @@ class _Worker:
     def __init__(self, name):
         self.lock = threading.Lock()
         self.last_used = time.monotonic()
+        self.vram_gb = None  # GPU memory the model holds, as the worker reports it
         # stderr is inherited, so the worker's logs appear in the console window.
         self.process = subprocess.Popen(
             [_python(name), _worker_script(name)],
@@ -488,6 +489,7 @@ class _Worker:
             encoding="utf-8",
         )
         ready = self._read()
+        self.vram_gb = ready.get("vram_gb")
         if not ready.get("ready"):
             self.process.kill()
             if ready.get("oom"):
@@ -505,7 +507,9 @@ class _Worker:
             try:
                 self.process.stdin.write(json.dumps(message) + "\n")
                 self.process.stdin.flush()
-                return self._read()
+                reply = self._read()
+                self.vram_gb = reply.get("vram_gb", self.vram_gb)
+                return reply
             finally:
                 self.last_used = time.monotonic()
 
@@ -520,6 +524,31 @@ def _unload_idle(now=None):
                     stop(name)
             finally:
                 worker.lock.release()
+
+
+def runtime(name):
+    """Whether the component is loaded right now, for the Models screen: busy (generating), the GPU memory it holds,
+    and the seconds until it is unloaded for being idle."""
+    worker = _workers.get(name)
+    if worker is None:
+        return {"loaded": False}
+    busy = worker.lock.locked()
+    left = None if busy else max(0, round(IDLE_SECONDS - (time.monotonic() - worker.last_used)))
+    return {"loaded": True, "busy": busy, "vram_gb": worker.vram_gb, "unloads_in": left}
+
+
+def unload(name):
+    """Unloads a component now. ValueError while it is generating."""
+    worker = _workers.get(name)
+    if worker is None:
+        return
+    if not worker.lock.acquire(blocking=False):
+        raise ValueError(f"{spec(name)['title']} is generating; it can be unloaded when it is done.")
+    try:
+        if _workers.get(name) is worker:
+            stop(name)
+    finally:
+        worker.lock.release()
 
 
 def _watch_idle():

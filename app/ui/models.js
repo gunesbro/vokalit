@@ -1,9 +1,37 @@
 // Models screen: install (with confirmation and progress), cancel, remove.
 import { api, el, setMessage, waitForJob } from "./app.js";
 
-// Install jobs survive switching screens.
-const installs = {}; // name -> { progress, log, step, steps }
+// Install jobs survive switching screens: their state lives here, and `screen` is the Models screen open right now
+// (null on other screens), which the job following code updates.
+const installs = {}; // name -> { progress, log, step, steps, started }
+const following = new Set(); // install job ids being followed
+let screen = null;
 let missedNotice = null; // how an install ended while another screen was open: [text, kind]
+
+// Follows an install job to its end, updating whichever Models screen is open.
+async function follow(id, name, title) {
+  if (following.has(id)) return;
+  following.add(id);
+  installs[name] ||= { progress: "", log: "", step: 1, steps: 5 };
+  const report = (text, kind) => (screen?.alive() ? screen.report(text, kind) : (missedNotice = [text, kind]));
+  try {
+    await waitForJob(id, (j) => {
+      const [, step, steps] = j.progress.match(/^Step (\d+)\/(\d+)/) || [];
+      const last = installs[name];
+      installs[name] = { progress: j.progress, log: j.log, started: j.started,
+        step: Number(step || last.step), steps: Number(steps || last.steps) };
+      screen?.updateProgress(name);
+    });
+    report(`${title} is installed.`, "info");
+  } catch (error) {
+    report(/Cancelled|^$/.test(error.message) ? "Install cancelled. Nothing was kept." : `Install failed: ${error.message}`,
+      /Cancelled|^$/.test(error.message) ? "info" : "error");
+  } finally {
+    delete installs[name];
+    following.delete(id);
+    screen?.refresh();
+  }
+}
 
 export async function renderModels(root) {
   const message = el("div", { class: "message" });
@@ -27,8 +55,7 @@ export async function renderModels(root) {
   }
 
   function report(text, kind) {
-    if (root.isConnected) setMessage(message, text, kind);
-    else missedNotice = [text, kind];
+    setMessage(message, text, kind);
   }
 
   async function refresh() {
@@ -41,7 +68,12 @@ export async function renderModels(root) {
 
   let busyName = null; // an install running on the server (also one started elsewhere): other Installs wait
 
-  function draw({ items, total_gb: total, installing }) {
+  function draw({ items, total_gb: total, installing, install_job: job }) {
+    // An install started before this screen opened (another tab, or the window was reopened): follow it here.
+    if (job && !installs[job.name]) {
+      installs[job.name] = { progress: "", log: "", step: 1, steps: 5 };
+      follow(job.id, job.name, items.find((c) => c.name === job.name)?.title || job.name);
+    }
     busyName = installing || Object.keys(installs)[0] || null;
     // Sizes are measured in the background after an install or remove: look again until they are known.
     if (items.some((c) => c.installed && c.frees_gb == null)) setTimeout(() => root.isConnected && refresh(), 3000);
@@ -66,7 +98,8 @@ export async function renderModels(root) {
           el("a", { href: model.url, target: "_blank", rel: "noopener", style: { fontSize: "14px", fontWeight: "600", textDecoration: "none" } }, model.title),
           model.recommended ? el("span", { class: "tag" }, "Recommended") : null),
         el("div", { class: "muted" }, model.summary)),
-      el("div", { class: `status ${state}` }, el("span", { class: "dot" }), statusText),
+      el("div", {}, el("div", { class: `status ${state}` }, el("span", { class: "dot" }), statusText),
+        model.installed && !job ? runtimeLine(model) : null),
       el("div", { class: "muted" }, model.license),
       actions);
 
@@ -146,22 +179,43 @@ export async function renderModels(root) {
       const { id } = await api("POST", `/api/models/${model.name}/install`);
       installs[model.name] = { progress: "", log: "", step: 1, steps: 5 };
       refresh();
-      await waitForJob(id, (j) => {
-        const [, step, steps] = j.progress.match(/^Step (\d+)\/(\d+)/) || [];
-        const last = installs[model.name];
-        installs[model.name] = { progress: j.progress, log: j.log, started: j.started,
-          step: Number(step || last.step), steps: Number(steps || last.steps) };
-        if (root.isConnected) updateProgress(model.name);
-      });
-      report(`${model.title} is installed.`, "info");
+      follow(id, model.name, model.title);
     } catch (error) {
-      report(/Cancelled|^$/.test(error.message) ? "Install cancelled. Nothing was kept." : `Install failed: ${error.message}`,
-        /Cancelled|^$/.test(error.message) ? "info" : "error");
-    } finally {
-      delete installs[model.name];
-      if (root.isConnected) refresh();
+      setMessage(message, `Install failed: ${error.message}`, "error");
     }
   }
+
+  // Whether the model is loaded right now (GPU memory, when it unloads itself) and an Unload button.
+  function runtimeLine(model) {
+    const box = el("div", { class: "runtime small", "data-runtime": model.name });
+    paintRuntime(box, model);
+    return box;
+  }
+
+  function paintRuntime(box, model) {
+    const r = model.runtime || { loaded: false };
+    if (!r.loaded) return box.replaceChildren(el("span", { class: "faint" }, "\u25cb Not loaded"));
+    const where = model.kind === "tool" ? "In memory" : "On GPU";
+    const parts = [where, r.vram_gb ? `${r.vram_gb.toFixed(1)} GB` : null,
+      r.busy ? "generating" : `unloads in ${Math.max(1, Math.ceil(r.unloads_in / 60))} min`].filter(Boolean);
+    box.replaceChildren(el("span", { class: "loaded" }, `\u25cf ${parts.join(" \u00b7 ")}`),
+      r.busy ? null : el("button", { class: "btn btn-ghost btn-small", title: "Free its memory now; the next take loads it again",
+        onclick: () => api("POST", `/api/models/${model.name}/unload`).then((view) => paintRuntime(box, view),
+          (error) => setMessage(message, error.message, "error")) }, "Unload"));
+  }
+
+  // Loaded models change on their own (a take loads one, idle ones unload): look every few seconds and repaint only
+  // those lines, so an open confirmation or install log stays as it is.
+  const watcher = setInterval(async () => {
+    if (!root.isConnected) { clearInterval(watcher); return; }
+    try {
+      const { items } = await api("GET", "/api/components");
+      for (const model of items) {
+        const box = body.querySelector(`[data-runtime="${model.name}"]`);
+        if (box && model.installed) paintRuntime(box, model);
+      }
+    } catch { /* the next look */ }
+  }, 5000);
 
   // The elapsed time is counted here, every second, so it moves even while the server is busy.
   function progressText(job) {
@@ -215,5 +269,7 @@ export async function renderModels(root) {
     refresh();
   }
 
+  screen = { report, alive: () => root.isConnected, refresh: () => (root.isConnected ? refresh() : undefined),
+    updateProgress: (name) => root.isConnected && updateProgress(name) };
   refresh();
 }

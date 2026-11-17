@@ -500,3 +500,8 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .suggest-head { padding: 4px 10px 2px; }
 .suggest-item { display: flex; justify-content: space-between; gap: 16px; }
 .suggest-item.active { background: var(--hover); }
+
+/* Models screen: whether a model is loaded right now */
+.runtime { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 4px; }
+.runtime .btn { padding-left: 0; }
+.runtime .loaded { color: var(--accent); }

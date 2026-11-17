@@ -116,7 +116,8 @@ def _component_view(name):
         "name": name, "title": info["title"], "summary": info["summary"], "url": info["url"],
         "license": info["license"], "disk_gb": info["disk_gb"], "installed": installed,
         "frees_gb": _frees_gb(name) if installed else None}
-    return {**view, "kind": "model" if name in models.MODELS else "tool", "recommended": info.get("recommended", False)}
+    return {**view, "kind": "model" if name in models.MODELS else "tool", "recommended": info.get("recommended", False),
+            "runtime": models.runtime(name)}
 
 
 def _check_component(name):
@@ -347,8 +348,11 @@ def list_models(req):
 def list_components(req):
     """The Models screen: tools (Whisper) first, then the voice models."""
     names = list(models.TOOLS) + list(models.MODELS)
+    running = next((j for j in _jobs.values() if j["kind"] == "install" and j["state"] == "running"), None)
     return {"items": [_component_view(name) for name in names], "total_gb": _round(models.sizes()["total_gb"]),
-            "installing": models.installing()}
+            "installing": models.installing(),
+            # A screen opened during an install (after switching tabs, or a restart of the window) follows it.
+            "install_job": {"id": running["id"], "name": running["line"]} if running else None}
 
 
 @route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/install")
@@ -364,7 +368,7 @@ def install_model(req, name):
         if name == "whisper":
             transcribe_missing()
         return _component_view(name)
-    return _start_job(work)
+    return _start_job(work, kind="install", line=name)
 
 
 @route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/cancel")
@@ -378,6 +382,13 @@ def cancel_model(req, name):
 def remove_model(req, name):
     _check_component(name)
     models.remove(name)
+    return _component_view(name)
+
+
+@route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/unload")
+def unload_model(req, name):
+    _check_component(name)
+    models.unload(name)
     return _component_view(name)
 
 

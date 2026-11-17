@@ -61,7 +61,7 @@ def main():
     except Exception as error:  # e.g. no room on the GPU: the app makes room and tries again
         send(ready=False, error=str(error), oom=_out_of_memory(error))
         return
-    send(ready=True)
+    send(ready=True, vram_gb=round(torch.cuda.memory_reserved() / 1e9, 2))
 
     for line in sys.stdin:
         request = json.loads(line)
@@ -76,7 +76,8 @@ def main():
                                    speed=settings.get("speed", 1.0), num_step=int(settings.get("num_step", 32)))
             # 16-bit PCM so the app can join takes with the standard wave module.
             sf.write(request["out"], audio[0], SAMPLE_RATE, subtype="PCM_16")
-            send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1))
+            send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1),
+                 vram_gb=round(torch.cuda.memory_reserved() / 1e9, 2))  # shown on the Models screen
         except Exception as error:
             if _out_of_memory(error):  # recoverable: free the cache and let the app make room
                 if hasattr(torch.cuda, "empty_cache"):

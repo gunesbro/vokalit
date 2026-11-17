@@ -57,7 +57,7 @@ def main():
         return
     # Cloning replaces model.conds (the active voice); keep the built-in voice to restore it.
     default_conds = model.conds
-    send(ready=True)
+    send(ready=True, vram_gb=round(torch.cuda.memory_reserved() / 1e9, 2))
 
     vc = None  # the conversion model loads on the first convert request
 
@@ -83,7 +83,8 @@ def main():
                 sample_rate = model.sr
             # 16-bit PCM so the app can join takes with the standard wave module.
             sf.write(request["out"], wav.squeeze(0).cpu().numpy(), sample_rate, subtype="PCM_16")
-            send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1))
+            send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1),
+                 vram_gb=round(torch.cuda.memory_reserved() / 1e9, 2))  # shown on the Models screen
         except Exception as error:
             if _out_of_memory(error):  # recoverable: free the cache and let the app make room
                 if hasattr(torch.cuda, "empty_cache"):

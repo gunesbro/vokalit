@@ -682,3 +682,65 @@ def test_batch_generates_model_by_model(api, monkeypatch):
                                              ("omnivoice", "One"), ("omnivoice", "Two"), ("omnivoice", "Three")]
     seeds = {t: {s for n, tt, s in calls if tt == t} for t in ("One", "Two", "Three")}
     assert all(len(s) == 1 for s in seeds.values())
+
+
+def test_running_install_is_listed_so_a_new_screen_can_follow_it(api, monkeypatch, tmp_path):
+    import threading
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path / "local"))
+    release = threading.Event()
+
+    def slow_install(name):
+        yield "status", "Step 1/3: Python environment"
+        release.wait(5)
+
+    monkeypatch.setattr(models, "install", slow_install)
+    _, job, _ = api("POST", "/api/models/omnivoice/install")
+    try:
+        _, listed, _ = api("GET", "/api/components")
+        assert listed["install_job"] == {"id": job["id"], "name": "omnivoice"}
+    finally:
+        release.set()
+    _wait(api, job["id"])
+    _, listed, _ = api("GET", "/api/components")
+    assert listed["install_job"] is None
+
+
+def test_components_say_which_models_are_loaded(api, monkeypatch, tmp_path):
+    import threading
+    import time
+
+    class Loaded:
+        lock = threading.Lock()
+        last_used = time.monotonic() - 60
+        vram_gb = 2.4
+
+    monkeypatch.setitem(models._workers, "omnivoice", Loaded())
+    try:
+        _, listed, _ = api("GET", "/api/components")
+        runtime = {item["name"]: item["runtime"] for item in listed["items"]}
+        assert runtime["chatterbox"] == {"loaded": False}
+        omni = runtime["omnivoice"]
+        assert omni["loaded"] and not omni["busy"] and omni["vram_gb"] == 2.4
+        assert models.IDLE_SECONDS - 70 <= omni["unloads_in"] <= models.IDLE_SECONDS - 50
+    finally:
+        models._workers.pop("omnivoice", None)
+
+
+def test_unload_stops_a_model_but_not_while_it_generates(api, monkeypatch):
+    import threading
+    import time
+    stopped = []
+
+    class Loaded:
+        lock = threading.Lock()
+        last_used = time.monotonic()
+        vram_gb = None
+
+    monkeypatch.setattr(models, "stop", lambda name: stopped.append(name) or models._workers.pop(name, None))
+    worker = Loaded()
+    monkeypatch.setitem(models._workers, "omnivoice", worker)
+    with worker.lock:
+        status, body, _ = api("POST", "/api/models/omnivoice/unload")
+    assert status == 400 and "generating" in body["error"] and stopped == []
+    status, body, _ = api("POST", "/api/models/omnivoice/unload")
+    assert status == 200 and stopped == ["omnivoice"] and body["runtime"] == {"loaded": False}

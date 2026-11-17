@@ -153,6 +153,9 @@ user presses "Install" and confirms, to download packages and model weights.
   <model>…" with what to do.
 - Several models in one batch (Generate missing, bulk Generate): model by model, so each loads once; a line keeps
   one seed across models, and a model that does not speak a line's language skips it.
+- The Models screen shows, for each installed component, whether it is loaded right now (GPU memory as the worker
+  reports it, "generating", or how long until it unloads for being idle) with an Unload button; it looks every 5 s.
+  An install keeps being followed when the screen is left and opened again, or the window is reopened.
 - A worker starts on its first request and is stopped after 5 minutes without one (`IDLE_SECONDS`), so models do
   not hold GPU memory while unused; the next request loads it again. A worker also exits when the app is gone,
   however it ended (its stdin closes).

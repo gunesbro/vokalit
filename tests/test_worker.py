@@ -171,3 +171,9 @@ def test_out_of_memory_keeps_the_worker_and_says_so(installed):
     out = _out(local, "after-oom.wav")
     models.generate("chatterbox", "fits again", None, out, seed=1, settings={}, language="tr")
     assert "text=fits again" in _read(out)
+
+
+def test_worker_reports_its_gpu_memory(installed):
+    _, local = installed
+    models.generate("chatterbox", "measure", None, _out(local, "vram.wav"), seed=1, settings={}, language="tr")
+    assert models._workers["chatterbox"].vram_gb == 1.5
