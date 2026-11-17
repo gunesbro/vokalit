@@ -1,6 +1,7 @@
-"""Throwaway check for docs/superpowers/plans/2026-11-17-omnivoice.md, Task 0. Run from the repo root:
+r"""Throwaway check for docs/superpowers/plans/2026-11-17-omnivoice.md, Task 0. Run from the repo root:
 
-    uv run --python 3.11 scripts/spike_2026_11_17.py
+    Windows (PowerShell):  $env:UV_PYTHON_INSTALL_DIR="$PWD\.local\python"; .\.local\uv\uv.exe run --python 3.11 scripts\spike_2026_11_17.py
+    Linux:                 UV_PYTHON_INSTALL_DIR="$PWD/.local/python" .local/uv/uv run --python 3.11 scripts/spike_2026_11_17.py
 
 Needs uv and the internet (it installs small packages into a temporary folder inside .local and deletes it).
 Prints one JSON report; paste it back into the conversation.
@@ -14,7 +15,8 @@ import sys
 import tempfile
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-UV = os.environ.get("VOKALIT_UV") or shutil.which("uv") or "uv"
+_OWN_UV = os.path.join(ROOT, ".local", "uv", "uv.exe" if sys.platform == "win32" else "uv")  # the copy start.bat fetches
+UV = os.environ.get("VOKALIT_UV") or (_OWN_UV if os.path.exists(_OWN_UV) else None) or shutil.which("uv") or "uv"
 
 
 def venv_python(venv):
@@ -35,7 +37,8 @@ def run(args, env):
 def main():
     os.makedirs(os.path.join(ROOT, ".local"), exist_ok=True)
     work = tempfile.mkdtemp(prefix="spike-", dir=os.path.join(ROOT, ".local"))  # same drive as the real installs
-    env = dict(os.environ, UV_CACHE_DIR=os.path.join(work, "uv-cache"), UV_LINK_MODE="hardlink")
+    env = dict(os.environ, UV_CACHE_DIR=os.path.join(work, "uv-cache"), UV_LINK_MODE="hardlink",
+               UV_PYTHON_INSTALL_DIR=os.path.join(ROOT, ".local", "python"))  # the Python the app already uses
     report = {"platform": sys.platform, "python": sys.version.split()[0]}
     try:
         # 1. Hard links from one shared cache into two environments.
