@@ -1,5 +1,6 @@
 r"""Throwaway check for docs/superpowers/plans/2026-11-17-voxcpm2.md, Task 0. Run from the repo root, with Vokalit
-closed, passing one of your Turkish voice samples (a .wav file):
+closed. On Windows, double-click scripts\spike_voxcpm2.bat: it picks a Turkish sample of one of your library
+characters (with its transcript). Or pass a sample yourself:
 
     Windows (PowerShell):
         $env:UV_PYTHON_INSTALL_DIR="$PWD\.local\python"; .\.local\uv\uv.exe run --python 3.11 scripts\spike_voxcpm2.py C:\path\to\sample.wav --transcript "what the sample says"
@@ -144,9 +145,30 @@ def _one(model, name, kwargs, sf, np, torch):
         return {"file": name, "error": f"{type(error).__name__}: {error}"[:500]}
 
 
+def pick_sample():
+    """A library character's Turkish sample, preferring one with a transcript; then any sample. (path, transcript)"""
+    found = []
+    root = os.path.join(ROOT, "workspace", "characters")
+    for char_id in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        try:
+            with open(os.path.join(root, char_id, "character.json"), encoding="utf-8") as f:
+                samples = json.load(f).get("samples", [])
+        except (OSError, ValueError):
+            continue
+        for sample in samples:
+            path = os.path.join(root, char_id, sample["file"])
+            if os.path.exists(path):
+                rank = (sample.get("language") == "tr", bool(sample.get("transcript")), sample.get("duration", 0) <= 30)
+                found.append((rank, path, sample.get("transcript")))
+    if not found:
+        return None, None
+    _, path, transcript = max(found, key=lambda item: item[0])
+    return path, transcript
+
+
 def main():
     parser = argparse.ArgumentParser(description="VoxCPM2 spike for Vokalit (see the docstring).")
-    parser.add_argument("sample", help="a Turkish voice sample (.wav)")
+    parser.add_argument("sample", nargs="?", help="a Turkish voice sample (.wav); default: one from your workspace")
     parser.add_argument("--transcript", help="what the sample says (optional)")
     parser.add_argument("--child", choices=["download", "generate"], help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -155,12 +177,19 @@ def main():
     if args.child == "generate":
         return child_generate(args.sample, args.transcript)
 
-    sample = os.path.abspath(args.sample)
+    if args.sample:
+        sample, transcript = os.path.abspath(args.sample), args.transcript
+    else:
+        sample, transcript = pick_sample()
+        if not sample:
+            return print("No voice sample found in workspace/characters. Pass one: spike_voxcpm2.py sample.wav")
+        args.transcript = transcript
+    print(f"[spike] sample: {sample}", flush=True)
     os.makedirs(OUT, exist_ok=True)
     env = dict(os.environ, UV_CACHE_DIR=os.path.join(ROOT, ".local", "shared", "uv-cache"), UV_LINK_MODE="hardlink",
                UV_PYTHON_INSTALL_DIR=os.path.join(ROOT, ".local", "python"), HF_HOME=os.path.join(WORK, "hf"),
                HF_HUB_DISABLE_TELEMETRY="1", PYTHONUTF8="1")
-    report = {"platform": sys.platform}
+    report = {"platform": sys.platform, "sample": os.path.basename(sample), "transcript": bool(args.transcript)}
     steps = [("venv", [UV, "venv", "--python", "3.11", os.path.join(WORK, "venv")]),
              ("torch", [UV, "pip", "install", "--python", venv_python(), *TORCH_CUDA]),
              ("voxcpm", [UV, "pip", "install", "--python", venv_python(), "voxcpm"])]
