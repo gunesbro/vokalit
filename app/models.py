@@ -76,7 +76,8 @@ MODELS = {
             {"key": "speed", "label": "Speed", "min": 0.5, "max": 2.0, "step": 0.05, "default": 1.0,
              "help": "Above 1 is faster."},
             {"key": "num_step", "label": "Quality", "min": 16, "max": 64, "step": 16, "default": 32,
-             "help": "Higher sounds better but takes longer; 16 is quick."},
+             "help": "Higher sounds better but takes longer; 16 is quick. Sounds such as [laughter] come out clearer "
+                     "when it is higher."},
         ],
         "pip_steps": [
             ("PyTorch with CUDA", TORCH_CUDA),  # the same files as Chatterbox's: shared, not downloaded again

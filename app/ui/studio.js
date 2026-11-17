@@ -760,7 +760,7 @@ export async function renderStudio(root) {
           save();
         } }, TAG_LABELS[tag] || tag))));
       return el("div", { class: "row sound-tools" }, el("div", { class: "pop-holder" }, button),
-        el("span", { class: "faint small" }, "Laughter, sighs and more, written into the text (OmniVoice)"));
+        el("span", { class: "faint small" }, "Laughter, sighs and more, written into the text (OmniVoice; clearer with a higher Quality)"));
     }
     const counter = el("span", { class: "faint small num" }, `${line.text.length} characters`);
     text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
