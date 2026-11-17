@@ -24,6 +24,13 @@ LANGUAGE_NAMES = {
     "ru": "Russian", "sv": "Swedish", "sw": "Swahili", "tr": "Turkish", "zh": "Chinese",
 }
 
+# OmniVoice's own list (646 languages, ISO 639 codes) read from the package it installs, in English. Vokalit's names
+# above win where both have one.
+with open(os.path.join(os.path.dirname(__file__), "omnivoice_languages.json"), encoding="utf-8") as _f:
+    _OMNIVOICE_LANGUAGES = json.load(_f)["languages"]
+LANGUAGE_NAMES = {**_OMNIVOICE_LANGUAGES, **LANGUAGE_NAMES}
+
+
 MODELS = {
     "chatterbox": {
         "title": "Chatterbox Multilingual",
@@ -62,9 +69,9 @@ MODELS = {
         "supports_convert": False,
         "supports_tags": True,
         "needs_transcript": True,  # it copies a voice from the sample and what is said in it
-        # It speaks 600+ languages; Vokalit lists the ones it has names for.
-        "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",
-                      "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
+        # Every language it lists, and "ar" (Chatterbox's Arabic), which it calls Standard Arabic.
+        "languages": sorted(set(_OMNIVOICE_LANGUAGES) | {"ar"}),
+        "language_codes": {"ar": "arb"},  # Vokalit's code -> the model's
         "settings": [
             {"key": "speed", "label": "Speed", "min": 0.5, "max": 2.0, "step": 0.05, "default": 1.0,
              "help": "Above 1 is faster."},
@@ -540,13 +547,18 @@ def transcribe(audio, language):
     return {"text": reply["text"], "language": reply.get("language")}
 
 
+def model_language(name, code):
+    """The code `name` expects for Vokalit's language `code`."""
+    return MODELS[name].get("language_codes", {}).get(code, code)
+
+
 def generate(name, text, ref, out, seed, settings, language, ref_text=None):
     """Returns the generation time in seconds. `ref_text`: what is said in `ref` (models that need it)."""
     if language not in MODELS[name].get("languages", []):
         raise ValueError(f"{MODELS[name]['title']} does not support {LANGUAGE_NAMES.get(language, language)}.")
     settings = validate_settings(name, settings)
-    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings, "language": language,
-                       "ref_text": ref_text})
+    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings,
+                       "language": model_language(name, language), "ref_text": ref_text})
 
 
 def convert(name, source, ref, out):

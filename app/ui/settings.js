@@ -1,6 +1,6 @@
 // Shared Studio controls: model picker, popovers, generation-setting sliders.
 import { el, icon, ICONS } from "./app.js";
-import { pickerLabel } from "./script.js";
+import { filterOptions, pickerLabel } from "./script.js";
 
 const COLORS = { chatterbox: "#e9a15b", omnivoice: "#56b6c2", "chatterbox-vc": "#c678dd" };
 const FALLBACK = ["#98c379", "#d19a66", "#7aa2f7", "#e5807a"];
@@ -129,4 +129,40 @@ export function contextMenu(event, content) {
   document.addEventListener("keydown", escape);
   window.addEventListener("wheel", close, true);
   return close;
+}
+
+// A choice among many (languages): a button that opens a search box and the matching options. Type to filter, Enter
+// takes the first match, Esc closes. onChange(value) after a pick. `small` for tight rows.
+export function searchSelect({ options, value, onChange, label, placeholder = "Search", small = false }) {
+  const current = () => options.find((o) => o.value === value)?.label ?? value ?? "";
+  const button = el("button", { type: "button", class: `select search-select ${small ? "select-small" : ""}`,
+    "aria-haspopup": "listbox", "aria-label": label, title: label }, current());
+  button.onclick = () => {
+    const input = el("input", { class: "input", placeholder, "aria-label": placeholder });
+    const list = el("div", { class: "menu search-list", role: "listbox" });
+    const pick = (option) => {
+      document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+      value = option.value;
+      button.textContent = current();
+      onChange(option.value);
+    };
+    const paint = () => {
+      const shown = filterOptions(options, input.value);
+      const limit = 200; // a long list is cut; typing narrows it
+      list.replaceChildren(...shown.slice(0, limit).map((o) => el("button", { type: "button",
+        class: `menu-item ${o.value === value ? "active" : ""}`, role: "option", onclick: () => pick(o) }, o.label)));
+      if (!shown.length) list.append(el("div", { class: "faint small menu-empty" }, "No match"));
+      if (shown.length > limit) list.append(el("div", { class: "faint small menu-empty" }, `Type to see the other ${shown.length - limit}`));
+      return shown;
+    };
+    input.addEventListener("input", paint);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); const [first] = paint(); if (first) pick(first); }
+    });
+    popover(button, el("div", { class: "search-box" }, input, list));
+    paint();
+    list.querySelector(".active")?.scrollIntoView({ block: "center" });
+    input.focus();
+  };
+  return el("div", { class: "pop-holder" }, button);
 }

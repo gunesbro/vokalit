@@ -1,6 +1,7 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
 import { api, editableTitle, el, icon, ICONS, revealButton, setMessage } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
+import { searchSelect } from "./settings.js";
 import { player, rangeEditor, stopAudio } from "./waveform.js";
 
 const MIN_SECONDS = 10;
@@ -211,13 +212,12 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       if (!value) { label.value = sample.label; return; }
       api("PATCH", path(`/samples/${sample.id}`), { label: value }).then(refresh, fail);
     } });
-    const language = el("select", { class: "select", "aria-label": "Sample language", title: "The language spoken in this sample. When a line is in another language, the Studio warns about accent.",
-      onchange: () => api("PATCH", path(`/samples/${sample.id}`), { language: language.value || null }).then(refresh, fail) },
-    el("option", { value: "" }, "Not set"));
-    languages().then((list) => {
-      language.append(...list.map((l) => el("option", { value: l.code }, l.name)));
-      language.value = sample.language || "";
-    });
+    // The language spoken in the sample; searchable, since some models speak hundreds.
+    const language = el("div", { title: "The language spoken in this sample. When a line is in another language, the Studio warns about accent." });
+    languages().then((list) => language.replaceChildren(searchSelect({
+      options: [{ value: "", label: "Not set" }, ...list.map((l) => ({ value: l.code, label: l.name }))],
+      value: sample.language || "", label: "Sample language", placeholder: "Search languages",
+      onChange: (code) => api("PATCH", path(`/samples/${sample.id}`), { language: code || null }).then(refresh, fail) })));
     const url = sampleUrl(charId, sample.file, sessionId);
     const wave = player(url, { buckets: 140, showTime: false });
     const play = wave.querySelector(".play");

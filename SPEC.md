@@ -18,6 +18,8 @@ file. Everything is done by clicking in a desktop window.
 - Models: **Chatterbox Multilingual** (Resemble AI) and **OmniVoice** (k2-fsa); the optional **Whisper** component
   (faster-whisper on the CPU) writes sample transcripts. Design: `docs/superpowers/specs/2026-11-17-omnivoice-design.md`.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
+  - Language fields are search boxes (OmniVoice lists 646 languages); only languages every chosen model speaks are
+    offered.
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
     generation settings at three levels (model defaults → session → line); voice conversion ("Perform this line");
     export of the selected takes to one file (WAV always; FLAC, MP3 and OGG Vorbis when the computer's libsndfile can
@@ -43,7 +45,7 @@ file. Everything is done by clicking in a desktop window.
 
 | | Chatterbox Multilingual | OmniVoice |
 |---|---|---|
-| Languages | 23 (Turkish via `language_id="tr"`) | 600+ |
+| Languages | 23 (Turkish via `language_id="tr"`) | 646, from its `utils/lang_map.py` (kept in `app/omnivoice_languages.json`); Vokalit's `ar` is sent as `arb` |
 | Size | ~500M parameters | ~0.6B parameters |
 | Measured disk use | 12.3 GB on Windows (libraries + weights) | ~9 GB estimate; PyTorch is shared with Chatterbox |
 | VRAM | ~3.5–4 GB | ~8 GB is enough (RTX 4090 test) |

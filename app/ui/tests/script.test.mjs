@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatTime, insertTag, moveLine, pickerLabel, settingsChanges, takeNumber } from "../script.js";
+import { filterOptions, formatTime, insertTag, moveLine, pickerLabel, settingsChanges, takeNumber } from "../script.js";
 
 test("moveLine places a line before or after the target", () => {
   assert.deepEqual(moveLine(["a", "b", "c", "d"], "d", "b", false), ["a", "d", "b", "c"]);
@@ -78,4 +78,15 @@ test("insertTag puts the tag at the cursor with spaces around it", () => {
   assert.deepEqual(insertTag("", 0, 0, "laughter"), { value: "[laughter] ", caret: 11 });
   assert.deepEqual(insertTag("Hi ", 3, 3, "sigh"), { value: "Hi [sigh] ", caret: 10 });
   assert.deepEqual(insertTag("Hi there", 3, 8, "sigh"), { value: "Hi [sigh] ", caret: 10 }); // replaces a selection
+});
+
+test("filterOptions puts names starting with the search first, then words, then anywhere; a code matches too", () => {
+  const options = [
+    { value: "tk", label: "Turkmen" }, { value: "tr", label: "Turkish" }, { value: "ota", label: "Ottoman Turkish" },
+    { value: "en", label: "English" }, { value: "zh", label: "Chinese" }, { value: "x", label: "Kurtur" },
+  ];
+  assert.deepEqual(filterOptions(options, "turk").map((o) => o.value), ["tk", "tr", "ota"]);
+  assert.deepEqual(filterOptions(options, "  TUR ").map((o) => o.value), ["tk", "tr", "ota", "x"]);
+  assert.deepEqual(filterOptions(options, "zh").map((o) => o.value), ["zh"]);
+  assert.equal(filterOptions(options, "").length, 6);
 });

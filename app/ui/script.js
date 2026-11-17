@@ -87,3 +87,18 @@ export function insertTag(value, start, end, tag) {
   const inserted = `${lead}[${tag}]${trail}`;
   return { value: before + inserted + after, caret: before.length + inserted.length };
 }
+
+// Options matching a search, best first: the code itself, names that start with it, a word that starts with it, then
+// names containing it. An empty search keeps every option in order.
+export function filterOptions(options, search) {
+  const q = search.trim().toLowerCase();
+  if (!q) return options;
+  const rank = (o) => {
+    const label = o.label.toLowerCase();
+    if (o.value.toLowerCase() === q) return 0;
+    if (label.startsWith(q)) return 1;
+    if (label.split(/[\s(\-]+/).some((word) => word.startsWith(q))) return 2;
+    return label.includes(q) ? 3 : null;
+  };
+  return options.map((o) => [rank(o), o]).filter(([r]) => r !== null).sort((a, b) => a[0] - b[0]).map(([, o]) => o);
+}

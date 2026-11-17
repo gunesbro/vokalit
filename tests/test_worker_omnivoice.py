@@ -65,3 +65,10 @@ def test_gpu_error_restarts_the_worker(installed):
     with pytest.raises(RuntimeError, match="restarted"):
         models.generate("omnivoice", "CRASH", None, str(Path(local) / "crash.wav"), seed=1, settings={}, language="en")
     assert "omnivoice" not in models._workers
+
+
+def test_arabic_is_sent_as_standard_arabic(installed):
+    _, local = installed
+    out = str(Path(local) / "arabic.wav")
+    models.generate("omnivoice", "marhaba", None, out, seed=1, settings={}, language="ar")
+    assert "language=arb" in _read(out)

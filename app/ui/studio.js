@@ -3,7 +3,7 @@ import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJ
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { commonLanguages, findPlayable, formatTime, insertTag, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
-import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, sliders } from "./settings.js";
+import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, searchSelect, sliders } from "./settings.js";
 import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
@@ -109,15 +109,14 @@ export async function renderStudio(root) {
 
   // Language choices are the languages every chosen model supports. `inherit` adds a "Session (...)" option.
   function languageSelect(names, value, onChange, inherit = null, small = false) {
-    const options = commonLanguages(models, names);
-    const select = el("select", { class: `select language-select ${small ? "select-small" : ""}`, "aria-label": "Language", onchange: () => onChange(select.value || null) },
-      inherit && el("option", { value: "" }, `Session (${languageName(inherit)})`),
-      options.map((l) => el("option", { value: l.code }, l.name)));
-    if (value && !options.some((l) => l.code === value)) {
-      select.append(el("option", { value }, `${languageName(value)} (not supported)`));
-    }
-    select.value = value || "";
-    return select;
+    const languages = commonLanguages(models, names);
+    const options = [
+      ...(inherit ? [{ value: "", label: `Session (${languageName(inherit)})` }] : []),
+      ...languages.map((l) => ({ value: l.code, label: l.name })),
+      ...(value && !languages.some((l) => l.code === value) ? [{ value, label: `${languageName(value)} (not supported)` }] : []),
+    ];
+    return searchSelect({ options, value: value || "", onChange: (code) => onChange(code || null), label: "Language",
+      placeholder: "Search languages", small });
   }
 
   // --- Loading -------------------------------------------------------------------------------

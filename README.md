@@ -17,7 +17,8 @@ Your voice, your text and the generated audio never leave your machine.
 - **Generation settings** — per model, at three levels: model defaults → session → line. A seed makes a take
   reproducible.
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
-- **Languages** — per session or per line, limited to what the selected models support.
+- **Languages** — per session or per line, limited to what the selected models support; a search box finds a
+  language among OmniVoice's 646.
 - **Sound tags** — write `[laughter]`, `[sigh]` and other sounds into a line (*Add sound*); OmniVoice performs them,
   models that cannot are given the text without them.
 - **Transcripts** — every sample keeps what is said in it, which some models use to copy the voice. The optional
@@ -50,7 +51,7 @@ before downloading anything. Each model goes into its own folder under `.local/`
 |---|---|---|---|
 | [Whisper](https://github.com/SYSTRAN/faster-whisper) (optional, recommended) — writes sample transcripts, runs on the CPU | ~100 | ~1.7 GB | MIT |
 | [Chatterbox Multilingual](https://huggingface.co/ResembleAI/chatterbox) (Resemble AI) | 23 | ~12.3 GB (measured on Windows) | MIT |
-| [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) (k2-fsa) — cloning, sound tags | 600+ (23 listed in the app) | ~9 GB, less when Chatterbox is installed | Code Apache 2.0; **weights CC-BY-NC: no commercial use** |
+| [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) (k2-fsa) — cloning, sound tags | 646 | ~9 GB, less when Chatterbox is installed | Code Apache 2.0; **weights CC-BY-NC: no commercial use** |
 
 Each component has its own environment, so one model's packages can never break another's. Identical files — above
 all PyTorch with CUDA, about 5 GB — are stored once and shared between models; files nothing uses any more are
