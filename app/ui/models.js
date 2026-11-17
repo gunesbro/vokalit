@@ -3,6 +3,7 @@ import { api, el, setMessage, waitForJob } from "./app.js";
 
 // Install jobs survive switching screens.
 const installs = {}; // name -> { progress, log, percent }
+let missedNotice = null; // how an install ended while another screen was open: [text, kind]
 
 export async function renderModels(root) {
   const message = el("div", { class: "message" });
@@ -20,6 +21,15 @@ export async function renderModels(root) {
       message,
       gpu),
     el("div", { class: "main-body" }, body)));
+  if (missedNotice) {
+    setMessage(message, ...missedNotice);
+    missedNotice = null;
+  }
+
+  function report(text, kind) {
+    if (root.isConnected) setMessage(message, text, kind);
+    else missedNotice = [text, kind];
+  }
 
   async function refresh() {
     try {
@@ -109,9 +119,9 @@ export async function renderModels(root) {
         installs[model.name] = { progress: j.progress, log: j.log, percent };
         if (root.isConnected) updateProgress(model.name);
       });
-      setMessage(message, `${model.title} is installed.`, "info");
+      report(`${model.title} is installed.`, "info");
     } catch (error) {
-      setMessage(message, /Cancelled|^$/.test(error.message) ? "Install cancelled. Nothing was kept." : `Install failed: ${error.message}`,
+      report(/Cancelled|^$/.test(error.message) ? "Install cancelled. Nothing was kept." : `Install failed: ${error.message}`,
         /Cancelled|^$/.test(error.message) ? "info" : "error");
     } finally {
       delete installs[model.name];

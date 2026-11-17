@@ -28,7 +28,7 @@ MODELS = {
         "title": "Chatterbox Multilingual",
         "summary": "23 languages \u00b7 cloning \u00b7 voice conversion",
         "url": "https://huggingface.co/ResembleAI/chatterbox",
-        "disk_gb": 11.3,  # measured on Windows (SPEC.md §6.1)
+        "disk_gb": 12.3,  # measured on Windows (SPEC.md §6.1)
         "license": "MIT",
         "supports_convert": True,
         "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no",

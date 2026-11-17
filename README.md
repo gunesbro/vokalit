@@ -44,7 +44,7 @@ before downloading anything. Each model goes into its own folder under `.local/`
 
 | Model | Languages | Disk space | License |
 |---|---|---|---|
-| [Chatterbox Multilingual](https://huggingface.co/ResembleAI/chatterbox) (Resemble AI) | 23 | ~11.3 GB (measured on Windows) | MIT |
+| [Chatterbox Multilingual](https://huggingface.co/ResembleAI/chatterbox) (Resemble AI) | 23 | ~12.3 GB (measured on Windows) | MIT |
 | OmniVoice (k2-fsa) | 600+ | — | *coming next; its weights are for non-commercial use* |
 
 Disk space includes PyTorch with CUDA, which every model installs into its own environment.

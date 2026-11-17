@@ -43,7 +43,7 @@ file. Everything is done by clicking in a desktop window.
 |---|---|---|
 | Languages | 23 (Turkish via `language_id="tr"`) | 600+ |
 | Size | ~500M parameters | ~0.6B parameters |
-| Measured disk use | 11.3 GB on Windows (libraries + weights) | not measured yet |
+| Measured disk use | 12.3 GB on Windows (libraries + weights) | not measured yet |
 | VRAM | ~3.5–4 GB | ~8 GB is enough (RTX 4090 test) |
 | Reference | Audio file | Audio file + optional transcript (Whisper fills it in; downloaded at install) |
 | Code license | MIT | Apache 2.0 |
@@ -181,7 +181,7 @@ Nothing has to be installed beforehand except the NVIDIA driver.
   the other dependencies are listed in `workers/chatterbox/requirements.txt` with upstream pins.
 - **Per-model uv cache:** `UV_CACHE_DIR=.local/<model>/uv-cache` during install, deleted afterwards, so "Remove"
   frees all of it. Cost: reinstalling downloads the packages again.
-- **Progress:** a status line updated every few seconds (`Step 2/5: PyTorch with CUDA · 37% · 1.42 of ~11.3 GB · 3m 12s`)
+- **Progress:** a status line updated every few seconds (`Step 2/5: PyTorch with CUDA · 37% · 1.42 of ~12.3 GB · 3m 12s`)
   above a collapsible log. Size = the model folder (hard links counted once); percent = size / measured total, at
   most 99%.
 - **Cancel** stops the running process within seconds and deletes `.local/<model>/`. Install always clears leftovers
