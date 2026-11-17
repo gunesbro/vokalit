@@ -63,18 +63,28 @@ def _scope_session(session, char_id):
     return None if entry is None or entry["scope"] == "library" else session["id"]
 
 
+def _with_missing_samples(char_id, data, session_id=None):
+    """Marks samples whose file was deleted outside the app (one stat per sample)."""
+    folder = ws.character_dir(char_id, session_id)
+    return {**data, "samples": [{**s, "missing": not (folder / s["file"]).exists()} for s in data["samples"]]}
+
+
 def _session_view(session):
     defaults = {name: models.default_settings(name) for name in models.MODELS}
     cast = []
     for entry in session["cast"]:
         character = ws.cast_character(session, entry["character"])
+        if character:
+            character = _with_missing_samples(entry["character"], character,
+                                              session["id"] if entry["scope"] == "session" else None)
         cast.append({**entry, "name": character["name"] if character else None,
                      "samples": character["samples"] if character else [],
                      "default_sample": character["default_sample"] if character else None})
     names = {c["character"]: c["name"] for c in cast}
     lines = []
     for line in session["lines"]:
-        takes = [{**take,
+        folder = ws.session_dir(session["id"])
+        takes = [{**take, "missing": not (folder / take["file"]).exists(),
                   "text_changed": ws.take_text_changed(line, take),
                   "custom_settings": take.get("model") in defaults
                   and ws.take_has_custom_settings(session, take, defaults[take["model"]])}
@@ -258,7 +268,7 @@ def list_characters(req):
     def used(cid):
         return [d["name"] for _, d in sessions if any(c["character"] == cid and c["scope"] == "library" for c in d["cast"])]
 
-    return [{**data, "id": cid, "used_in": used(cid)} for cid, data in ws.list_characters()]
+    return [{**_with_missing_samples(cid, data), "id": cid, "used_in": used(cid)} for cid, data in ws.list_characters()]
 
 
 @route("POST", "/api/characters")
@@ -275,7 +285,8 @@ def get_character(req, cid):
     data = ws.load_character(cid, _session_arg(req))
     if data is None:
         raise NotFound()
-    return {**data, "id": cid, "used_in": [] if _session_arg(req) else ws.sessions_using(cid)}
+    return {**_with_missing_samples(cid, data, _session_arg(req)), "id": cid,
+            "used_in": [] if _session_arg(req) else ws.sessions_using(cid)}
 
 
 @route("PATCH", "/api/characters/(?P<cid>[0-9-]+)")

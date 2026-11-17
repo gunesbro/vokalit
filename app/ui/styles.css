@@ -315,7 +315,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .hover-only { visibility: visible; opacity: 0; transition: opacity .18s ease; }
 .line:hover .hover-only, .hover-only[aria-expanded="true"], .hover-only:focus-visible { opacity: 1; }
 @keyframes open-details { from { opacity: 0; transform: translateY(-6px) scale(.995); } to { opacity: 1; transform: none; } }
-.line-details { animation: open-details .22s ease-out; }
+.line-details.opening { animation: open-details .22s ease-out; }
 .btn:disabled[title]:hover { cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { .line-details { animation: none; } }
 
@@ -447,3 +447,10 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .script-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .character-card { box-shadow: inset 3px 0 0 var(--accent-line); }
+
+/* A line that just got a new take glows briefly instead of the whole page redrawing visibly */
+@keyframes just-done { from { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); } to { background: transparent; box-shadow: inset 3px 0 0 transparent; } }
+.line.just-done, .line-details.just-done { animation: just-done 1.4s ease-out; }
+.take.just-done { animation: just-done 1.4s ease-out; border-radius: 6px; }
+.file-missing { color: var(--warn); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+@media (prefers-reduced-motion: reduce) { .line.just-done, .line-details.just-done, .take.just-done { animation: none; } }

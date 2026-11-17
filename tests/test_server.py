@@ -337,3 +337,29 @@ def test_exports_and_trim_endpoints(api, monkeypatch):
     assert len(body) == 1 and body[0]["path"].startswith(f"sessions/{sid}/exports/")
     status, body, _ = api("DELETE", f"/api/sessions/{sid}/exports", {"name": body[0]["name"]})
     assert status == 200 and body == []
+
+
+def test_missing_files_are_reported(api, monkeypatch, tmp_path):
+    def fake_generate(name, text, ref, out, seed, settings, language):
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, lid, cid = _session_with_line(api, "one")
+    api("POST", f"/api/characters/{cid}/samples?source=upload", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
+        content_type="audio/wav")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+    _wait(api, job["id"])
+    _, view, _ = api("GET", f"/api/sessions/{sid}")
+    take = view["lines"][0]["takes"][0]
+    assert take["missing"] is False and view["cast"][0]["samples"][0]["missing"] is False
+    (ws.session_dir(sid) / take["file"]).unlink()
+    (ws.character_dir(cid) / "samples" / "s1.wav").unlink()
+    _, view, _ = api("GET", f"/api/sessions/{sid}")
+    assert view["lines"][0]["takes"][0]["missing"] is True
+    assert view["cast"][0]["samples"][0]["missing"] is True
+    _, character, _ = api("GET", f"/api/characters/{cid}")
+    assert character["samples"][0]["missing"] is True
+    _, listed, _ = api("GET", "/api/characters")
+    assert listed[0]["samples"][0]["missing"] is True

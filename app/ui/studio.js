@@ -44,6 +44,8 @@ export async function renderStudio(root) {
   let library = [];
   let session = null;
   let openLine = null;
+  let justOpened = null; // the open animation plays only when a line (or card) is opened, not on every redraw
+  let justDone = null; // { line, file } of the newest take, briefly highlighted
   let exportFormats = []; // what this computer can export (from the server)
   let exportFormat = (() => { try { return localStorage.getItem("vokalit.exportFormat") || "wav"; } catch { return "wav"; } })();
   const picked = new Set(); // lines ticked for bulk actions
@@ -60,6 +62,7 @@ export async function renderStudio(root) {
   // Elapsed time next to every spinner; one ticker for the whole screen.
   const ticker = setInterval(() => {
     if (!main.isConnected) { stopAll(); clearInterval(ticker); document.removeEventListener("keydown", spaceToggle);
+      window.removeEventListener("focus", onFocus);
       document.removeEventListener("keydown", selectionKeys);
       document.removeEventListener("vokalit-player-play", onPlayerPlay); return; }
     paintClock();
@@ -131,10 +134,28 @@ export async function renderStudio(root) {
     draw();
   }
 
+  // Reloads the session; redraws only if something changed (focus checks run this often).
   async function refresh() {
-    session = await api("GET", `/api/sessions/${sid()}`);
+    const next = await api("GET", `/api/sessions/${sid()}`);
+    if (JSON.stringify(next) === JSON.stringify(session)) return;
+    session = next;
     draw();
   }
+
+  // A take whose file was deleted outside the app (e.g. in File Explorer) cannot be played or exported.
+  const playableFile = (line) => {
+    const take = line.takes.find((t) => t.file === line.selected);
+    return take && !take.missing ? take.file : null;
+  };
+
+  // Coming back to the window (e.g. after deleting files in File Explorer) re-checks the session's files.
+  function onFocus() {
+    if (!main.isConnected || !session || Object.keys(pendingText).length || generating.size || batch
+        || document.querySelector(".popover, .trim-box, .review-box") || document.activeElement?.matches("input, textarea")) return;
+    refresh().catch(() => {});
+    loadExports();
+  }
+  window.addEventListener("focus", onFocus);
 
   // Applies a session returned by the API and redraws.
   const apply = (data) => {
@@ -240,6 +261,8 @@ export async function renderStudio(root) {
     main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, card, divider, script()), footer());
     main.querySelector(".main-body").scrollTop = scroll;
     paintTransport();
+    justOpened = null;
+    justDone = null;
   }
 
   function header() {
@@ -337,7 +360,7 @@ export async function renderStudio(root) {
     const meta = deleted ? "" : sessionOnly ? "this session"
       : entry.samples.length ? plural(entry.samples.length, "sample") : "default voice";
     const nameNode = deleted ? el("span", { class: "warn" }, label)
-      : sessionOnly ? el("button", { class: "link-btn", title: "Edit samples", onclick: () => { editing = editing === entry.character ? null : entry.character; editingOpen = true; draw(); } }, label)
+      : sessionOnly ? el("button", { class: "link-btn", title: "Edit samples", onclick: () => { editing = editing === entry.character ? null : entry.character; editingOpen = true; justOpened = "card"; draw(); } }, label)
         : el("a", { class: "link-btn", href: `#/characters/${entry.character}`, title: "Open in Characters" }, label);
     return el("div", { class: "chip" },
       avatar(entry.character, deleted ? "?" : entry.name, 24), nameNode,
@@ -393,7 +416,7 @@ export async function renderStudio(root) {
     const toggle = el("button", { class: "btn btn-ghost icon-btn close-details", "aria-expanded": String(editingOpen),
       "aria-label": editingOpen ? "Collapse" : "Expand", title: editingOpen ? "Collapse" : "Show samples",
       onclick: () => setOpen(!editingOpen) }, icon(editingOpen ? ICON_CLOSE : ICON_OPEN, 16));
-    const card = el("section", { class: `line-details character-card ${editingOpen ? "" : "collapsed"}`, "aria-label": `Character ${entry.name}` });
+    const card = el("section", { class: `line-details character-card ${editingOpen ? "" : "collapsed"} ${justOpened === "card" ? "opening" : ""}`, "aria-label": `Character ${entry.name}` });
     const head = el("div", { class: "detail-head", title: editingOpen ? "Click an empty spot to collapse" : "Click to show samples" },
       avatar(entry.character, entry.name, 28),
       el("label", { class: "row field", title: "Only in this session. Save to library to reuse it in other sessions." },
@@ -422,6 +445,7 @@ export async function renderStudio(root) {
     function setOpen(value) {
       if (!value) return close(() => { editingOpen = false; });
       editingOpen = true;
+      justOpened = "card";
       draw();
     }
     card.append(head);
@@ -471,6 +495,10 @@ export async function renderStudio(root) {
     const right = el("div", { class: "row line-right" });
     if (generating.has(line.id)) {
       right.append(busyLabel(line.id, "Generating…"));
+    } else if (selected?.missing) {
+      right.append(el("span", { class: "file-missing", title: "The selected take's file was deleted outside Vokalit." },
+        icon(ICONS.trash, 12), "Take file missing"),
+        el("button", { class: "btn btn-ghost btn-takes", onclick: () => open(line.id) }, plural(takes.length, "take")));
     } else if (selected) {
       right.append(player(`/files/sessions/${sid()}/${selected.file}`, { buckets: 30, showTime: false, label: "Play selected take" }),
         el("button", { class: "btn btn-ghost btn-takes", onclick: () => open(line.id) },
@@ -491,7 +519,7 @@ export async function renderStudio(root) {
 
     const long = line.text.length > LONG_LINE;
     const node = el("div", { class: `line ${generating.has(line.id) ? "is-generating" : ""} ${justClosed === line.id ? "reopened" : ""} `
-      + `${playback.lineId === line.id ? "now-playing" : ""}`,
+      + `${playback.lineId === line.id ? "now-playing" : ""} ${justDone?.line === line.id ? "just-done" : ""}`,
       "data-line": line.id,
       title: "Click to edit the line and its takes" },
     pickBox(line), handle(line), speaker(line),
@@ -631,6 +659,7 @@ export async function renderStudio(root) {
 
   function open(lineId) {
     openLine = lineId;
+    justOpened = lineId;
     draw();
   }
 
@@ -720,7 +749,8 @@ export async function renderStudio(root) {
       el("button", { class: "btn btn-ghost icon-btn close-details", "aria-label": "Close details", title: "Close (Esc)", onclick: close },
         icon(ICON_CLOSE, 16)));
     head.addEventListener("click", (e) => { if (e.target === head || e.target.classList.contains("spacer")) close(); });
-    const node = el("div", { class: "line-details", "data-line": line.id,
+    const node = el("div", { class: `line-details ${justOpened === line.id ? "opening" : ""} ${justDone?.line === line.id ? "just-done" : ""}`,
+      "data-line": line.id,
       onkeydown: (e) => { if (e.key === "Escape" && !e.target.closest(".popover")) { e.preventDefault(); close(); } } },
       head,
       el("div", { class: "detail-text" }, text, el("div", { class: "row" }, el("div", { class: "spacer" }), counter)),
@@ -846,11 +876,14 @@ export async function renderStudio(root) {
       ? `from your recording · Chatterbox VC · ${take.duration} s`
       : [take.sample_label, take.language && languageName(take.language), `seed ${take.seed}`, `${take.duration} s`]
         .filter(Boolean).join(" \u00b7 ");
-    const rowNode = el("div", { class: "take" },
+    const rowNode = el("div", { class: `take ${justDone?.file === take.file ? "just-done" : ""}` },
       el("input", { type: "radio", name: `take-${line.id}`, checked: isSelected, "aria-label": `Use take ${takeNumber(take.file)}`,
         title: "The selected take is the one used in the export.",
         onchange: () => api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/select`, { file: take.file }).then(apply, fail) }),
-      player(`/files/sessions/${sid()}/${take.file}`, { buckets: 60, showTime: false, selected: isSelected }),
+      take.missing
+        ? el("span", { class: "file-missing", title: "This take's file was deleted outside Vokalit. Remove it from the list." },
+          "File missing")
+        : player(`/files/sessions/${sid()}/${take.file}`, { buckets: 60, showTime: false, selected: isSelected }),
       el("div", { class: "take-info" },
         el("div", { class: "row" }, dot(modelColor(take.model)), el("span", {}, model),
           el("span", { class: "muted" }, `· take ${takeNumber(take.file) ?? "?"}`)),
@@ -860,10 +893,10 @@ export async function renderStudio(root) {
           take.text_changed && [" · ", el("span", { class: "warn", title: `The line's text changed after this take. The take says: \u201c${take.text}\u201d` }, "text changed")])),
       !converted && take.settings && el("button", { class: "btn btn-small btn-ghost", title: "Copy this take's seed and settings to the line",
         onclick: () => useSettings(line, take) }, "Use these settings") || el("span"),
-      el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Trim take", "aria-expanded": "false",
+      take.missing ? el("span") : el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Trim take", "aria-expanded": "false",
         title: "Trim: cut silence or noise from the start and end (saved as a new take)",
         onclick: (e) => toggleTrim(e.currentTarget, rowNode, line, take) }, icon(ICON_SCISSORS)),
-      revealButton(`sessions/${sid()}/${take.file}`),
+      take.missing ? el("span") : revealButton(`sessions/${sid()}/${take.file}`),
       el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Delete take", title: "Delete take", onclick: () => {
         rowNode.querySelector(".confirm")?.remove();
         rowNode.append(el("div", { class: "confirm" },
@@ -1001,7 +1034,13 @@ export async function renderStudio(root) {
       setMessage(message, `Line ${number} done.`);
     } catch (error) { fail(error); }
     generating.delete(line.id);
-    if (session?.id) await refresh();
+    const before = new Set(line.takes.map((t) => t.file));
+    if (session?.id) {
+      session = await api("GET", `/api/sessions/${sid()}`);
+      const fresh = session.lines.find((l) => l.id === line.id)?.takes.find((t) => !before.has(t.file));
+      if (fresh) justDone = { line: line.id, file: fresh.file };
+      draw();
+    }
   }
 
   async function generateMissing() {
@@ -1044,7 +1083,7 @@ export async function renderStudio(root) {
 
   // Export is possible once every line has a selected take; it opens a small panel to choose the format.
   function exportButton() {
-    const missing = session.lines.map((l, n) => (l.selected ? null : n + 1)).filter(Boolean);
+    const missing = session.lines.map((l, n) => (playableFile(l) ? null : n + 1)).filter(Boolean);
     const ready = session.lines.length && !missing.length;
     const button = el("button", { class: "btn", "aria-haspopup": "dialog", disabled: !ready,
       title: !session.lines.length ? "Add lines first."
@@ -1255,7 +1294,7 @@ export async function renderStudio(root) {
     playback.audio?.pause();
     clearTimeout(playback.timer);
     playback.resumeAt = null;
-    const { index, skipped } = findPlayable(session.lines, from, step);
+    const { index, skipped } = findPlayable(session.lines.map((l) => ({ selected: playableFile(l) })), from, step);
     if (skipped.length) {
       const numbers = (step > 0 ? skipped : [...skipped].reverse()).map((n) => n + 1);
       setMessage(message, `Skipped ${numbers.length > 1 ? "lines" : "line"} ${numbers.join(", ")}: no take yet.`, "warn");
@@ -1267,7 +1306,7 @@ export async function renderStudio(root) {
     }
     const line = session.lines[index];
     pauseAll();
-    const audio = new Audio(`/files/sessions/${sid()}/${line.selected}`);
+    const audio = new Audio(`/files/sessions/${sid()}/${playableFile(line)}`);
     Object.assign(playback, { lineId: line.id, audio, paused: false });
     audio.addEventListener("ended", () => {
       // Silence for the line's pause, then the next line (looked up again: the script may have changed).
@@ -1310,7 +1349,7 @@ export async function renderStudio(root) {
     const at = playback.lineId ? lineIndex(playback.lineId) : -1;
     const isPlaying = playback.lineId && !playback.paused;
     const line = at >= 0 ? session.lines[at] : null;
-    const playable = session?.lines.some((l) => l.selected);
+    const playable = session?.lines.some((l) => playableFile(l));
     transport.replaceChildren(
       el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Previous line", title: "Previous line",
         disabled: !playable, onclick: () => step(-1) }, icon(ICON_PREV, 14)),

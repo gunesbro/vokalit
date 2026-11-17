@@ -4,10 +4,17 @@ import { decode, peaks } from "./audio.js";
 import { seekTo } from "./script.js";
 
 const peakCache = new Map();
+const peakValues = new Map(); // already decoded: drawn at once, so a redraw does not flash empty waveforms
 
 export async function urlPeaks(url, buckets) {
   const key = `${url}|${buckets}`;
-  if (!peakCache.has(key)) peakCache.set(key, decode(url).then(({ samples }) => peaks(samples, buckets)));
+  if (!peakCache.has(key)) {
+    peakCache.set(key, decode(url).then(({ samples }) => {
+      const values = peaks(samples, buckets);
+      peakValues.set(key, values);
+      return values;
+    }).catch((error) => { peakCache.delete(key); throw error; }));
+  }
   return peakCache.get(key);
 }
 
@@ -64,10 +71,12 @@ export function player(url, { buckets = 48, selected = false, label = "Play", sh
   paintButton();
   const time = el("span", { class: "time num" });
   const root = el("div", { class: "player" }, button, wave, showTime && time);
-  urlPeaks(url, buckets).then((values) => {
+  const drawPeaks = (values) => {
     wave.replaceChildren(...values.map((v) => el("span", { style: { height: `${Math.max(12, Math.round(v * 100))}%` } })));
-    paint();
-  }).catch(() => wave.replaceChildren(el("span", { class: "faint small" }, "Cannot read audio")));
+  };
+  const known = peakValues.get(`${url}|${buckets}`);
+  if (known) drawPeaks(known);
+  else urlPeaks(url, buckets).then((values) => { drawPeaks(values); paint(); }).catch(() => wave.replaceChildren(el("span", { class: "faint small" }, "Cannot read audio")));
   const paint = () => {
     const played = audio.duration ? audio.currentTime / audio.duration : 0;
     [...wave.children].forEach((bar, i, all) => bar.classList.toggle("played", i / all.length < played));
