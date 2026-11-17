@@ -661,9 +661,11 @@ def convert(name, source, ref, out):
 
 
 def stop(name):
+    """Unloads a component: its process and the processes it started. On Windows a venv's python.exe starts the real
+    interpreter as a child, which holds the GPU memory; killing only the parent could leave it running."""
     worker = _workers.pop(name, None)
     if worker:
-        worker.process.kill()
+        _kill_tree(worker.process)
 
 
 def stop_all():
