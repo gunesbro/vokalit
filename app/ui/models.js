@@ -88,7 +88,7 @@ export async function renderModels(root) {
   function progress(job) {
     return el("div", { class: "progress-wrap" },
       steps(job),
-      el("div", { class: "row muted small num" }, el("div", {}, job.progress || "Starting\u2026")),
+      el("div", { class: "row muted small num" }, el("div", {}, progressText(job))),
       el("details", {}, el("summary", {}, "Show install log"), el("pre", { class: "log" }, job.log || "")));
   }
 
@@ -149,7 +149,7 @@ export async function renderModels(root) {
       await waitForJob(id, (j) => {
         const [, step, steps] = j.progress.match(/^Step (\d+)\/(\d+)/) || [];
         const last = installs[model.name];
-        installs[model.name] = { progress: j.progress, log: j.log,
+        installs[model.name] = { progress: j.progress, log: j.log, started: j.started,
           step: Number(step || last.step), steps: Number(steps || last.steps) };
         if (root.isConnected) updateProgress(model.name);
       });
@@ -162,6 +162,22 @@ export async function renderModels(root) {
       if (root.isConnected) refresh();
     }
   }
+
+  // The elapsed time is counted here, every second, so it moves even while the server is busy.
+  function progressText(job) {
+    if (!job.progress) return "Starting\u2026";
+    if (!job.started) return job.progress;
+    const seconds = Math.max(0, Math.floor(Date.now() / 1000 - job.started));
+    return `${job.progress} \u00b7 ${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+  }
+
+  const ticker = setInterval(() => {
+    if (!root.isConnected) return clearInterval(ticker);
+    for (const name of Object.keys(installs)) {
+      const line = body.querySelector(`[data-model="${name}"] .progress-wrap .row div`);
+      if (line) line.textContent = progressText(installs[name]);
+    }
+  }, 1000);
 
   function installingText(job) {
     return `Installing \u00b7 step ${job.step} of ${job.steps}`;
@@ -176,7 +192,7 @@ export async function renderModels(root) {
     const bar = wrap.querySelector(".steps");
     if (bar.children.length === job.steps) markSteps(bar, job);
     else bar.replaceWith(steps(job));
-    wrap.querySelector(".row div").textContent = job.progress || "Starting…";
+    wrap.querySelector(".row div").textContent = progressText(job);
     const log = wrap.querySelector("pre.log");
     const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
     log.textContent = job.log;

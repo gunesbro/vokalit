@@ -169,3 +169,23 @@ def test_sizes_never_walk_in_a_request(local, monkeypatch):
     walked.set()
     models._join_background()
     assert "a" in models.sizes()["frees"]
+
+
+def test_install_does_not_wait_for_the_size_on_disk(local, monkeypatch):
+    # Walking the folders takes seconds on Windows; the progress (and the log) must keep moving meanwhile.
+    release = threading.Event()
+    real = models._size_gb
+    monkeypatch.setattr(models, "_size_gb", lambda *folders: (release.wait(5), real(*folders))[1])
+    done = threading.Event()
+    threading.Thread(target=lambda: (list(models.install("a")), done.set()), daemon=True).start()
+    try:
+        assert done.wait(2), "the install waited for the size measurement"
+    finally:
+        release.set()
+
+
+def test_status_has_no_clock(local):
+    statuses = [text for kind, text in models.install("a") if kind == "status"]
+    models._join_background()
+    assert statuses[0].startswith("Step 1/4: Python environment · ")
+    assert statuses[0].endswith("GB on disk") or "measuring" in statuses[0]

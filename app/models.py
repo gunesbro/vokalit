@@ -322,14 +322,22 @@ def _install(name):
     for label, args in spec(name)["pip_steps"]:
         steps.append((label, [UV, "pip", "install", "--python", _python(name), *args]))
     steps.append(("Model weights", [_python(name), _worker_script(name), "--download"]))
-    started = time.monotonic()
-    cache_at_start = _size_gb(shared_dir())
+    # The size on disk is measured by a thread: walking tens of thousands of files takes seconds on Windows, and the
+    # steps and the log must not wait for it. The screen counts the elapsed time itself.
+    measured = {"gb": None}
+    stop = threading.Event()
+
+    def measure():
+        at_start = _size_gb(shared_dir())
+        while not stop.is_set():
+            measured["gb"] = max(0.0, _size_gb(model_dir(name), shared_dir()) - at_start)
+            stop.wait(3)
+
+    threading.Thread(target=measure, daemon=True).start()
 
     def status(number, label):
-        elapsed = int(time.monotonic() - started)
-        size = max(0.0, _size_gb(model_dir(name), shared_dir()) - cache_at_start)
-        return "status", (f"Step {number}/{len(steps)}: {label} \u00b7 {size:.2f} GB on disk \u00b7 "
-                          f"{elapsed // 60}m {elapsed % 60:02d}s")
+        size = "measuring size\u2026" if measured["gb"] is None else f"{measured['gb']:.2f} GB on disk"
+        return "status", f"Step {number}/{len(steps)}: {label} \u00b7 {size}"
 
     try:
         for number, (label, command) in enumerate(steps, 1):
@@ -346,8 +354,10 @@ def _install(name):
                         last_status = time.monotonic()
                         yield status(number, label)
     except BaseException:  # also GeneratorExit: a closed install leaves nothing half-done
+        stop.set()
         remove(name, maintain=False)
         raise
+    stop.set()
     with open(_marker(name), "w", encoding="utf-8"):
         pass
     yield "log", "Done.\n"
