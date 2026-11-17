@@ -112,7 +112,10 @@ export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "T
     record(text, at);
     field.dispatchEvent(new Event("input", { bubbles: true }));
   };
-  const paintMenu = () => menu.items.forEach((item, i) => item.classList.toggle("active", i === menu.active));
+  const paintMenu = () => {
+    menu.items.forEach((item, i) => item.classList.toggle("active", i === menu.active));
+    menu.items[menu.active]?.scrollIntoView({ block: "nearest" }); // the list scrolls with the arrow keys
+  };
   function suggest() {
     const caret = caretOffset();
     const typed = caret === null ? null : current.slice(0, caret).match(/\[([a-z-]*)$/i);
