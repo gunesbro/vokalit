@@ -596,7 +596,7 @@ def delete_export(req, sid):
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)/takes/trim")
 def trim_take(req, sid, lid):
     body = req["json"]
-    ws.trim_take(sid, lid, body["file"], float(body["start"]), float(body["end"]))
+    ws.trim_take(sid, lid, body["file"], float(body["start"]), float(body["end"]), replace=bool(body.get("replace")))
     return get_session(req, sid)
 
 

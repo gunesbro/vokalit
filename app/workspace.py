@@ -812,9 +812,10 @@ def delete_export(session_id: str, name: str) -> None:
 MIN_TRIM_SECONDS = 0.3
 
 
-def trim_take(session_id: str, line_id: str, file: str, start: float, end: float) -> str:
+def trim_take(session_id: str, line_id: str, file: str, start: float, end: float, replace: bool = False) -> str:
     """Saves the part [start, end] (seconds) of a take as a new take of the same line, selected. The original
-    take is kept. Returns the new take's file (relative to the session)."""
+    take is kept, or with `replace` deleted (its recording then moves to the trimmed take). Returns the new
+    take's file (relative to the session)."""
     data = load_session(session_id)
     take = next((t for t in _line(data, line_id)["takes"] if t["file"] == file), None)
     if take is None:
@@ -832,13 +833,20 @@ def trim_take(session_id: str, line_id: str, file: str, start: float, end: float
     with wave.open(str(out), "wb") as w:
         w.setparams(params)
         w.writeframes(frames)
-    # source_recording stays with the original: deleting the trimmed copy must not delete the shared recording.
-    record = {key: value for key, value in take.items() if key not in ("file", "duration", "created", "source_recording")}
-    record.update(file=str(out), trimmed_from=file, trim=[round(start, 2), round(end, 2)],
+    # A kept original keeps its recording: deleting the trimmed copy must not delete a shared recording.
+    record = {key: value for key, value in take.items()
+              if key not in ("file", "duration", "created", "trimmed_from") and (replace or key != "source_recording")}
+    record.update(file=str(out), trim=[round(start, 2), round(end, 2)],
                   duration=round((last - first) / rate, 2), created=_now())
+    if not replace:
+        record["trimmed_from"] = file
     add_take(session_id, line_id, record)
     data = load_session(session_id)
-    new = _line(data, line_id)["takes"][-1]["file"]
-    _line(data, line_id)["selected"] = new
+    line = _line(data, line_id)
+    new = line["takes"][-1]["file"]
+    if replace:
+        line["takes"] = [t for t in line["takes"] if t["file"] != file]
+        (session_dir(session_id) / file).unlink(missing_ok=True)
+    line["selected"] = new
     save_session(session_id, data)
     return new

@@ -316,3 +316,22 @@ def test_clear_takes_keeps_the_lines(tmp_workspace):
     assert [l["selected"] is None for l in data["lines"]] == [True, False, True]
     assert [l["text"] for l in data["lines"]] == ["one", "two", "three"]
     assert _files(sid) == ["takes/02-burak-chatterbox-take1.wav"]
+
+
+def test_trim_take_can_replace_the_original(tmp_workspace):
+    sid, (l1,) = _session_with_lines(["one"])
+    original = _add_take(sid, l1, "chatterbox", 2.0, seed=7)
+    _add_take(sid, l1, "chatterbox", 1.0)
+    rel = ws.load_session(sid)["lines"][0]["takes"][0]["file"]
+    data = ws.load_session(sid)
+    data["lines"][0]["takes"][0]["source_recording"] = "recordings/01-take1.wav"
+    ws.save_session(sid, data)
+    rec = ws.session_dir(sid) / "recordings/01-take1.wav"
+    make_wav(rec, 1)
+    new = ws.trim_take(sid, l1, rel, 0.5, 1.5, replace=True)
+    line = ws.load_session(sid)["lines"][0]
+    assert [t["file"] for t in line["takes"]] == [line["takes"][0]["file"], new] and len(line["takes"]) == 2
+    assert rel not in [t["file"] for t in line["takes"]] and not original.exists()
+    take = next(t for t in line["takes"] if t["file"] == new)
+    assert line["selected"] == new and take["trim"] == [0.5, 1.5] and "trimmed_from" not in take
+    assert take["source_recording"] == "recordings/01-take1.wav" and rec.exists()  # the recording moves along

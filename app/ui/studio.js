@@ -921,22 +921,38 @@ export async function renderStudio(root) {
     rowNode.append(box);
     try {
       const { samples, sampleRate } = await decode(`/files/sessions/${sid()}/${take.file}`);
-      const save = el("button", { class: "btn btn-primary btn-small" }, "Save trimmed take");
+      // Two ways to save: as a new take (the original stays) or in place of the original.
+      const asCopy = el("button", { class: "btn btn-primary btn-small",
+        title: "Keep the original and add the trimmed audio as a new, selected take" }, "Save as new take");
+      const replace = el("button", { class: "btn btn-small",
+        title: "Save the trimmed audio and delete the original take" }, "Replace original");
       const range = rangeEditor(samples, sampleRate, (start, end) => {
-        save.disabled = end - start < 0.3;
+        asCopy.disabled = replace.disabled = end - start < 0.3;
       });
-      save.onclick = async () => {
+      const save = async (replaceOriginal) => {
         const [start, end] = range.getRange();
-        save.disabled = true;
+        asCopy.disabled = replace.disabled = true;
+        if (replaceOriginal) stopAudio(`/files/sessions/${sid()}/${take.file}`);
         try {
-          apply(await api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/trim`, { file: take.file, start, end }));
-          setMessage(message, `Saved a trimmed copy of take ${takeNumber(take.file) ?? ""}; it is now selected.`);
-        } catch (error) { save.disabled = false; fail(error); }
+          apply(await api("POST", `/api/sessions/${sid()}/lines/${line.id}/takes/trim`,
+            { file: take.file, start, end, replace: replaceOriginal }));
+          setMessage(message, replaceOriginal
+            ? `Take ${takeNumber(take.file) ?? ""} was trimmed; the original was deleted.`
+            : `Saved a trimmed copy of take ${takeNumber(take.file) ?? ""}; it is now selected.`);
+        } catch (error) { asCopy.disabled = replace.disabled = false; fail(error); }
+      };
+      asCopy.onclick = () => save(false);
+      replace.onclick = () => {
+        // Deleting the original cannot be undone: confirm in place.
+        replace.replaceWith(el("span", { class: "row small" },
+          el("span", { class: "warn" }, "Delete the original take?"),
+          el("button", { class: "btn btn-danger btn-small", onclick: () => save(true) }, "Replace"),
+          el("button", { class: "btn btn-ghost btn-small", onclick: (e) => e.target.parentElement.replaceWith(replace) }, "Cancel")));
       };
       box.replaceChildren(
-        el("div", { class: "muted small" }, "Drag the handles to keep only the part you want. The original take is kept."),
+        el("div", { class: "muted small" }, "Drag the handles to keep only the part you want."),
         range.element,
-        el("div", { class: "row" }, save,
+        el("div", { class: "row" }, asCopy, replace,
           el("button", { class: "btn btn-ghost btn-small", onclick: () => { box.remove(); button.setAttribute("aria-expanded", "false"); } },
             "Cancel")));
     } catch {
