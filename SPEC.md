@@ -204,7 +204,8 @@ Nothing has to be installed beforehand except the NVIDIA driver.
   hard links counted once),
   above a collapsible log.
 - **Cancel** stops the running process within seconds and deletes `.local/<model>/`. Install always clears leftovers
-  of an interrupted install first. A finished install writes `.local/<model>/installed`.
+  of an interrupted install first, and so does every start of the app (a folder without the `installed` marker:
+  the app closed, crashed or lost power during an install). A finished install writes `.local/<model>/installed`.
 - **Remove** shows the folder and the space it frees (files no other component links to), then, after confirmation,
   stops the worker and deletes `.local/<model>/`; then the shared cache is cleaned. The Models screen also shows the
   total of all components.

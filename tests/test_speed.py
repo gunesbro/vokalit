@@ -108,3 +108,20 @@ def test_install_waits_for_a_delete_of_its_folder(tmp_path, monkeypatch):
     list(models.install("chatterbox"))
 
     assert order[0] == "deleted"
+
+
+def test_half_installed_components_are_deleted_at_start(tmp_path, monkeypatch):
+    # The app closed (or crashed, or lost power) during an install: the folder exists without the "installed" marker.
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path))
+    half = tmp_path / "omnivoice" / "venv"
+    half.mkdir(parents=True)
+    (half / "torch.py").write_bytes(b"x")
+    done = tmp_path / "chatterbox"
+    done.mkdir()
+    (done / "installed").write_text("")
+
+    models.delete_removed()
+    models._join_background()
+
+    assert not (tmp_path / "omnivoice").exists()
+    assert done.exists()

@@ -450,11 +450,15 @@ def _linked(folder):
 
 
 def delete_removed():
-    """Deletes what a remove left behind when the app closed before it finished."""
+    """At start: deletes what a remove left behind when the app closed before it finished, and components whose
+    install never finished (the app closed, crashed or lost power during it: the folder has no "installed" marker)."""
     with contextlib.suppress(FileNotFoundError):
         for entry in os.scandir(LOCAL):
             if entry.name.startswith(".removing-") and entry.is_dir():
                 _delete_in_background(entry.path)
+    for name in _components():
+        if os.path.isdir(model_dir(name)) and not is_installed(name):
+            remove(name)
 
 
 class _Worker:
