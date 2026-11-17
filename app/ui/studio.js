@@ -1281,7 +1281,12 @@ export async function renderStudio(root) {
       shared.samples.map((sample) => el("button", { class: "menu-item", onclick: () => bulkUpdate(ids,
         { sample: sample.id }, `${plural(ids.length, "line")} now use \u201c${sample.label}\u201d.`) },
       sample.label, sample.id === shared.default_sample && el("span", { class: "faint small" }, "default")))), { up: true });
-    const deleteButton = el("button", { class: "btn btn-small btn-danger", title: "Delete the selected lines and their takes" }, "Delete");
+    const takeCount = lines.reduce((n, l) => n + l.takes.length, 0);
+    const clearButton = el("button", { class: "btn btn-small", disabled: !takeCount || !!batch,
+      title: takeCount ? "Delete every take of the selected lines; the lines stay" : "The selected lines have no takes" },
+    "Delete takes");
+    clearButton.onclick = () => confirmClearTakes(clearButton, lines, takeCount);
+    const deleteButton = el("button", { class: "btn btn-small btn-danger", title: "Delete the selected lines and their takes" }, "Delete lines");
     deleteButton.onclick = () => confirmBulkDelete(deleteButton, ids, "selected");
     return el("div", { class: "selection-bar" },
       el("span", { class: "small selection-count" }, `${plural(ids.length, "line")} selected`),
@@ -1289,6 +1294,7 @@ export async function renderStudio(root) {
         title: "Generate a take for each selected line with the models in \u201cGenerate with\u201d" }, "Generate"),
       el("div", { class: "pop-holder" }, characterButton),
       el("div", { class: "pop-holder" }, sampleButton),
+      el("div", { class: "pop-holder" }, clearButton),
       el("div", { class: "pop-holder" }, deleteButton),
       el("button", { class: "btn btn-ghost btn-small", onclick: clearPicked, title: "Clear the selection (Esc)" }, "Clear"));
   }
@@ -1299,6 +1305,23 @@ export async function renderStudio(root) {
       apply(await api("POST", `/api/sessions/${sid()}/lines/update`, { lines: ids, fields }));
       setMessage(message, done);
     } catch (error) { fail(error); }
+  }
+
+  function confirmClearTakes(anchor, lines, takeCount) {
+    popover(anchor, el("div", { class: "menu confirm-menu" },
+      el("strong", {}, `Delete ${plural(takeCount, "take")} of ${plural(lines.length, "line")}?`),
+      el("div", { class: "muted small" }, "The lines and their text stay; the take files are removed permanently. "
+        + "This cannot be undone."),
+      el("button", { class: "btn btn-danger", onclick: async () => {
+        document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+        for (const line of lines) for (const take of line.takes) stopAudio(`/files/sessions/${sid()}/${take.file}`);
+        if (lines.some((l) => l.id === playback.lineId)) stopAll();
+        try {
+          const result = await api("POST", `/api/sessions/${sid()}/takes/clear`, { lines: lines.map((l) => l.id) });
+          apply(result);
+          setMessage(message, `Deleted ${plural(result.removed, "take")}.`);
+        } catch (error) { fail(error); }
+      } }, `Delete ${plural(takeCount, "take")}`)), { align: "left", up: true });
   }
 
   function confirmBulkDelete(anchor, ids, kind) {

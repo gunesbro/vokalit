@@ -302,3 +302,17 @@ def test_trim_take_adds_a_trimmed_copy(tmp_workspace):
     assert original.exists()  # the original take is kept
     with pytest.raises(ws.WorkspaceError):
         ws.trim_take(sid, l1, rel, 1.5, 1.6)  # shorter than 0.3 s
+
+
+def test_clear_takes_keeps_the_lines(tmp_workspace):
+    sid, (l1, l2, l3) = _session_with_lines(["one", "two", "three"])
+    for lid in (l1, l2, l3):
+        _add_take(sid, lid, "chatterbox", 1)
+    _add_take(sid, l1, "chatterbox", 1)
+    removed = ws.clear_takes(sid, [l1, l3])
+    data = ws.load_session(sid)
+    assert removed == 3
+    assert [len(l["takes"]) for l in data["lines"]] == [0, 1, 0]
+    assert [l["selected"] is None for l in data["lines"]] == [True, False, True]
+    assert [l["text"] for l in data["lines"]] == ["one", "two", "three"]
+    assert _files(sid) == ["takes/02-burak-chatterbox-take1.wav"]

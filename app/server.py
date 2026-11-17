@@ -541,6 +541,12 @@ def update_lines(req, sid):
     return get_session(req, sid)
 
 
+@route("POST", "/api/sessions/(?P<sid>[0-9-]+)/takes/clear")
+def clear_takes(req, sid):
+    removed = ws.clear_takes(sid, req["json"].get("lines", []))
+    return {"removed": removed, "session": get_session(req, sid)}
+
+
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/delete")
 def delete_lines(req, sid):
     renamed = ws.delete_lines(sid, req["json"]["lines"])

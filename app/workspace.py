@@ -656,6 +656,26 @@ def remove_missing_takes(session_id: str) -> bool:
     return changed
 
 
+def clear_takes(session_id: str, line_ids: list[str]) -> int:
+    """Deletes every take (and its recording) of these lines; the lines stay. Returns how many takes."""
+    data = load_session(session_id)
+    folder = session_dir(session_id)
+    wanted = set(line_ids)
+    removed = 0
+    for line in data["lines"]:
+        if line["id"] not in wanted:
+            continue
+        for take in line["takes"]:
+            for key in ("file", "source_recording"):
+                if take.get(key):
+                    (folder / take[key]).unlink(missing_ok=True)
+        removed += len(line["takes"])
+        line["takes"] = []
+        line["selected"] = None
+    save_session(session_id, data)
+    return removed
+
+
 def take_text_changed(line: dict, take: dict) -> bool:
     return take.get("kind") == "tts" and take.get("text") != line["text"]
 

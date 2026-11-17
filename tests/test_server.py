@@ -436,3 +436,12 @@ def test_audio_files_support_range_requests(api, tmp_path):
     response = conn.getresponse()
     assert response.status == 200 and response.read() == whole and response.getheader("Accept-Ranges") == "bytes"
     conn.close()
+
+
+def test_clear_takes_endpoint(api, tmp_path):
+    sid, lid, _ = _session_with_line(api, "one")
+    out = ws.new_take_path(sid, lid, "chatterbox")
+    make_wav(out, 1)
+    ws.add_take(sid, lid, {"file": str(out), "kind": "tts", "model": "chatterbox"})
+    status, body, _ = api("POST", f"/api/sessions/{sid}/takes/clear", {"lines": [lid]})
+    assert status == 200 and body["removed"] == 1 and body["session"]["lines"][0]["takes"] == []
