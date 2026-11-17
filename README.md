@@ -153,7 +153,8 @@ node --test "app/ui/tests/*.test.mjs"   # interface helpers
 
 The interface is plain HTML, CSS and JavaScript modules in `app/ui/` (no build step, no CDN); the local server is
 `app/server.py`, storage is `app/workspace.py`, and each model has a worker in `workers/<model>/`.
-[SPEC.md](SPEC.md) describes the design.
+[SPEC.md](SPEC.md) describes the design, and [docs/workspace-design.md](docs/workspace-design.md) the workspace in
+detail.
 
 ## License
 

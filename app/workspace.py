@@ -1,6 +1,6 @@
 """User data under workspace/: characters, samples, sessions, takes, exports. No UI code.
 
-See docs/superpowers/specs/2026-11-16-workspace-design.md, section 6.
+See docs/workspace-design.md, section 6.
 """
 import json
 import os

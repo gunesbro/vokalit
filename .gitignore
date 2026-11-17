@@ -1,5 +1,6 @@
 
 .local/
+.superpowers/
 __pycache__/
 
 # Never commit voice recordings (public repo).

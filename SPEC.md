@@ -3,7 +3,7 @@
 Local voice cloning and text-to-speech workspace.
 
 > Status: **v2.0** (v1.14 was the Turkish single-page Gradio version; v2.0 is the workspace with our own UI).
-> The workspace is specified in detail in `docs/superpowers/specs/2026-11-16-workspace-design.md`;
+> The workspace is specified in detail in `docs/workspace-design.md`;
 > this file is the overview. Changes are made here (or in that design) first, then in code.
 
 ## 1. Purpose
@@ -16,13 +16,11 @@ file. Everything is done by clicking in a desktop window.
 ## 2. Scope (v2)
 
 - Models: **Chatterbox Multilingual** (Resemble AI), **OmniVoice** (k2-fsa) and **VoxCPM2** (OpenBMB); the optional
-  **Whisper** component (faster-whisper on the CPU) writes sample transcripts. Designs:
-  `docs/superpowers/specs/2026-11-17-omnivoice-design.md`, `docs/superpowers/specs/2026-11-17-voxcpm2-design.md`.
+  **Whisper** component (faster-whisper on the CPU) writes sample transcripts.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
   - A line's text is edited in our own small editor: plain text with sound tags shown as chips (× removes one,
     typed `[laughter]` becomes a chip, paste is plain text, own undo history). Stored text keeps canonical tags;
-    `MODELS[name]["sounds"]` converts each for the model, models without it drop them
-    (`docs/superpowers/specs/2026-11-17-sound-chips-design.md`).
+    `MODELS[name]["sounds"]` converts each for the model, models without it drop them.
   - Language fields are search boxes (OmniVoice lists 646 languages); only languages every chosen model speaks are
     offered.
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
@@ -236,7 +234,7 @@ Nothing has to be installed beforehand except the NVIDIA driver.
 
 ## 7. Interface
 
-All interface text is English. The visual design is the design canvas; behaviour is specified in the design doc
+All interface text is English. The visual design is the design canvas; behaviour is specified in `docs/workspace-design.md`
 (§7 Studio, Characters, Models). Summary:
 
 - **Rail:** Studio, Characters, Models, and a GPU status dot.
@@ -271,7 +269,7 @@ vokalit/
 │   └── ui/                    # HTML/CSS/JS (+ tests/ for node --test)
 ├── workers/<model>/           # requirements.txt + worker.py
 ├── tests/                     # pytest (stubs for torch/chatterbox; no GPU or network needed)
-├── docs/superpowers/          # design docs and plans
+├── docs/                      # workspace design (workspace-design.md) and README images
 ├── samples/                   # sample texts (no audio)
 ├── workspace/                 # user data — .gitignore
 └── .local/                    # .gitignore
@@ -296,7 +294,7 @@ Tests: `python3 -m pytest tests -q` and `node --test "app/ui/tests/*.test.mjs"`.
    finds results only in `samples/`.
 9. No audio files in the repo (`git ls-files | grep -iE "\.(wav|mp3|flac|ogg|m4a|webm)$"` is empty) and the README
    has Privacy and Responsible use sections.
-10. The workspace criteria in the design doc (§11) hold.
+10. The workspace criteria in `docs/workspace-design.md` (§11) hold.
 
 ## 10. Risks
 
