@@ -26,7 +26,8 @@ file. Everything is done by clicking in a desktop window.
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
     generation settings at three levels (model defaults → session → line); voice conversion ("Perform this line");
     export of the selected takes to one file (WAV always; FLAC, MP3 and OGG Vorbis when the computer's libsndfile can
-    write them). Export is enabled once every line has a take. Takes at a lower sample rate are converted to the
+    write them). Export is enabled once every line has a take. A line's menu exports only its selected take,
+    without its pause, as `<session>-line-<n>-<time>.<fmt>`. Takes at a lower sample rate are converted to the
     highest one among the lines (linear interpolation), since VoxCPM2 writes 48 kHz and the others 24 kHz.
   - Settings are sliders (`min`, `max`, `step`) or, with `"type": "text"`, a text box (`max_length`, `placeholder`,
     `suggestions` as buttons that fill it). `models.clean_settings` checks them; text loses parentheses and extra

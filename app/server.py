@@ -742,8 +742,8 @@ def stop_generation(req, sid):
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/export")
 def export_session(req, sid):
-    fmt = req["json"].get("format", "wav")
-    return _start_job(lambda job: ws.export_session(sid, fmt).relative_to(ws.workspace_root()).as_posix(),
+    fmt, line = req["json"].get("format", "wav"), req["json"].get("line")  # line: export only that line
+    return _start_job(lambda job: ws.export_session(sid, fmt, line).relative_to(ws.workspace_root()).as_posix(),
                       session=sid, kind="export")
 
 

@@ -10,7 +10,8 @@ Your voice, your text and the generated audio never leave your machine.
 
 - **Studio** — sessions with a cast of characters and a script. Generate one or more takes per line, pick the best,
   trim it, listen to the whole script with *Play all*, and export it as one file (WAV, FLAC, MP3 or OGG). Lines made
-  by different models are joined at the highest sample rate among them.
+  by different models are joined at the highest sample rate among them. A single line can be exported too (its
+  menu: *Export this line*), in any of these formats.
 - **Characters** — a library of reusable voices. Each character can have several samples (e.g. *calm*, *excited*, or
   one per language), recorded in the app or uploaded, and trimmed before saving.
 - **Models** — install and remove open models with one click. Size, GPU memory, location and license are shown

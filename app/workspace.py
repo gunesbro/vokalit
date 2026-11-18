@@ -798,12 +798,21 @@ def export_formats() -> list[str]:
                       if major in majors and subtype in sf.available_subtypes(major)]
 
 
-def export_session(session_id: str, fmt: str = "wav") -> Path:
-    """Joins each line's selected take and its pause into exports/<session>-<time>.<fmt>."""
+def export_session(session_id: str, fmt: str = "wav", line_id: str | None = None) -> Path:
+    """Joins each line's selected take and its pause into exports/<session>-<time>.<fmt>. With `line_id`, only that
+    line's selected take, without its pause, into exports/<session>-line-<n>-<time>.<fmt>."""
     if fmt not in export_formats():
         raise WorkspaceError(f"This computer cannot export {fmt.upper()} files.")
     data = load_session(session_id)
-    missing = [str(n) for n, line in enumerate(data["lines"], 1) if not line["selected"]]
+    name = slugify(data["name"])
+    numbers = list(range(1, len(data["lines"]) + 1))  # line numbers in messages
+    if line_id is not None:
+        number = _line_index(data, line_id) + 1
+        line = dict(data["lines"][number - 1], pause_after=0)
+        if not line["selected"]:
+            raise WorkspaceError(f"Line {number} has no takes yet.")
+        data["lines"], name, numbers = [line], f"{name}-line-{number}", [number]
+    missing = [str(n) for n, line in zip(numbers, data["lines"]) if not line["selected"]]
     if missing:
         if len(missing) == 1:
             raise WorkspaceError(f"Line {missing[0]} has no takes yet.")
@@ -811,7 +820,7 @@ def export_session(session_id: str, fmt: str = "wav") -> Path:
     if not data["lines"]:
         raise WorkspaceError("The script is empty.")
     takes = []
-    for n, line in enumerate(data["lines"], 1):
+    for n, line in zip(numbers, data["lines"]):
         path = session_dir(session_id) / line["selected"]
         if not path.exists():
             raise WorkspaceError(f"Line {n}: the selected take file is missing ({line['selected']}). "
@@ -826,7 +835,7 @@ def export_session(session_id: str, fmt: str = "wav") -> Path:
         chunks.append(np.zeros(round(line["pause_after"] * rate), dtype="<i2"))
     folder = session_dir(session_id) / "exports"
     folder.mkdir(exist_ok=True)
-    out = folder / f"{slugify(data['name'])}-{time.strftime('%Y%m%d-%H%M%S')}.{fmt}"
+    out = folder / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.{fmt}"
     samples = np.concatenate(chunks)
     if fmt == "wav":
         with wave.open(str(out), "wb") as w:

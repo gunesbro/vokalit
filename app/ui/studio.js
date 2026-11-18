@@ -558,6 +558,8 @@ export async function renderStudio(root) {
       el("button", { class: "menu-item", disabled: !line.selected, onclick: () => { close(); playFrom(i); } }, "Play from here"),
       el("button", { class: "menu-item", onclick: () => { close(); open(line.id); } }, "Edit and takes"),
       el("button", { class: "menu-item", onclick: () => { close(); open(line.id); } }, "Perform this line"),
+      el("button", { class: "menu-item", disabled: !line.selected || exporting, title: line.selected ? "" : "Generate a take first.",
+        onclick: () => popover(anchor, exportPanel(line, i), { align: "right" }) }, "Export this line\u2026"),
       el("button", { class: "menu-item", disabled: i === 0, onclick: () => move(i - 1) }, "Move up"),
       el("button", { class: "menu-item", disabled: i === session.lines.length - 1, onclick: () => move(i + 1) }, "Move down"),
       el("div", { class: "menu-sep" }),
@@ -1224,13 +1226,15 @@ export async function renderStudio(root) {
     return button;
   }
 
-  function exportPanel() {
+  // The format panel; with `line`, it exports only that line's selected take (WAV, or a converted copy).
+  function exportPanel(line = null, i = 0) {
     let choice = exportFormat;
     const options = exportFormats.length ? exportFormats : [{ id: "wav", label: "WAV", note: "Lossless." }];
     if (!options.some((f) => f.id === choice)) choice = options[0].id;
     return el("div", { class: "menu export-panel" },
-      el("strong", {}, "Export"),
-      el("div", { class: "muted small" }, `The selected take of all ${plural(session.lines.length, "line")}, with their pauses, in one file.`),
+      el("strong", {}, line ? `Export line ${i + 1}` : "Export"),
+      el("div", { class: "muted small" }, line ? "The selected take of this line, without its pause."
+        : `The selected take of all ${plural(session.lines.length, "line")}, with their pauses, in one file.`),
       el("div", { class: "export-options", role: "radiogroup", "aria-label": "File format" },
         options.map((f) => el("label", { class: "export-option" },
           el("input", { type: "radio", name: "export-format", value: f.id, checked: f.id === choice,
@@ -1241,13 +1245,13 @@ export async function renderStudio(root) {
         document.querySelector(".popover")?.dispatchEvent(new Event("close"));
         exportFormat = choice;
         try { localStorage.setItem("vokalit.exportFormat", choice); } catch { /* storage may be unavailable */ }
-        exportSession(choice);
+        exportSession(choice, line?.id);
       } }, "Export"));
   }
 
-  async function exportSession(fmt) {
+  async function exportSession(fmt, lineId = null) {
     try {
-      const { id } = await api("POST", `/api/sessions/${sid()}/export`, { format: fmt });
+      const { id } = await api("POST", `/api/sessions/${sid()}/export`, { format: fmt, ...(lineId ? { line: lineId } : {}) });
       follow({ id, kind: "export", started: Date.now() / 1000 });
     } catch (error) { setMessage(message, error.message, "warn"); }
   }

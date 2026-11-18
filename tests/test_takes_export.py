@@ -347,3 +347,20 @@ def test_trim_take_can_replace_the_original(tmp_workspace):
     take = next(t for t in line["takes"] if t["file"] == new)
     assert line["selected"] == new and take["trim"] == [0.5, 1.5] and "trimmed_from" not in take
     assert take["source_recording"] == "recordings/01-take1.wav" and rec.exists()  # the recording moves along
+
+
+def test_export_one_line_without_its_pause(tmp_workspace):
+    import wave
+    sid, (l1, l2) = _session_with_lines(["one", "two"])
+    ws.update_line(sid, l2, pause_after=0.5)
+    _add_take(sid, l2, "chatterbox", 1.0, sr=24000)  # line 1 has no take: not needed for one line
+    out = ws.export_session(sid, "wav", line_id=l2)
+    assert "-line-2-" in out.name and out.parent.name == "exports"
+    with wave.open(str(out)) as w:
+        assert w.getframerate() == 24000 and w.getnframes() == 24000
+
+
+def test_export_one_line_needs_a_take(tmp_workspace):
+    sid, (l1,) = _session_with_lines(["one"])
+    with pytest.raises(ws.WorkspaceError, match="no takes"):
+        ws.export_session(sid, "wav", line_id=l1)
