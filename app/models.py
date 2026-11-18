@@ -21,7 +21,7 @@ LANGUAGE_NAMES = {
     "ar": "Arabic", "da": "Danish", "de": "German", "el": "Greek", "en": "English", "es": "Spanish",
     "fi": "Finnish", "fr": "French", "he": "Hebrew", "hi": "Hindi", "it": "Italian", "ja": "Japanese",
     "ko": "Korean", "ms": "Malay", "nl": "Dutch", "no": "Norwegian", "pl": "Polish", "pt": "Portuguese",
-    "ru": "Russian", "sv": "Swedish", "sw": "Swahili", "tl": "Tagalog", "tr": "Turkish", "zh": "Chinese",
+    "ru": "Russian", "sv": "Swedish", "sw": "Swahili", "tl": "Tagalog", "tr": "Turkish", "zh": "Chinese", "ne": "Nepali", "la": "Latin",
 }
 
 # OmniVoice's own list (646 languages, ISO 639 codes) read from the package it installs, in English. Vokalit's names
@@ -45,6 +45,26 @@ HIGGS_TAGS = ["cough", "crying", "screaming", "burping", "humming", "sniff", "sn
               "speed-very-slow", "speed-slow", "speed-fast", "speed-very-fast", "pitch-low", "pitch-high", "pause",
               "long-pause", "expressive-high", "expressive-low"]
 TAGS = OMNIVOICE_TAGS + HIGGS_TAGS
+
+# Higgs TTS 3 runs from a transformers packaging of Boson AI's weights. Its code is run from the Hub
+# (trust_remote_code), so it and the codec are pinned to the commits checked on Windows (2026-11-18).
+HIGGS_PORT = "multimodalart/higgs-audio-v3-tts-4b-transformers"
+HIGGS_PORT_REVISION = "30f01593ee6a12efa586c92455afe4b76e45095d"
+HIGGS_CODEC = "bosonai/higgs-audio-v2-tokenizer"
+HIGGS_CODEC_REVISION = "815a03f1b57dcb5ae918db415f22cd0c8a6f0f54"
+# Higgs's syntax for each tag. Sound effects are followed by their sound written out, as the model card advises.
+_HIGGS_SFX = {"cough": "Ahem", "laughter": "Haha", "crying": "Boohoo", "screaming": "Aaah", "burping": "Burp",
+              "humming": "Hmm", "sigh": "Ahh", "sniff": "Sff", "sneeze": "Achoo"}
+_HIGGS_STYLES = ["singing", "shouting", "whispering"]
+_HIGGS_PROSODY = ["speed-very-slow", "speed-slow", "speed-fast", "speed-very-fast", "pitch-low", "pitch-high", "pause",
+                  "long-pause", "expressive-high", "expressive-low"]
+HIGGS_SOUNDS = {
+    **{tag: f"<|sfx:{tag}|>{word}" for tag, word in _HIGGS_SFX.items()},
+    **{tag: f"<|emotion:{tag}|>" for tag in HIGGS_TAGS
+       if tag not in _HIGGS_SFX and tag not in _HIGGS_STYLES and tag not in _HIGGS_PROSODY},
+    **{tag: f"<|style:{tag}|>" for tag in _HIGGS_STYLES},
+    **{tag: f"<|prosody:{tag.replace('-', '_')}|>" for tag in _HIGGS_PROSODY},
+}
 _TAG = re.compile(r"\[(" + "|".join(re.escape(tag) for tag in TAGS) + r")\]")
 
 
@@ -134,6 +154,35 @@ MODELS = {
         "pip_steps": [
             ("PyTorch with CUDA", TORCH_CUDA),  # voxcpm 2.0.3 accepts this build: shared with the other models
             ("VoxCPM2", ["voxcpm==2.0.3"]),
+        ],
+    },
+    "higgs": {
+        "title": "Higgs TTS 3",
+        "summary": "102 languages \u00b7 cloning \u00b7 emotions and sounds",
+        "url": "https://huggingface.co/bosonai/higgs-tts-3-4b",
+        # measured on Windows: 7.8 GB environment (PyTorch shared with other models) + 10.1 GB model and codec
+        "disk_gb": 17.9,
+        "license": "Non-commercial; creator content allowed with credit (see README)",
+        "supports_convert": False,
+        "needs_transcript": True,  # cloning is much better with what the sample says
+        # Measured on an RTX 4070 SUPER (Windows): 8-bit 6.1 GB peak (used when less than 10.7 GB is free), bf16
+        # 9.7 GB peak and about three times faster (used on cards with room for it).
+        "vram_gb": 6.1,
+        "languages": ("af ar hy as ast az ba eu be bn bs bg ca ceb ckb zh hr cs da nl mhr en eo et fi fr gl ka de el "
+                      "gu ht ha he hi hu id it ja jv kn kk ko rw ky lv ln lt luo mk ms ml mt mi mr mn ne no oc fa pl "
+                      "pt ro ru nso sr sn sk sl es sw sv tl tg ta te th tr uk ur ug uz vi xh zu sq ny pa lg is ga kab "
+                      "kea kam la lb om ps sd so umb cy").split(),
+        "sounds": HIGGS_SOUNDS,
+        "settings": [
+            {"key": "temperature", "label": "Variation", "min": 0.3, "max": 1.2, "step": 0.05, "default": 0.7,
+             "help": "Higher sounds livelier and more varied; lower is steadier."},
+        ],
+        "env": {"HIGGS_PORT": HIGGS_PORT, "HIGGS_PORT_REVISION": HIGGS_PORT_REVISION,
+                "HIGGS_CODEC": HIGGS_CODEC, "HIGGS_CODEC_REVISION": HIGGS_CODEC_REVISION},
+        "pip_steps": [
+            ("PyTorch with CUDA", TORCH_CUDA),  # transformers 5.23 accepts this build: shared with the other models
+            ("Higgs libraries", ["transformers==5.23.0", "accelerate==1.16.0", "bitsandbytes==0.50.2",
+                                 "soundfile==0.14.0"]),
         ],
     },
 }
@@ -287,7 +336,8 @@ def _measure_soon():
 
 def _env(name, offline):
     cache = os.path.join(model_dir(name), "cache")
-    env = dict(os.environ, HF_HOME=cache, TORCH_HOME=cache, HF_HUB_DISABLE_TELEMETRY="1", PYTHONUTF8="1")
+    env = dict(os.environ, HF_HOME=cache, TORCH_HOME=cache, HF_HUB_DISABLE_TELEMETRY="1", PYTHONUTF8="1",
+               **spec(name).get("env", {}))
     if offline:
         env.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     return env
@@ -522,6 +572,7 @@ class _Worker:
         self.lock = threading.Lock()
         self.last_used = time.monotonic()
         self.vram_gb = None  # GPU memory the model holds, as the worker reports it
+        self.mode = None  # how a worker chose to load, if it can choose ({label, reason}; Higgs: precision)
         # stderr is inherited, so the worker's logs appear in the console window.
         self.process = subprocess.Popen(
             [_python(name), _worker_script(name)],
@@ -533,6 +584,7 @@ class _Worker:
         )
         ready = self._read()
         self.vram_gb = ready.get("vram_gb")
+        self.mode = ready.get("mode")
         if not ready.get("ready"):
             self.process.kill()
             if ready.get("oom"):
@@ -577,7 +629,7 @@ def runtime(name):
         return {"loaded": False}
     busy = worker.lock.locked()
     left = None if busy else max(0, round(IDLE_SECONDS - (time.monotonic() - worker.last_used)))
-    return {"loaded": True, "busy": busy, "vram_gb": worker.vram_gb, "unloads_in": left}
+    return {"loaded": True, "busy": busy, "vram_gb": worker.vram_gb, "unloads_in": left, "mode": worker.mode}
 
 
 def unload(name):

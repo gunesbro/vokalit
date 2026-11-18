@@ -516,4 +516,5 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 /* Models screen: whether a model is loaded right now */
 .runtime { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 4px; }
 .runtime .btn { padding-left: 0; }
+.runtime-reason { flex-basis: 100%; max-width: 640px; }
 .runtime .loaded { color: var(--accent); }

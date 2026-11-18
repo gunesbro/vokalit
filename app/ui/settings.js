@@ -2,7 +2,7 @@
 import { el, icon, ICONS } from "./app.js";
 import { filterOptions, pickerLabel } from "./script.js";
 
-const COLORS = { chatterbox: "#e9a15b", omnivoice: "#56b6c2", voxcpm: "#98c379", "chatterbox-vc": "#c678dd" };
+const COLORS = { chatterbox: "#e9a15b", omnivoice: "#56b6c2", voxcpm: "#98c379", higgs: "#e06c9f", "chatterbox-vc": "#c678dd" };
 const FALLBACK = ["#98c379", "#d19a66", "#7aa2f7", "#e5807a"];
 
 export function modelColor(name) {

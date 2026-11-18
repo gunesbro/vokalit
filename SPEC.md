@@ -15,7 +15,10 @@ file. Everything is done by clicking in a desktop window.
 
 ## 2. Scope (v2)
 
-- Models: **Chatterbox Multilingual** (Resemble AI), **OmniVoice** (k2-fsa) and **VoxCPM2** (OpenBMB); the optional
+- Models: **Chatterbox Multilingual** (Resemble AI), **OmniVoice** (k2-fsa), **VoxCPM2** (OpenBMB) and
+  **Higgs TTS 3** (Boson AI, via the pinned transformers packaging `multimodalart/higgs-audio-v3-tts-4b-transformers`
+  and codec `bosonai/higgs-audio-v2-tokenizer`; full precision when >= 10.7 GB is free on loading, otherwise 8-bit,
+  reported on the Models screen with the reason); the optional
   **Whisper** component (faster-whisper on the CPU) writes sample transcripts.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
   - A line's text is edited in our own small editor: plain text with sound tags shown as chips (× removes one,

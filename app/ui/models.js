@@ -208,12 +208,14 @@ export async function renderModels(root) {
     const r = model.runtime || { loaded: false };
     if (!r.loaded) return box.replaceChildren(el("span", { class: "faint" }, "\u25cb Not loaded"));
     const where = model.kind === "tool" ? "In memory" : "On GPU";
-    const parts = [where, r.vram_gb ? `${r.vram_gb.toFixed(1)} GB` : null,
+    const parts = [where, r.vram_gb ? `${r.vram_gb.toFixed(1)} GB` : null, r.mode?.label,
       r.busy ? "generating" : `unloads in ${Math.max(1, Math.ceil(r.unloads_in / 60))} min`].filter(Boolean);
     box.replaceChildren(el("span", { class: "loaded" }, `\u25cf ${parts.join(" \u00b7 ")}`),
       r.busy ? null : el("button", { class: "btn btn-ghost btn-small", title: "Free its memory now; the next take loads it again",
         onclick: () => api("POST", `/api/models/${model.name}/unload`).then((view) => paintRuntime(box, view),
-          (error) => setMessage(message, error.message, "error")) }, "Unload"));
+          (error) => setMessage(message, error.message, "error")) }, "Unload"),
+      // Why it runs this way (Higgs: full precision or 8-bit), on its own line
+      r.mode?.reason ? el("div", { class: "faint runtime-reason" }, r.mode.reason) : null);
   }
 
   // Loaded models change on their own (a take loads one, idle ones unload): look every few seconds and repaint only

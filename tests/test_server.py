@@ -495,7 +495,7 @@ def test_transcribe_endpoint_passes_the_language(api, tmp_path, monkeypatch):
 
 
 def test_unknown_detected_language_is_dropped(api, tmp_path, monkeypatch):
-    monkeypatch.setattr(models, "transcribe", lambda audio, language: {"text": "Salve", "language": "la"})
+    monkeypatch.setattr(models, "transcribe", lambda audio, language: {"text": "Salve", "language": "xx"})
     status, body, _ = api("POST", "/api/transcribe", raw=make_wav(tmp_path / "s.wav", 11).read_bytes(),
                           content_type="audio/wav")
     assert status == 200 and body == {"text": "Salve", "language": None}
@@ -713,6 +713,7 @@ def test_components_say_which_models_are_loaded(api, monkeypatch, tmp_path):
         lock = threading.Lock()
         last_used = time.monotonic() - 60
         vram_gb = 2.4
+        mode = None
 
     monkeypatch.setitem(models._workers, "omnivoice", Loaded())
     try:
@@ -816,3 +817,17 @@ def test_line_of_only_new_tags_is_empty_for_other_models(api, monkeypatch):
     _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
     done = _wait(api, job["id"])
     assert done["state"] == "failed" and "Line 1 is empty without its sound tags" in done["error"]
+
+
+def test_higgs_needs_a_transcript(api, tmp_workspace, monkeypatch, tmp_path):
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", lambda *a, **k: pytest.fail("generated without a transcript"))
+    cid = ws.create_character("Burak")
+    ws.add_sample(cid, str(make_wav(tmp_path / "old.wav", 11)), "recording")  # no transcript
+    _, session, _ = api("POST", "/api/sessions", {"name": "E"})
+    sid = session["id"]
+    api("POST", f"/api/sessions/{sid}/cast", {"character": cid, "scope": "library"})
+    _, line, _ = api("POST", f"/api/sessions/{sid}/lines", {"character": cid, "text": "Merhaba", "language": "tr"})
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{line['id']}/generate", {"models": ["higgs"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Higgs TTS 3: This sample has no transcript" in done["error"]

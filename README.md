@@ -58,6 +58,7 @@ before downloading anything. Each model goes into its own folder under `.local/`
 | [Chatterbox Multilingual](https://huggingface.co/ResembleAI/chatterbox) (Resemble AI) | 23 | ~12.3 GB (measured on Windows) | MIT |
 | [OmniVoice](https://huggingface.co/k2-fsa/OmniVoice) (k2-fsa) — cloning, sound tags | 646 | ~9 GB, less when Chatterbox is installed | Code Apache 2.0; **weights CC-BY-NC: no commercial use** |
 | [VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) (OpenBMB) — cloning, style instructions, 48 kHz | 30 | ~13.6 GB (measured on Windows), less when another model is installed | Apache 2.0 |
+| [Higgs TTS 3](https://huggingface.co/bosonai/higgs-tts-3-4b) (Boson AI) — cloning, emotions, styles, sounds | 102 | ~17.9 GB (measured on Windows), less when another model is installed | **Research and non-commercial**; monetized creator content allowed with credit (below) |
 
 Each component has its own environment, so one model's packages can never break another's. Identical files — above
 all PyTorch with CUDA, about 5 GB — are stored once and shared between models; files nothing uses any more are
@@ -66,11 +67,18 @@ deleted automatically, and removing the last component frees everything.
 What you do with OmniVoice's output must be non-commercial: its weights are licensed CC-BY-NC because of its training
 data, and no paid license is offered.
 
+Higgs TTS 3 is under Boson AI's research and non-commercial license. Its Creator Use Grant lets you publish and
+monetize podcasts, videos and social posts made with it, provided you credit "Boson AI's Higgs Audio" in the audio or
+prominently in the accompanying text; embedding it in a product or offering it as a service needs a commercial license
+from Boson AI. Vokalit runs it from a community transformers packaging of the original weights, pinned to one
+version.
+
 ## Requirements
 
 - **NVIDIA GPU** with an up-to-date driver that supports CUDA 12.8. RTX 20 series or newer is a safe choice; RTX 50
-  series is supported. Video memory: Chatterbox about 4 GB, OmniVoice about 2.7 GB, VoxCPM2 about 8.4 GB (shown on the
-  Models screen). Models left unused for 5 minutes are unloaded, and others are unloaded when one needs room.
+  series is supported. Video memory: Chatterbox about 4 GB, OmniVoice about 2.7 GB, VoxCPM2 about 8.4 GB, Higgs TTS 3 about
+  6.1 GB in 8-bit or 9.7 GB in full precision (it picks full precision when there is room, and the Models screen
+  says which and why). Models left unused for 5 minutes are unloaded, and others are unloaded when one needs room.
 - **Windows 10/11** (tested) or **Linux** (less tested).
 - An internet connection only while installing. Nothing else needs to be installed beforehand: Vokalit downloads its
   own Python and packages into its folder, and the models are installed later from inside the app.
