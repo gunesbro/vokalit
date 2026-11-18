@@ -106,14 +106,14 @@ def _texts():
     return runs
 
 
-def child_generate(sample, transcript, sha, mode):
+def child_generate(sample, transcript, sha, codec_sha, mode):
     block_network()
     import inspect
 
     import numpy as np
     import soundfile as sf
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 
     report = {"mode": mode, "torch": torch.__version__}
     folder = OUT if mode == "bf16" else os.path.join(OUT, "8bit")
@@ -131,8 +131,16 @@ def child_generate(sample, transcript, sha, mode):
                                                          trust_remote_code=True, dtype=torch.bfloat16,
                                                          quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                                                          device_map="cuda").eval()
+        # The port loads its codec lazily from the Hub's "main", which is not in an offline cache downloaded by
+        # commit: load it here at its pinned commit and hand it over.
+        codec = AutoModel.from_pretrained(CODEC, revision=codec_sha, local_files_only=True, dtype=torch.float32,
+                                          trust_remote_code=True)
+        model._audio_codec = codec.to(model.device).eval()
     except Exception as error:
+        import traceback
+
         report["load_error"] = f"{type(error).__name__}: {error}"[:1500]
+        report["load_traceback"] = traceback.format_exc()[-2500:]
         report["oom"] = "out of memory" in str(error).lower()
         print("REPORT " + json.dumps(report))
         return
@@ -157,7 +165,11 @@ def child_generate(sample, transcript, sha, mode):
             files.append({"file": name, "seconds": round(time.perf_counter() - start, 1),
                           "duration": round(len(wav) / rate, 1)})
         except Exception as error:
+            import traceback
+
             files.append({"file": name, "error": f"{type(error).__name__}: {error}"[:400]})
+            if len(files) == 1:
+                report["first_traceback"] = traceback.format_exc()[-2500:]
             if "out of memory" in str(error).lower():
                 report["oom"] = True
                 break
@@ -198,11 +210,12 @@ def main():
     parser.add_argument("--transcript", help="what the sample says")
     parser.add_argument("--child", choices=["download", "bf16", "8bit"], help=argparse.SUPPRESS)
     parser.add_argument("--sha", help=argparse.SUPPRESS)
+    parser.add_argument("--codec-sha", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.child == "download":
         return child_download()
     if args.child:
-        return child_generate(args.sample, args.transcript, args.sha, args.child)
+        return child_generate(args.sample, args.transcript, args.sha, args.codec_sha, args.child)
 
     if args.sample:
         sample = os.path.abspath(args.sample)
@@ -226,7 +239,7 @@ def main():
         print(text)
         print(f"[spike] files: {OUT}")
 
-    steps = [("venv", [UV, "venv", "--python", "3.11", os.path.join(WORK, "venv")]),
+    steps = [("venv", [UV, "venv", "--allow-existing", "--python", "3.11", os.path.join(WORK, "venv")]),
              ("torch", [UV, "pip", "install", "--python", venv_python(), *TORCH_CUDA]),
              ("libraries", [UV, "pip", "install", "--python", venv_python(), *LIBRARIES])]
     for label, command in steps:
@@ -251,7 +264,8 @@ def main():
     offline = dict(env, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     for mode in ("bf16", "8bit"):
         print(f"[spike] generating ({mode}) with the network blocked, several minutes...", flush=True)
-        command = [venv_python(), __file__, sample, "--child", mode, "--sha", download["port_sha"]]
+        command = [venv_python(), __file__, sample, "--child", mode, "--sha", download["port_sha"],
+                   "--codec-sha", download["codec_sha"]]
         if args.transcript:
             command += ["--transcript", args.transcript]
         code, log = run(command, offline)
