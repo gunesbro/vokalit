@@ -831,3 +831,26 @@ def test_higgs_needs_a_transcript(api, tmp_workspace, monkeypatch, tmp_path):
     _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{line['id']}/generate", {"models": ["higgs"]})
     done = _wait(api, job["id"])
     assert done["state"] == "failed" and "Higgs TTS 3: This sample has no transcript" in done["error"]
+
+
+def test_higgs_line_without_words_is_empty(api, monkeypatch):
+    calls = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        calls.append(text)
+        make_wav(out, 1)
+        return 0.5
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    sid, lid, _ = _session_with_line(api, "[anger] [pause]")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["higgs"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Line 1 is empty without its sound tags" in done["error"] and not calls
+    api("PATCH", f"/api/sessions/{sid}/lines/{lid}", {"text": "[laughter]"})  # a sound alone is spoken ("Haha")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["higgs"]})
+    assert _wait(api, job["id"])["state"] == "done" and calls == ["<|sfx:laughter|>Haha"]
+
+
+def test_higgs_install_shows_the_required_credit():
+    assert "Boson AI's Higgs Audio" in models.MODELS["higgs"]["license"]

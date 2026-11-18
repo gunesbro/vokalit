@@ -46,14 +46,15 @@ class _Higgs:
         return self
 
     def generate_speech(self, text, tokenizer, *, reference_audio=None, reference_sample_rate=None, reference_text=None,
-                        temperature=1.0, top_p=None, **kwargs):
+                        temperature=1.0, top_p=None, max_new_tokens=2048, **kwargs):
         if text == "CRASH":
             raise RuntimeError("CUDA error: device-side assert triggered")
         if text == "OOM":
             raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
         return _Text(f"text={text}|reference_audio={reference_audio}|reference_sample_rate={reference_sample_rate}"
                      f"|reference_text={reference_text}|temperature={temperature}|top_p={top_p}"
-                     f"|precision={self.precision}|codec={self._audio_codec}|seed={torch.last_seed}")
+                     f"|precision={self.precision}|codec={self._audio_codec}|max_new_tokens={max_new_tokens}"
+                     f"|seed={torch.last_seed}")
 
 
 class AutoModelForCausalLM:

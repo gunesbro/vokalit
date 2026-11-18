@@ -9,6 +9,7 @@ Tags arrive already in Higgs's syntax (<|emotion:anger|>, <|sfx:cough|>Ahem, ...
 """
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -17,6 +18,14 @@ PORT, PORT_REVISION = os.environ.get("HIGGS_PORT"), os.environ.get("HIGGS_PORT_R
 CODEC, CODEC_REVISION = os.environ.get("HIGGS_CODEC"), os.environ.get("HIGGS_CODEC_REVISION")
 BF16_NEEDS_GB = 10.7  # measured peak 9.66 GB at bf16, plus room; with less free memory it loads in 8-bit
 TOP_P = 0.95
+FRAMES_PER_SECOND = 25  # the codec's frame rate; max_new_tokens counts frames
+
+
+def max_frames(text):
+    """A length limit from the words (slow speech is about 8 characters a second, plus 6 s for sounds and pauses), so
+    a take cannot run on for a minute; at most the model's default of 2048 frames (about 80 s)."""
+    words = re.sub(r"<\|[^|]*\|>", "", text).strip()
+    return min(2048, int(FRAMES_PER_SECOND * (len(words) / 8 + 6)))
 
 
 def block_network():
@@ -104,7 +113,8 @@ def main():
                                  reference_text=request.get("ref_text"))
             # The line's language is not passed: Higgs reads it from the text.
             wav = model.generate_speech(request["text"], tokenizer, **reference,
-                                        temperature=request.get("settings", {}).get("temperature", 0.7), top_p=TOP_P)
+                                        temperature=request.get("settings", {}).get("temperature", 0.7), top_p=TOP_P,
+                                        max_new_tokens=max_frames(request["text"]))
             audio = wav.float().cpu().numpy().reshape(-1).clip(-1, 1)
             sf.write(request["out"], audio, model.config.sample_rate, subtype="PCM_16")
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1),

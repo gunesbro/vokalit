@@ -184,7 +184,7 @@ def _generate_line(session_id, line_id, model_names, seed):
                           "screen or install Whisper.")
             continue
         text = models.text_for(name, line["text"])
-        if not text:  # only sound tags, which this model does not perform
+        if not models.has_words(text):  # only tags: sounds it does not perform, or Higgs's emotions with no words
             number = next(i for i, l in enumerate(session["lines"], 1) if l["id"] == line_id)
             errors.append(f"{models.MODELS[name]['title']}: Line {number} is empty without its sound tags.")
             continue

@@ -162,7 +162,7 @@ MODELS = {
         "url": "https://huggingface.co/bosonai/higgs-tts-3-4b",
         # measured on Windows: 7.8 GB environment (PyTorch shared with other models) + 10.1 GB model and codec
         "disk_gb": 17.9,
-        "license": "Non-commercial; creator content allowed with credit (see README)",
+        "license": "Non-commercial; monetized creator content allowed with the credit \u201cBoson AI's Higgs Audio\u201d",
         "supports_convert": False,
         "needs_transcript": True,  # cloning is much better with what the sample says
         # Measured on an RTX 4070 SUPER (Windows): 8-bit 6.1 GB peak (used when less than 10.7 GB is free), bf16
@@ -193,6 +193,12 @@ def text_for(name, text):
     sounds = MODELS[name].get("sounds") or {}
     converted = _TAG.sub(lambda m: f" {sounds[m.group(1)]} " if m.group(1) in sounds else " ", text)
     return re.sub(r"[ \t]+", " ", converted).strip() if converted != text else text
+
+
+def has_words(text):
+    """Whether a model's text (after text_for) has something to say besides control tags like Higgs's
+    <|emotion:anger|>. A sound effect counts: it is followed by its sound ("Haha")."""
+    return bool(re.sub(r"<\|[^|]*\|>", " ", text).strip())
 
 
 # Components that are not voice models. Whisper writes down what a voice sample says; some models need that.

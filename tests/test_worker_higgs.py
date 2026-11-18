@@ -94,3 +94,11 @@ def test_higgs_performs_every_higgs_tag_and_no_omnivoice_question():
 def test_higgs_languages_have_names():
     assert models.MODELS["higgs"]["languages"] == LANGUAGES
     assert all(code in models.LANGUAGE_NAMES for code in LANGUAGES)
+
+
+def test_length_is_capped_by_the_text(installed):
+    _, local = installed
+    short = _generate(local, "short", "[anger] Merhaba.")
+    assert "max_new_tokens=175|" in short  # 25 frames/s for (8 characters / 8 per second + 6 s)
+    long = _generate(local, "long", "a" * 2000)
+    assert "max_new_tokens=2048|" in long
