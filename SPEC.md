@@ -26,7 +26,7 @@ file. Everything is done by clicking in a desktop window.
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
     generation settings at three levels (model defaults → session → line); voice conversion ("Perform this line");
     export of the selected takes to one file (WAV always; FLAC, MP3 and OGG Vorbis when the computer's libsndfile can
-    write them). Export is enabled once every line has a take. A line's menu exports only its selected take,
+    write them). Export is enabled once every line has a take. An open line's export button (and its menu) exports only its selected take,
     without its pause, as `<session>-line-<n>-<time>.<fmt>`. Takes at a lower sample rate are converted to the
     highest one among the lines (linear interpolation), since VoxCPM2 writes 48 kHz and the others 24 kHz.
   - Settings are sliders (`min`, `max`, `step`) or, with `"type": "text"`, a text box (`max_length`, `placeholder`,
@@ -140,8 +140,10 @@ user presses "Install" and confirms, to download packages and model weights.
 **App process:**
 
 - Binds to `127.0.0.1` only; `HF_HUB_DISABLE_TELEMETRY=1`.
-- The window does not run in private mode so the microphone permission is remembered; its data is kept in
-  `.local/webview/`.
+- The window does not run in private mode; its data is kept in `.local/webview/`. The server's port changes every
+  launch, so the window's own memory of the microphone answer does not last: the page reports the answer
+  (`POST /api/microphone`), "allowed" is kept as `.local/webview/microphone-allowed`, and on Windows the window then
+  grants the microphone to Vokalit's own page without asking. After a block the flag is removed and it asks again.
 - Samples, takes, recordings and exports are stored **unencrypted** in `workspace/` until the user deletes them.
   Temporary uploads go to `workspace/.tmp/`, which is cleared at start and exit.
 

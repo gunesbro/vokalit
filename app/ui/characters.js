@@ -1,5 +1,5 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
-import { api, editableTitle, el, icon, ICONS, revealButton, setMessage } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, rememberMicrophone, revealButton, setMessage } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
 import { searchSelect } from "./settings.js";
 import { player, rangeEditor, stopAudio } from "./waveform.js";
@@ -324,7 +324,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       if (recorder) return stopRecording();
       review.replaceChildren();
       try {
-        recorder = await record(mic.value);
+        recorder = await record(mic.value, rememberMicrophone);
       } catch (error) {
         recorder = null;
         return setMessage(message, `Cannot use the microphone: ${error.message}`, "error");

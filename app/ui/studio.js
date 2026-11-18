@@ -1,5 +1,5 @@
 // Studio screen: sessions, cast, script lines with takes, generation, export.
-import { api, editableTitle, el, icon, ICONS, revealButton, setMessage, waitForJob } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, rememberMicrophone, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { soundEditor, soundText } from "./editor.js";
@@ -10,6 +10,7 @@ import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
 const ICON_SCISSORS = ["M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M20 4L8.1 15.9",
   "M14.5 14.5L20 20", "M8.1 8.1L12 12"];
+const ICON_EXPORT = ["M12 4v11", "M7.5 10.5L12 15l4.5-4.5", "M5 19h14"];
 const ICON_PREV = ["M18 6l-8 6 8 6z", "M6 6v12"];
 const ICON_NEXT = ["M6 6l8 6-8 6z", "M18 6v12"];
 const ICON_SLIDERS = ["M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4"];
@@ -732,6 +733,11 @@ export async function renderStudio(root) {
     const usable = picker.get().filter(speaks);
     const count = usable.length;
     const busy = generating.has(line.id);
+    const exportLineButton = el("button", { class: "btn btn-ghost icon-btn", "aria-label": `Export line ${i + 1}`,
+      disabled: !line.selected || exporting,
+      title: line.selected ? "Export this line\u2019s selected take (WAV, or a FLAC, MP3 or OGG copy)" : "Generate a take first." },
+    icon(ICON_EXPORT, 16));
+    exportLineButton.onclick = () => popover(exportLineButton, exportPanel(line, i), { align: "right" });
     const deleteButton = el("button", { class: "btn btn-ghost icon-btn", "aria-label": `Delete line ${i + 1}`, title: "Delete line" },
       icon(ICONS.trash));
     deleteButton.onclick = () => confirmDeleteLine(deleteButton, line, i);
@@ -792,6 +798,7 @@ export async function renderStudio(root) {
         languageSelect(picker.get(), line.language, (code) => patch({ language: code }), session.language, true)),
       el("label", { class: "row field", title: "Silence after this line in the export, in seconds." }, "Pause", pause, "s"),
       el("div", { class: "spacer" }),
+      el("div", { class: "pop-holder" }, exportLineButton),
       el("div", { class: "pop-holder" }, deleteButton),
       el("button", { class: "btn btn-ghost icon-btn close-details", "aria-label": "Close details", title: "Close (Esc)", onclick: close },
         icon(ICON_CLOSE, 16)));
@@ -1066,7 +1073,7 @@ export async function renderStudio(root) {
     button.onclick = async () => {
       if (performing && !ownRecording()) return setMessage(message, "Another line is being recorded. Stop it first.", "warn");
       if (!performing) {
-        try { performing = { line: line.id, recorder: await record(mic.value) }; } catch (error) {
+        try { performing = { line: line.id, recorder: await record(mic.value, rememberMicrophone) }; } catch (error) {
           return setMessage(message, `Cannot use the microphone: ${error.message}`, "error");
         }
         fill();

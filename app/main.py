@@ -47,6 +47,39 @@ def _windows_window_icon(window):
         print(f"Could not set the window icon: {error}")
 
 
+_handlers = []  # .NET event handlers stay referenced for the window's lifetime
+
+
+def _windows_microphone(window, url):
+    """The server's port, and so the page's address, changes every launch, so the window would ask for the
+    microphone every time. Once the user has allowed it (server.microphone_allowed), it is granted to Vokalit's own
+    page without asking; until then, and after a block, the window asks as usual. An error here only means the
+    window asks again, so it is caught."""
+    if _handlers:  # "loaded" fires after every page load; hook once
+        return
+
+    def hook():
+        try:
+            from Microsoft.Web.WebView2.Core import CoreWebView2PermissionKind, CoreWebView2PermissionState
+
+            def requested(sender, args):
+                if (args.PermissionKind == CoreWebView2PermissionKind.Microphone and str(args.Uri).startswith(url)
+                        and server.microphone_allowed()):
+                    args.State = CoreWebView2PermissionState.Allow
+
+            window.native.browser.webview.CoreWebView2.PermissionRequested += requested
+            _handlers.append(requested)
+        except Exception as error:
+            print(f"Could not remember the microphone permission: {error}")
+
+    try:
+        from System import Action
+
+        window.native.Invoke(Action(hook))
+    except Exception as error:
+        print(f"Could not remember the microphone permission: {error}")
+
+
 def main():
     shutil.rmtree(workspace.workspace_root() / ".tmp", ignore_errors=True)  # leftovers from a crash
     models.delete_removed()
@@ -59,7 +92,8 @@ def main():
                                    background_color="#111214")
     if sys.platform == "win32":
         window.events.shown += lambda: _windows_window_icon(window)
-    # Not private mode, so the microphone permission is remembered between launches.
+        window.events.loaded += lambda: _windows_microphone(window, url)
+    # Not private mode: the window keeps its data (and the remembered microphone answer, see _windows_microphone).
     options = {"private_mode": False, "storage_path": WEBVIEW_DIR}
     if sys.platform != "win32":
         # Linux (GTK/Qt) takes a PNG. On Windows, pywebview would load it with System.Drawing.Icon, which refuses

@@ -798,3 +798,12 @@ def test_line_text_override_equal_to_session_is_not_stored(api, text_setting):
     status, _, _ = api("PUT", f"/api/sessions/{sid}/lines/{lid}/settings/chatterbox", {"style": "(sad)"})
     assert status == 200
     assert "chatterbox" not in ws.load_session(sid)["lines"][0]["settings"]
+
+
+def test_microphone_permission_is_remembered(api, tmp_path, monkeypatch):
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path / "local"))
+    assert server.microphone_allowed() is False
+    assert api("POST", "/api/microphone", {"allowed": True})[0] == 200
+    assert server.microphone_allowed() is True
+    assert api("POST", "/api/microphone", {"allowed": False})[0] == 200  # blocked: ask again next time
+    assert server.microphone_allowed() is False

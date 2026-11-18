@@ -73,11 +73,19 @@ export async function microphones() {
 }
 
 // Starts recording. Returns { stop(): Promise<{samples, sampleRate}>, seconds(): number, level(): number }.
-export async function record(deviceId) {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: false, noiseSuppression: false,
-      autoGainControl: false },
-  });
+// onPermission(allowed) gets the answer to the microphone prompt, so the app can remember it.
+export async function record(deviceId, onPermission = () => {}) {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { deviceId: deviceId ? { exact: deviceId } : undefined, echoCancellation: false, noiseSuppression: false,
+        autoGainControl: false },
+    });
+  } catch (error) {
+    if (error.name === "NotAllowedError") onPermission(false);
+    throw error;
+  }
+  onPermission(true);
   const context = new AudioContext();
   await context.audioWorklet.addModule("/ui/recorder-worklet.js");
   const source = context.createMediaStreamSource(stream);

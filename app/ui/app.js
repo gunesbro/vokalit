@@ -22,6 +22,9 @@ export async function api(method, path, body) {
 }
 
 // Polls a background job until it ends. onUpdate gets the job each time.
+// Tells the app the answer to the microphone prompt: allowed is not asked again, blocked is asked next time.
+export const rememberMicrophone = (allowed) => api("POST", "/api/microphone", { allowed }).catch(() => {});
+
 export async function waitForJob(id, onUpdate = () => {}) {
   for (;;) {
     const job = await api("GET", `/api/jobs/${id}`);

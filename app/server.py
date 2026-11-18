@@ -740,6 +740,28 @@ def stop_generation(req, sid):
     return {}
 
 
+def _microphone_flag():
+    return Path(models.LOCAL) / "webview" / "microphone-allowed"
+
+
+def microphone_allowed():
+    """Whether the user allowed the microphone before. The window then grants it without asking again (main.py);
+    the server's port, and so the page's address, changes every launch, so the window's own memory does not help."""
+    return _microphone_flag().exists()
+
+
+@route("POST", "/api/microphone")
+def remember_microphone(req):
+    """The page reports the answer to the microphone prompt: allowed is remembered, blocked asks again next time."""
+    flag = _microphone_flag()
+    if req["json"].get("allowed") is True:
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        flag.touch()
+    else:
+        flag.unlink(missing_ok=True)
+    return {}
+
+
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/export")
 def export_session(req, sid):
     fmt, line = req["json"].get("format", "wav"), req["json"].get("line")  # line: export only that line
