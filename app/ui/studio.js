@@ -1027,7 +1027,8 @@ export async function renderStudio(root) {
   function perform(line) {
     const status = el("div", { class: "muted small grow" }, "Ready to record");
     const meter = el("div", { class: "meter" }, el("div"));
-    const mic = el("select", { class: "select select-small", "aria-label": "Microphone" });
+    const mic = el("select", { class: "select select-small", "aria-label": "Microphone",
+      onchange: () => { mic.title = mic.selectedOptions[0]?.textContent || ""; } });
     const button = el("button", { class: "record-round", "aria-label": "Record",
       title: "Record yourself reading the line; it is converted to this character's voice as a new take." }, el("span", { class: "rec-dot" }));
     const fileInput = el("input", { type: "file", accept: "audio/*", class: "sr-only", onchange: async () => {
@@ -1058,6 +1059,7 @@ export async function renderStudio(root) {
       mic.replaceChildren(...devices.map((d, n) => el("option", { value: d.deviceId }, d.label || `Microphone ${n + 1}`)));
       if (!devices.length) mic.append(el("option", { value: "" }, "Default microphone"));
       if (devices.some((d) => d.deviceId === current)) mic.value = current;
+      mic.title = mic.selectedOptions[0]?.textContent || "";  // the full name when it is cut off
     }).catch(() => {});
     button.onclick = async () => {
       if (performing && !ownRecording()) return setMessage(message, "Another line is being recorded. Stop it first.", "warn");
@@ -1093,7 +1095,7 @@ export async function renderStudio(root) {
       el("div", { class: "muted small" }, `Record it with your own delivery; it becomes a take in ${name}’s voice.`),
       el("div", { class: "row perform-controls" }, button, status, meter,
         el("button", { class: "btn btn-small", onclick: () => fileInput.click() }, "Upload"), fileInput),
-      el("label", { class: "row faint small" }, "Microphone", mic));
+      el("label", { class: "row faint small mic-field" }, "Microphone", mic));
   }
 
   // --- Generation and export -----------------------------------------------------------------

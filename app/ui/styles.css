@@ -291,6 +291,10 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .take-info .row { gap: 6px; }
 .perform { padding: 12px 16px 16px; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
 .perform-controls { gap: 10px; }
+/* Microphone names can be very long: the box shrinks to fit and cuts the name off (full name on hover) */
+.mic-field { min-width: 0; max-width: 100%; }
+.mic-field .select { flex: 1 1 auto; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.add-sample .mic-field { max-width: 360px; }
 .record-round { width: 36px; height: 36px; flex: none; border-radius: 50%; border: 1px solid var(--border); background: transparent;
   display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .record-round.on { border-color: var(--record); }

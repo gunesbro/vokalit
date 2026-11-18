@@ -286,7 +286,8 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
   }
 
   function addSample() {
-    const mic = el("select", { class: "select", "aria-label": "Microphone" });
+    const mic = el("select", { class: "select", "aria-label": "Microphone",
+      onchange: () => { mic.title = mic.selectedOptions[0]?.textContent || ""; } });
     const fileInput = el("input", { type: "file", accept: "audio/*", class: "sr-only", onchange: () => upload(fileInput.files[0]) });
     const recordButton = el("button", { class: "btn record-btn", onclick: toggleRecord }, el("span", { class: "rec-dot" }), "Record");
     const timer = el("span", { class: "num timer" }, "0:00");
@@ -296,7 +297,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     const box = el("div", { class: "add-sample" },
       el("h3", {}, "Add a sample"),
       el("div", { class: "row wrap" },
-        el("label", { class: "row muted" }, "Microphone", mic),
+        el("label", { class: "row muted mic-field" }, "Microphone", mic),
         recordButton, timer, meter,
         el("div", { class: "spacer" }),
         el("button", { class: "btn", onclick: () => fileInput.click() }, "Upload file"), fileInput),
@@ -313,6 +314,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
         mic.replaceChildren(...devices.map((d, i) => el("option", { value: d.deviceId }, d.label || `Microphone ${i + 1}`)));
         if (!devices.length) mic.append(el("option", { value: "" }, "Default microphone"));
         if (devices.some((d) => d.deviceId === current)) mic.value = current;
+        mic.title = mic.selectedOptions[0]?.textContent || "";  // the full name when it is cut off
       } catch {
         mic.replaceChildren(el("option", { value: "" }, "Default microphone"));
       }
