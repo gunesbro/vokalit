@@ -10,12 +10,13 @@ Your voice, your text and the generated audio never leave your machine.
 
 - **Studio** — sessions with a cast of characters and a script. Generate one or more takes per line, pick the best,
   trim it, listen to the whole script with *Play all*, and export it as one file (WAV, FLAC, MP3 or OGG). Lines made
-  by different models are joined at the highest sample rate among them. A single line can be exported too, in any of these
-  formats: the export button at the top of an open line, or *Export this line* in a line's menu.
+  by different models are joined at the highest sample rate among them. A single line can be exported too: the export
+  button at the top of an open line, or *Export this line* in a line's menu.
 - **Characters** — a library of reusable voices. Each character can have several samples (e.g. *calm*, *excited*, or
   one per language), recorded in the app or uploaded, and trimmed before saving.
 - **Models** — install and remove open models with one click. Size, GPU memory, location and license are shown
-  before anything is downloaded, and *Remove* frees all of it.
+  before anything is downloaded, and *Remove* frees all of it. The screen also shows which models are loaded on the
+  GPU right now, with an *Unload* button.
 - **Generation settings** — per model, at three levels: model defaults → session → line. A seed makes a take
   reproducible. VoxCPM2 also takes a *Style*: a few words on how the line is said (type them or pick Happy, Sad,
   Calm, …). A take in progress can be cancelled (*Cancel* next to it, or *Stop* for Generate missing); the model then
@@ -25,8 +26,8 @@ Your voice, your text and the generated audio never leave your machine.
   language among OmniVoice's 646.
 - **Tags** — sounds (laughter, sighs, …), emotions, styles and delivery (speed, pitch, pauses) as chips inside a
   line's text (*Add tag*, or type `[`; × removes one). Each model gets them in its own syntax; models that cannot
-  perform a tag get the text without it, and the menus say which model performs which. OmniVoice performs its sounds,
-  more clearly with a higher Quality.
+  perform a tag get the text without it, and the menus say which model performs which. Higgs TTS 3 performs
+  emotions, styles, delivery and sounds; OmniVoice performs its sounds, more clearly with a higher Quality.
 - **Transcripts** — every sample keeps what is said in it, which some models use to copy the voice. The optional
   Whisper component writes it for you (and detects the language); otherwise you type it.
 
@@ -41,7 +42,7 @@ to compare, trim and pick; and *Perform this line* to convert your own recording
 
 ![Characters with samples](docs/images/characters.png)
 
-**Models** — install and remove models; size and license are shown first.
+**Models** — install and remove models; size, GPU memory and license are shown first.
 
 ![Models](docs/images/models.png)
 
@@ -77,9 +78,10 @@ version.
 ## Requirements
 
 - **NVIDIA GPU** with an up-to-date driver that supports CUDA 12.8. RTX 20 series or newer is a safe choice; RTX 50
-  series is supported. Video memory: Chatterbox about 4 GB, OmniVoice about 2.7 GB, VoxCPM2 about 8.4 GB, Higgs TTS 3 about
-  6.1 GB in 8-bit or 9.7 GB in full precision (it picks full precision when there is room, and the Models screen
-  says which and why). Models left unused for 5 minutes are unloaded, and others are unloaded when one needs room.
+  series is supported. Video memory: Chatterbox about 4 GB, OmniVoice about 2.7 GB, VoxCPM2 about 8.4 GB, Higgs TTS 3
+  about 6.1 GB in 8-bit or 9.7 GB in full precision (it picks full precision when there is room, and the Models
+  screen says which and why). Models left unused for 5 minutes are unloaded, and others are unloaded when one needs
+  room.
 - **Windows 10/11** (tested) or **Linux** (less tested).
 - An internet connection only while installing. Nothing else needs to be installed beforehand: Vokalit downloads its
   own Python and packages into its folder, and the models are installed later from inside the app.
@@ -117,6 +119,10 @@ Vokalit is built so that your voice cannot leave your computer.
   install.
 - **The window talks only to the app on your computer** (`127.0.0.1`, a random port, a per-run token). The page loads
   nothing from the internet.
+- **The microphone** is used only while you record. The window asks once; after you allow it, it is not asked again
+  (if you block it, it asks again on the next start).
+- **Higgs TTS 3 runs code that comes with its download** (a community transformers packaging of Boson AI's weights).
+  It is pinned to one version, so it cannot change after you install it, and it runs offline like the other models.
 - **Check it yourself:** after installing a model, disconnect from the internet and keep working — everything works.
   While generating, Windows Resource Monitor (Network tab) or `ss -tnp` on Linux shows no connection other than
   `127.0.0.1`.
@@ -151,6 +157,13 @@ Use the folder button next to a sample, take or export to show it in File Explor
 - **"The GPU stopped with an internal error":** a CUDA error stopped the model, so it was restarted automatically.
   Try again; if it repeats with the same settings, lower *Variation* or *Expressiveness*, or use another seed.
 - **Long lines get cut off or drift:** models work best with a sentence or two per line. Use *Split into N lines*.
+- **A take takes a long time:** press *Cancel* next to it (or *Stop* for Generate missing). Higgs TTS 3 in 8-bit
+  needs about 4 seconds per second of speech; the Models screen says whether it runs in 8-bit and why. Close other
+  programs that use the GPU and *Unload* it, and it loads in full precision (about three times faster) when there is
+  room.
+- **"Not enough GPU memory":** the model did not fit even after the others were unloaded, often because another line
+  is generating with a different model at the same time. Generate with one model at a time, or close other programs
+  that use the GPU.
 - **An accent from another language:** use a sample in the line's language, or *Reduce accent* in the line.
 - **Linux: the window does not open:** the Qt web engine may need system libraries; the console names the missing
   one. Install it with your package manager.
