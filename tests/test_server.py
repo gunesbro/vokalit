@@ -925,3 +925,25 @@ def test_cancel_kills_only_the_jobs_own_request(monkeypatch):
     assert models.cancel("chatterbox", "job-b") is False and killed == []
     assert models.cancel("chatterbox", "job-a") is True and killed == ["job-a"]
     assert "chatterbox" not in models._workers
+
+
+def test_remove_waits_while_the_model_generates(api, monkeypatch):
+    import threading
+    import time
+    removed = []
+
+    class Loaded:
+        lock = threading.Lock()
+        last_used = time.monotonic()
+        vram_gb = None
+        mode = None
+
+    monkeypatch.setattr(models, "remove", lambda name, maintain=True: removed.append(name))
+    worker = Loaded()
+    monkeypatch.setitem(models._workers, "omnivoice", worker)
+    with worker.lock:
+        status, body, _ = api("POST", "/api/models/omnivoice/remove")
+    assert status == 400 and "generating" in body["error"] and removed == []
+    models._workers.pop("omnivoice", None)
+    status, _, _ = api("POST", "/api/models/omnivoice/remove")
+    assert status == 200 and removed == ["omnivoice"]

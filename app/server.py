@@ -413,6 +413,9 @@ def cancel_model(req, name):
 @route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/remove")
 def remove_model(req, name):
     _check_component(name)
+    if models.runtime(name).get("busy"):  # removing would kill the take in progress
+        raise ws.WorkspaceError(f"{models.spec(name)['title']} is generating. Wait for it to finish or cancel it, "
+                                "then remove it.")
     models.remove(name)
     return _component_view(name)
 

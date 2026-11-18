@@ -861,13 +861,14 @@ export async function renderStudio(root) {
       box.hidden = value.length <= LONG_LINE;
       if (box.hidden) return box.replaceChildren();
       const parts = splitSentences(value, SPLIT_SIZE);
-      box.replaceChildren(
+      box.replaceChildren(...[
         el("span", { class: "warn" }, `This line is long (${value.length} characters). Models work best with a sentence or two; `
           + "very long lines can be cut off or drift."),
         parts.length > 1 && el("button", { class: "btn btn-small", onclick: async () => {
           await pendingText[line.id]?.();
           splitLine(line, splitSentences(textBox.value, SPLIT_SIZE));
-        } }, `Split into ${parts.length} lines`));
+        } }, `Split into ${parts.length} lines`),
+      ].filter(Boolean)); // replaceChildren would show false as the text "false"
     };
     textBox.addEventListener("input", update);
     update();

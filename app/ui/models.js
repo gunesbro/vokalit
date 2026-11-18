@@ -77,13 +77,14 @@ export async function renderModels(root) {
     busyName = installing || Object.keys(installs)[0] || null;
     // Sizes are measured in the background after an install or remove: look again until they are known.
     if (items.some((c) => c.installed && c.frees_gb == null)) setTimeout(() => root.isConnected && refresh(), 3000);
-    body.replaceChildren(
+    body.replaceChildren(...[
       el("div", { class: "table-head" }, el("div", {}, "Component"), el("div", {}, "Status"), el("div", {}, "License"), el("div")),
       ...items.map(row),
       total ? el("div", { class: "row total-line" }, el("span", { class: "muted" }, "All components"),
         el("span", { class: "num" }, `${total} GB`, sharedNote(items, total))) : null,
       el("p", { class: "muted small" },
-        "Sizes are measured on Windows and can differ slightly. The model name links to its page, which lists supported languages."));
+        "Sizes are measured on Windows and can differ slightly. The model name links to its page, which lists supported languages."),
+    ].filter(Boolean)); // replaceChildren would show a null as the text "null"
   }
 
   // What no single row frees: files several components use (PyTorch and common libraries), stored once.
@@ -210,12 +211,13 @@ export async function renderModels(root) {
     const where = model.kind === "tool" ? "In memory" : "On GPU";
     const parts = [where, r.vram_gb ? `${r.vram_gb.toFixed(1)} GB` : null, r.mode?.label,
       r.busy ? "generating" : `unloads in ${Math.max(1, Math.ceil(r.unloads_in / 60))} min`].filter(Boolean);
-    box.replaceChildren(el("span", { class: "loaded" }, `\u25cf ${parts.join(" \u00b7 ")}`),
+    // replaceChildren would show a null as the text "null": leave out what is not there
+    box.replaceChildren(...[el("span", { class: "loaded" }, `\u25cf ${parts.join(" \u00b7 ")}`),
       r.busy ? null : el("button", { class: "btn btn-ghost btn-small", title: "Free its memory now; the next take loads it again",
         onclick: () => api("POST", `/api/models/${model.name}/unload`).then((view) => paintRuntime(box, view),
           (error) => setMessage(message, error.message, "error")) }, "Unload"),
       // Why it runs this way (Higgs: full precision or 8-bit), on its own line
-      r.mode?.reason ? el("div", { class: "faint runtime-reason" }, r.mode.reason) : null);
+      r.mode?.reason ? el("div", { class: "faint runtime-reason" }, r.mode.reason) : null].filter(Boolean));
   }
 
   // Loaded models change on their own (a take loads one, idle ones unload): look every few seconds and repaint only
