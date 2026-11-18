@@ -21,7 +21,27 @@ const TAG_LABELS = {
   "question-ah": "Question \u201cah?\u201d", "question-oh": "Question \u201coh?\u201d", "question-ei": "Question \u201cei?\u201d",
   "question-yi": "Question \u201cyi?\u201d", "surprise-ah": "Surprise \u201cah!\u201d", "surprise-oh": "Surprise \u201coh!\u201d",
   "surprise-wa": "Surprise \u201cwa!\u201d", "surprise-yo": "Surprise \u201cyo!\u201d", "dissatisfaction-hnn": "Dissatisfied \u201chnn\u201d",
+  cough: "Cough", crying: "Crying", screaming: "Scream", burping: "Burp", humming: "Humming", sniff: "Sniff", sneeze: "Sneeze",
+  elation: "Elation", amusement: "Amusement", enthusiasm: "Enthusiasm", determination: "Determination", pride: "Pride",
+  contentment: "Contentment", affection: "Affection", relief: "Relief", contemplation: "Contemplation",
+  confusion: "Confusion", surprise: "Surprise", awe: "Awe", longing: "Longing", arousal: "Excited (arousal)",
+  anger: "Anger", fear: "Fear", disgust: "Disgust", bitterness: "Bitterness", sadness: "Sadness", shame: "Shame",
+  helplessness: "Helplessness", singing: "Singing", shouting: "Shouting", whispering: "Whispering",
+  "speed-very-slow": "Very slow", "speed-slow": "Slow", "speed-fast": "Fast", "speed-very-fast": "Very fast",
+  "pitch-low": "Lower pitch", "pitch-high": "Higher pitch", pause: "Pause", "long-pause": "Long pause",
+  "expressive-high": "More expressive", "expressive-low": "Less expressive",
 };
+// Tags by kind, for the Add tag menu, the "[" suggestions and the hint; every other tag is a sound.
+const TAG_GROUP_ORDER = ["Sounds", "Emotions", "Styles", "Delivery"];
+const TAG_GROUPS = Object.fromEntries([
+  ...["elation", "amusement", "enthusiasm", "determination", "pride", "contentment", "affection", "relief", "contemplation",
+    "confusion", "surprise", "awe", "longing", "arousal", "anger", "fear", "disgust", "bitterness", "sadness", "shame",
+    "helplessness"].map((t) => [t, "Emotions"]),
+  ...["singing", "shouting", "whispering"].map((t) => [t, "Styles"]),
+  ...["speed-very-slow", "speed-slow", "speed-fast", "speed-very-fast", "pitch-low", "pitch-high", "pause", "long-pause",
+    "expressive-high", "expressive-low"].map((t) => [t, "Delivery"]),
+]);
+const tagGroup = (tag) => TAG_GROUPS[tag] || "Sounds";
 
 // Lines longer than this get a note and a "Split" action: models work best with sentence-sized lines.
 const LONG_LINE = 300;
@@ -94,10 +114,11 @@ export async function renderStudio(root) {
   const modelInfo = (name) => models.find((m) => m.name === name);
   // Every sound tag some model performs: shown as chips wherever a line's text is shown.
   const soundTags = () => [...new Set(models.flatMap((m) => m.tags || []))];
-  // Sounds to offer (installed models), each with the models that perform it: [{ tag, label, note }].
+  // Tags to offer (installed models), grouped, each with the models that perform it: [{ tag, label, group, note }].
   const soundChoices = () => [...new Set(installed().flatMap((m) => m.tags || []))].map((tag) => ({
-    tag, label: TAG_LABELS[tag] || tag,
-    note: installed().filter((m) => m.tags?.includes(tag)).map((m) => m.title.split(" ")[0]).join(", ") }));
+    tag, label: TAG_LABELS[tag] || tag, group: tagGroup(tag),
+    note: installed().filter((m) => m.tags?.includes(tag)).map((m) => m.title.split(" ")[0]).join(", ") }))
+    .sort((a, b) => TAG_GROUP_ORDER.indexOf(a.group) - TAG_GROUP_ORDER.indexOf(b.group));
   const defaults = (name) => Object.fromEntries((modelInfo(name)?.settings || []).map((s) => [s.key, s.default]));
   const sessionValues = (name) => ({ ...defaults(name), ...(session.settings[name] || {}) });
   const languageName = (code) =>
@@ -767,24 +788,29 @@ export async function renderStudio(root) {
     function soundButton(field, save) {
       const tags = [...new Set(installed().flatMap((m) => m.tags || []))];
       if (!tags.length) return null;
-      const button = el("button", { class: "btn btn-small sound-btn", title: "Insert a sound at the cursor. Models that cannot perform sounds skip them." },
-        icon(["M12 5v14", "M5 12h14"], 12), "Add sound");
-      button.onclick = () => popover(button, el("div", { class: "menu" }, ...soundChoices().map((s) => el("button", {
-        class: "menu-item suggest-item", onclick: () => {
+      const button = el("button", { class: "btn btn-small sound-btn", title: "Insert a sound, emotion, style or delivery tag at the cursor. Models that cannot perform a tag skip it." },
+        icon(["M12 5v14", "M5 12h14"], 12), "Add tag");
+      button.onclick = () => popover(button, el("div", { class: "menu tag-menu" }, ...soundChoices().flatMap((s, n, all) => [
+        n === 0 || s.group !== all[n - 1].group ? el("div", { class: "faint small suggest-head" }, s.group) : null,
+        el("button", { class: "menu-item suggest-item", onclick: () => {
           document.querySelector(".popover")?.dispatchEvent(new Event("close"));
           field.insertSound(s.tag);
           save();
-        } }, el("span", {}, s.label), el("span", { class: "faint small" }, s.note)))));
-      const names = (list) => list.map((m) => m.title.split(" ")[0]).join(", ");
+        } }, el("span", {}, s.label), el("span", { class: "faint small" }, s.note))])));
+      // "Higgs performs emotions, styles, delivery and sounds; OmniVoice performs sounds; Chatterbox skips them."
+      const name = (m) => m.title.split(" ")[0];
+      const kinds = (m) => TAG_GROUP_ORDER.slice(1).concat("Sounds")
+        .filter((g) => (m.tags || []).some((t) => tagGroup(t) === g)).map((g) => g.toLowerCase());
+      const list = (words) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words[0]);
       const performers = installed().filter((m) => m.tags?.length);
       const skippers = installed().filter((m) => !m.tags?.length);
       return el("div", { class: "row sound-tools" }, el("div", { class: "pop-holder" }, button),
-        el("span", { class: "faint small" }, "or type [laughter], [sigh]\u2026 in the text. ",
-          `${names(performers)} ${performers.length === 1 ? "performs" : "perform"} them`
-          + (skippers.length ? `; ${names(skippers)} ${skippers.length === 1 ? "skips" : "skip"} them` : "")
-          + ". OmniVoice: clearer with a higher Quality."));
+        el("span", { class: "faint small" }, "or type [ in the text to pick one. ",
+          performers.map((m) => `${name(m)} performs ${list(kinds(m))}`).join("; ")
+          + (skippers.length ? `; ${skippers.map(name).join(", ")} ${skippers.length === 1 ? "skips" : "skip"} them` : "")
+          + (performers.some((m) => m.name === "omnivoice") ? ". OmniVoice: clearer with a higher Quality." : ".")));
     }
-    const counter = el("span", { class: "faint small num" }, `${line.text.length} characters`);
+    const counter = el("span", { class: "faint small num nowrap" }, `${line.text.length} characters`);
     text.addEventListener("input", () => { counter.textContent = `${text.value.length} characters`; });
     const head = el("div", { class: "detail-head", title: "Click an empty spot to close" },
       handle(line),

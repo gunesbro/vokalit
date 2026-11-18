@@ -18,3 +18,9 @@ test("joinParts gives back the same text", () => {
     assert.equal(joinParts(parseText(text, known)), text);
   }
 });
+
+test("hyphenated tags are chips, and [surprise] is not [surprise-ah]", () => {
+  const tags = ["surprise", "surprise-ah", "speed-slow", "long-pause"];
+  assert.deepEqual(parseText("[speed-slow]Hi [surprise] [surprise-ah][long-pause]", tags),
+    [{ tag: "speed-slow" }, { text: "Hi " }, { tag: "surprise" }, { text: " " }, { tag: "surprise-ah" }, { tag: "long-pause" }]);
+});

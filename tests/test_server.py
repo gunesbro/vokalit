@@ -640,7 +640,7 @@ def test_chatterbox_gets_the_text_without_tags_and_the_take_keeps_them(api, monk
 def test_models_list_their_tags(api):
     _, listed, _ = api("GET", "/api/models")
     tags = {m["name"]: m["tags"] for m in listed}
-    assert tags["chatterbox"] == [] and tags["omnivoice"] == models.TAGS
+    assert tags["chatterbox"] == [] and tags["omnivoice"] == models.OMNIVOICE_TAGS
 
 
 def test_model_without_the_language_is_skipped_when_another_speaks_it(api, monkeypatch):
@@ -807,3 +807,12 @@ def test_microphone_permission_is_remembered(api, tmp_path, monkeypatch):
     assert server.microphone_allowed() is True
     assert api("POST", "/api/microphone", {"allowed": False})[0] == 200  # blocked: ask again next time
     assert server.microphone_allowed() is False
+
+
+def test_line_of_only_new_tags_is_empty_for_other_models(api, monkeypatch):
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", lambda *a, **k: pytest.fail("generated tags as text"))
+    sid, lid, _ = _session_with_line(api, "[anger] [pause]")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Line 1 is empty without its sound tags" in done["error"]

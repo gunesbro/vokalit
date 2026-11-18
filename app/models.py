@@ -33,8 +33,18 @@ LANGUAGE_NAMES = {**_OMNIVOICE_LANGUAGES, **LANGUAGE_NAMES}
 
 # Sounds written into a line's text as [tag] (Vokalit's names, which are OmniVoice's). Each model gets them in its own
 # syntax ("sounds"); models without a sound get the text without it, since they would read the tag aloud.
-TAGS = ["laughter", "sigh", "confirmation-en", "question-en", "question-ah", "question-oh", "question-ei", "question-yi",
-        "surprise-ah", "surprise-oh", "surprise-wa", "surprise-yo", "dissatisfaction-hnn"]
+OMNIVOICE_TAGS = ["laughter", "sigh", "confirmation-en", "question-en", "question-ah", "question-oh", "question-ei",
+                  "question-yi", "surprise-ah", "surprise-oh", "surprise-wa", "surprise-yo", "dissatisfaction-hnn"]
+# Higgs TTS 3's controls, named like the others (hyphens, since "[" suggestions take letters and hyphens). The UI
+# groups them: sounds, emotions, styles, delivery.
+HIGGS_TAGS = ["cough", "crying", "screaming", "burping", "humming", "sniff", "sneeze",
+              "elation", "amusement", "enthusiasm", "determination", "pride", "contentment", "affection", "relief",
+              "contemplation", "confusion", "surprise", "awe", "longing", "arousal", "anger", "fear", "disgust",
+              "bitterness", "sadness", "shame", "helplessness",
+              "singing", "shouting", "whispering",
+              "speed-very-slow", "speed-slow", "speed-fast", "speed-very-fast", "pitch-low", "pitch-high", "pause",
+              "long-pause", "expressive-high", "expressive-low"]
+TAGS = OMNIVOICE_TAGS + HIGGS_TAGS
 _TAG = re.compile(r"\[(" + "|".join(re.escape(tag) for tag in TAGS) + r")\]")
 
 
@@ -82,7 +92,7 @@ MODELS = {
         "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
         "supports_convert": False,
         "vram_gb": 2.7,  # measured on an RTX 4070 SUPER (Windows): ~2.6 GB
-        "sounds": {tag: f"[{tag}]" for tag in TAGS},  # Vokalit's sound tags are OmniVoice's
+        "sounds": {tag: f"[{tag}]" for tag in OMNIVOICE_TAGS},  # Vokalit's first sound tags are OmniVoice's
         "needs_transcript": True,  # it copies a voice from the sample and what is said in it
         # Every language it lists, and "ar" (Chatterbox's Arabic), which it calls Standard Arabic.
         "languages": sorted(set(_OMNIVOICE_LANGUAGES) | {"ar"}),

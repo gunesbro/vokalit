@@ -132,7 +132,9 @@ export function soundEditor({ value = "", tags = [], labels = {}, ariaLabel = "T
       onmousedown: (e) => { e.preventDefault(); choose(s.tag); } },
     el("span", {}, s.label), s.note && el("span", { class: "faint small" }, s.note)));
     menu.active = Math.min(menu.active, matches.length - 1);
-    menu.box.replaceChildren(el("div", { class: "faint small suggest-head" }, "Sounds"), ...menu.items);
+    // A heading before each group (Sounds, Emotions, ...), as in the Add tag menu
+    menu.box.replaceChildren(...matches.flatMap((s, n) => (n === 0 || s.group !== matches[n - 1].group
+      ? [el("div", { class: "faint small suggest-head" }, s.group || "Tags"), menu.items[n]] : [menu.items[n]])));
     paintMenu();
     const rect = document.getSelection().getRangeAt(0).getBoundingClientRect();
     const fallback = field.getBoundingClientRect();

@@ -20,7 +20,9 @@ file. Everything is done by clicking in a desktop window.
 - Desktop window (pywebview) showing our own HTML/CSS/JS interface, served by a local server on `127.0.0.1`:
   - A line's text is edited in our own small editor: plain text with sound tags shown as chips (× removes one,
     typed `[laughter]` becomes a chip, paste is plain text, own undo history). Stored text keeps canonical tags;
-    `MODELS[name]["sounds"]` converts each for the model, models without it drop them.
+    `MODELS[name]["sounds"]` converts each for the model, models without it drop them. `TAGS` is OmniVoice's 13
+    sounds followed by Higgs TTS 3's controls (`HIGGS_TAGS`: effects, emotions, styles, delivery, hyphenated); the
+    UI groups them as Sounds, Emotions, Styles and Delivery in *Add tag* and the `[` suggestions.
   - Language fields are search boxes (OmniVoice lists 646 languages); only languages every chosen model speaks are
     offered.
   - **Studio:** sessions; a cast of characters; script lines with takes; generate with one or more models; seed;
