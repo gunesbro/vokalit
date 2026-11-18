@@ -88,6 +88,7 @@ export async function renderStudio(root) {
   let pasting = false;
   let dragging = null;
   const generating = new Map(); // line id -> start time, for the spinner and elapsed seconds
+  const lineJobs = new Map(); // line id -> id of the generate job working on it, for Cancel
   const pendingText = {}; // line id -> saves typed text not yet sent (the Generate button waits for it)
   // Elapsed time next to every spinner; one ticker for the whole screen.
   const ticker = setInterval(() => {
@@ -346,7 +347,8 @@ export async function renderStudio(root) {
       el("label", { class: "row muted", title: TIP_SEED }, "Seed", seedInput),
       el("div", { class: "pop-holder" }, exportButton()),
       batch
-        ? el("button", { class: "btn btn-primary", onclick: () => api("POST", `/api/sessions/${sid()}/stop`, {}).catch(fail) }, "Stop")
+        ? el("button", { class: "btn btn-primary", title: "Stop now: the take being generated is cancelled",
+          onclick: () => api("POST", `/api/jobs/${batch}/cancel`, {}).catch(fail) }, "Stop")
         : el("button", { class: "btn btn-primary", onclick: generateMissing,
           title: "Generates every line that has no take yet, top to bottom." }, "Generate missing"),
       el("div", { class: "pop-holder" }, more));
@@ -766,6 +768,10 @@ export async function renderStudio(root) {
       title: !line.text.trim() ? "Write the line first" : !count && picker.get().length ? "No selected model speaks this language" : "",
       onclick: () => generate(line, usable, lineSeeds[line.id] ?? seed) },
     busy ? busyLabel(line.id, "Generating\u2026") : `Generate ${plural(count || 0, "take")}`);
+    // Cancel stops the model at once; it loads again for the next take.
+    const cancelButton = busy && lineJobs.has(line.id) && el("button", { class: "btn", title: "Stop generating this line now",
+      onclick: () => { cancelButton.disabled = true; api("POST", `/api/jobs/${lineJobs.get(line.id)}/cancel`, {}).catch(fail); } },
+    "Cancel");
     text.addEventListener("input", () => {
       generateButton.disabled = busy || !count || !text.value.trim();
       generateButton.title = text.value.trim() ? "" : "Write the line first";
@@ -837,7 +843,7 @@ export async function renderStudio(root) {
       el("div", { class: "detail-row row wrap" },
         el("div", { class: "muted", title: TIP_MODELS }, "Generate with"), picker.element,
         el("label", { class: "row muted", title: TIP_SEED }, "Seed", lineSeed),
-        generateButton,
+        generateButton, cancelButton || null,
         el("div", { class: "faint small" }, "One take per selected model, so you can compare them.")),
       longNote(line, text),
       languageNotes(line, picker.get()),
@@ -1173,6 +1179,7 @@ export async function renderStudio(root) {
     const before = current ? takesOf(current) : null;
     if (job.kind === "generate" || job.kind === "convert") {
       generating.set(current, started);
+      if (job.kind === "generate") lineJobs.set(current, job.id);
       setMessage(message, `${job.kind === "convert" ? "Converting" : "Generating"} line ${number(current)}\u2026`);
     } else if (job.kind === "batch") {
       batch = job.id;
@@ -1206,9 +1213,10 @@ export async function renderStudio(root) {
       else { setMessage(message, `Exported ${result.split("/").pop()}.`); loadExports(); }
       return;
     }
-    if (current) generating.delete(current);
+    if (current) { generating.delete(current); lineJobs.delete(current); }
     if (job.kind === "batch") batch = null;
-    if (error) fail(error);
+    if (error?.cancelled) setMessage(message, job.kind === "batch" ? (error.progress || "Stopped.") : `Line ${number(current)} cancelled.`);
+    else if (error) fail(error);
     else if (job.kind === "batch") {
       const skipped = result.skipped_empty ? ` Skipped ${plural(result.skipped_empty, "empty line")}.` : "";
       setMessage(message, last.startsWith("Stopped") ? last : `Generated ${plural(result.generated, "line")}.${skipped}`);

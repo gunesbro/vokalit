@@ -39,6 +39,10 @@ class NotFound(Exception):
 # --- Jobs ---------------------------------------------------------------------------------------
 
 
+class Cancelled(Exception):
+    """The user cancelled the job (POST /api/jobs/<id>/cancel)."""
+
+
 def _start_job(work, session=None, kind=None, line=None):
     """Runs work(job) in a thread; the UI polls GET /api/jobs/<id>. Jobs tagged with a session are listed by
     GET /api/sessions/<sid>/jobs, so a screen opened later (or after switching tabs) shows them again."""
@@ -47,10 +51,14 @@ def _start_job(work, session=None, kind=None, line=None):
     _jobs[job["id"]] = job
 
     def run():
+        models.set_owner(job["id"])  # so cancelling this job stops only its own model request
         try:
             job["result"] = work(job)
             job["state"] = "done"
         except Exception as error:  # shown to the user
+            if isinstance(error, Cancelled) or job.get("cancelled"):
+                job["state"] = "cancelled"
+                return
             job["error"] = str(error)
             job["state"] = "failed"
 
@@ -161,7 +169,7 @@ def _line_models(session, line, model_names):
     return speaking or list(model_names)
 
 
-def _generate_line(session_id, line_id, model_names, seed):
+def _generate_line(session_id, line_id, model_names, seed, job=None):
     session, line, character, ref, sample = _line_context(session_id, line_id)
     sample_label = sample["label"] if sample else "default voice"
     transcript = sample.get("transcript") if sample else None
@@ -190,12 +198,22 @@ def _generate_line(session_id, line_id, model_names, seed):
             continue
         settings = ws.effective_settings(session, line, name, models.default_settings(name))
         out = ws.new_take_path(session_id, line_id, name)
+        if job is not None:
+            if job.get("cancelled"):
+                raise Cancelled()
+            job["model"] = name  # what cancelling stops
         try:
             seconds = models.generate(name, text, str(ref) if ref else None, str(out), seed, settings, language,
                                       ref_text=transcript)
         except Exception as error:
+            if job is not None and job.get("cancelled"):
+                Path(out).unlink(missing_ok=True)  # a take cut off halfway
+                raise Cancelled() from None
             errors.append(f"{models.MODELS[name]['title']}: {error}")
             continue
+        finally:
+            if job is not None:
+                job["model"] = None
         ws.add_take(session_id, line_id, {
             "file": str(out), "kind": "tts", "model": name, "character_name": character["name"],
             "sample_label": sample_label, "text": line["text"], "seed": seed, "settings": settings, "language": language,
@@ -300,6 +318,20 @@ def get_job(req, job_id):
     if job_id not in _jobs:
         raise NotFound()
     return _jobs[job_id]
+
+
+@route("POST", "/api/jobs/(?P<job_id>[0-9a-f]+)/cancel")
+def cancel_job(req, job_id):
+    """Cancels a generation: the model working for it is stopped at once (it loads again for the next take); a batch
+    ends there."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise NotFound()
+    if job["state"] == "running":
+        job["cancelled"] = True
+        if job.get("model"):
+            models.cancel(job["model"], job_id)
+    return {}
 
 
 @functools.cache  # the GPU does not change while the app runs; nvidia-smi takes a moment on Windows
@@ -631,7 +663,8 @@ def generate_line(req, sid, lid):
         raise ws.WorkspaceError("Choose at least one model to generate with.")
     seed = body.get("seed")
     seed = _random_seed() if seed in (None, "") else int(seed)
-    return _start_job(lambda job: _generate_line(sid, lid, model_names, seed), session=sid, kind="generate", line=lid)
+    return _start_job(lambda job: _generate_line(sid, lid, model_names, seed, job), session=sid, kind="generate",
+                      line=lid)
 
 
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/lines/(?P<lid>l[0-9]+)/convert")
@@ -668,8 +701,8 @@ def delete_take(req, sid, lid):
 
 
 def _batch_job(req, sid, pick):
-    """Generates the lines `pick(session)` returns, in script order, skipping empty ones; Stop ends it after the
-    current line."""
+    """Generates the lines `pick(session)` returns, in script order, skipping empty ones. Cancelling the job (Stop)
+    ends it at once, cutting off the current take."""
     body = req["json"]
     model_names = body.get("models") or ws.load_session(sid)["models"]
     if not model_names:
@@ -696,7 +729,11 @@ def _batch_job(req, sid, pick):
             title = models.MODELS[name]["title"].split(" ")[0]
             job["progress"] = f"{title} \u00b7 take {number}/{len(steps)}"
             job["line"] = line_id
-            _generate_line(sid, line_id, [name], seeds[line_id])
+            try:
+                _generate_line(sid, line_id, [name], seeds[line_id], job)
+            except Cancelled:
+                job["progress"] = f"Stopped after {number - 1} of {len(steps)} takes."
+                raise
             done_lines.add(line_id)
         return {"generated": len(lines), "skipped_empty": skipped}
     return _start_job(work, session=sid, kind="batch")

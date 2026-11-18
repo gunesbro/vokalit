@@ -18,7 +18,8 @@ Your voice, your text and the generated audio never leave your machine.
   before anything is downloaded, and *Remove* frees all of it.
 - **Generation settings** — per model, at three levels: model defaults → session → line. A seed makes a take
   reproducible. VoxCPM2 also takes a *Style*: a few words on how the line is said (type them or pick Happy, Sad,
-  Calm, …).
+  Calm, …). A take in progress can be cancelled (*Cancel* next to it, or *Stop* for Generate missing); the model then
+  loads again for the next take.
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.

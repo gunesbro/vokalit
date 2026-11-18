@@ -247,7 +247,7 @@ All interface text is English. The visual design is the design canvas; behaviour
 
 - **Rail:** Studio, Characters, Models, and a GPU status dot.
 - **Studio:** session list with search; header with session name, "Generate with" (multi-select of installed
-  models), Settings (session settings per model), Seed, Export, Generate missing / Stop; cast strip; script rows
+  models), Settings (session settings per model), Seed, Export, Generate missing / Stop (cancels the take in progress: the model's process is stopped and loads again next time); cast strip; script rows
   (speaker, sample, text, selected take player) with drag-and-drop reordering, "+ Insert line" between lines and a
   ⋯ menu; line details with text, sample, pause, Generate with + seed, line settings ("Reset to session settings"),
   takes (select, play, "custom settings", "text changed", "Use these settings", delete) and "Perform this line";

@@ -31,6 +31,7 @@ export async function waitForJob(id, onUpdate = () => {}) {
     onUpdate(job);
     if (job.state === "done") return job.result;
     if (job.state === "failed") throw new Error(job.error);
+    if (job.state === "cancelled") throw Object.assign(new Error("Cancelled."), { cancelled: true, progress: job.progress });
     await new Promise((resolve) => setTimeout(resolve, 600));
   }
 }

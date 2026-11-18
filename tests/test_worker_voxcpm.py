@@ -108,3 +108,29 @@ def test_style_setting_has_suggestions():
     assert [s["label"] for s in style["suggestions"]] == ["Neutral", "Happy", "Sad", "Angry", "Calm", "Excited",
                                                           "Whispering", "Serious"]
     assert models.default_settings("voxcpm") == {"style": "", "cfg_value": 2.0, "inference_timesteps": 10}
+
+
+def test_cancel_stops_the_worker_at_once(installed):
+    import threading
+    import time
+    _, local = installed
+    _generate(local, "warm2", "warm up")
+    errors = []
+
+    def run():
+        models.set_owner("job-1")
+        try:
+            _generate(local, "slow", "SLOW")
+        except RuntimeError as error:
+            errors.append(str(error))
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    time.sleep(0.5)
+    started = time.monotonic()
+    assert models.cancel("voxcpm", "job-2") is False  # another job's request is left alone
+    assert models.cancel("voxcpm", "job-1") is True
+    thread.join(10)
+    assert not thread.is_alive() and errors and time.monotonic() - started < 5
+    assert "voxcpm" not in models._workers
+    assert "text=Merhaba.|" in _generate(local, "again", "Merhaba.")  # the next take loads it again

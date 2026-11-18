@@ -854,3 +854,74 @@ def test_higgs_line_without_words_is_empty(api, monkeypatch):
 
 def test_higgs_install_shows_the_required_credit():
     assert "Boson AI's Higgs Audio" in models.MODELS["higgs"]["license"]
+
+
+def test_cancel_stops_a_generating_line(api, monkeypatch):
+    import threading
+    cancelled = threading.Event()
+    calls = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        Path(out).write_bytes(b"partial")
+        cancelled.wait(5)
+        raise RuntimeError("The model process stopped unexpectedly.")
+
+    def fake_cancel(name, owner):
+        calls.append((name, owner))
+        cancelled.set()
+        return True
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    monkeypatch.setattr(models, "cancel", fake_cancel)
+    sid, lid, _ = _session_with_line(api, "Hello.")
+    _, job, _ = api("POST", f"/api/sessions/{sid}/lines/{lid}/generate", {"models": ["chatterbox"]})
+    import time
+    time.sleep(0.2)
+    assert api("POST", f"/api/jobs/{job['id']}/cancel", {})[0] == 200
+    done = _wait(api, job["id"])
+    assert done["state"] == "cancelled" and calls == [("chatterbox", job["id"])]
+    session = ws.load_session(sid)
+    assert session["lines"][0]["takes"] == []
+    assert not list((ws.session_dir(sid) / "takes").glob("*")) if (ws.session_dir(sid) / "takes").exists() else True
+
+
+def test_cancel_stops_a_batch_at_once(api, monkeypatch):
+    import threading
+    started = threading.Event()
+    release = threading.Event()
+    generated = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        started.set()
+        if not generated:
+            release.wait(5)
+            raise RuntimeError("The model process stopped unexpectedly.")
+        generated.append(text)
+        make_wav(out, 1)
+        return 0.5
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "generate", fake_generate)
+    monkeypatch.setattr(models, "cancel", lambda name, owner: release.set() or True)
+    sid, lid, _ = _session_with_line(api, "One.")
+    api("POST", f"/api/sessions/{sid}/lines", {"character": ws.load_session(sid)["cast"][0]["character"], "text": "Two."})
+    _, job, _ = api("POST", f"/api/sessions/{sid}/generate-missing", {"models": ["chatterbox"]})
+    started.wait(5)
+    api("POST", f"/api/jobs/{job['id']}/cancel", {})
+    done = _wait(api, job["id"])
+    assert done["state"] == "cancelled" and done["progress"] == "Stopped after 0 of 2 takes." and generated == []
+
+
+def test_cancel_kills_only_the_jobs_own_request(monkeypatch):
+    killed = []
+
+    class Fake:
+        def __init__(self, owner):
+            self.owner, self.process = owner, owner
+
+    monkeypatch.setattr(models, "_kill_tree", killed.append)
+    monkeypatch.setitem(models._workers, "chatterbox", Fake("job-a"))
+    assert models.cancel("chatterbox", "job-b") is False and killed == []
+    assert models.cancel("chatterbox", "job-a") is True and killed == ["job-a"]
+    assert "chatterbox" not in models._workers

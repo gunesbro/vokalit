@@ -16,6 +16,9 @@ class VoxCPM:
         return cls()
 
     def generate(self, text, reference_wav_path=None, cfg_value=None, inference_timesteps=None, **kwargs):
+        if text == "SLOW":  # for cancelling: takes far longer than a test waits
+            import time
+            time.sleep(60)
         if text == "CRASH":
             raise RuntimeError("CUDA error: device-side assert triggered")
         if text == "OOM":

@@ -571,10 +571,30 @@ def delete_removed():
 
 
 IDLE_SECONDS = 5 * 60  # a model unused this long leaves the GPU (or, for Whisper, memory); the next request loads it
+_owner = threading.local()  # the job the current thread works for (server.py sets it), so cancel() stops only its own
+_starting = {}  # name -> worker still loading
+
+
+def set_owner(owner):
+    """Marks the current thread's requests as `owner`'s (a job id), for cancel()."""
+    _owner.value = owner
+
+
+def cancel(name, owner):
+    """Stops `name` if it is loading or generating for `owner`: its process is killed, so the request fails at once.
+    The next take loads the model again. False if `name` is not working for `owner`."""
+    for worker in (_workers.get(name), _starting.get(name)):
+        if worker is not None and owner is not None and worker.owner == owner:
+            if _workers.get(name) is worker:
+                _workers.pop(name, None)
+            _kill_tree(worker.process)
+            return True
+    return False
 
 
 class _Worker:
     def __init__(self, name):
+        self.owner = getattr(_owner, "value", None)  # the job it is loading or generating for
         self.lock = threading.Lock()
         self.last_used = time.monotonic()
         self.vram_gb = None  # GPU memory the model holds, as the worker reports it
@@ -588,7 +608,12 @@ class _Worker:
             text=True,
             encoding="utf-8",
         )
-        ready = self._read()
+        _starting[name] = self
+        try:
+            ready = self._read()
+        finally:
+            _starting.pop(name, None)
+        self.owner = None
         self.vram_gb = ready.get("vram_gb")
         self.mode = ready.get("mode")
         if not ready.get("ready"):
@@ -605,6 +630,7 @@ class _Worker:
 
     def request(self, message):
         with self.lock:
+            self.owner = getattr(_owner, "value", None)
             try:
                 self.process.stdin.write(json.dumps(message) + "\n")
                 self.process.stdin.flush()
@@ -612,6 +638,7 @@ class _Worker:
                 self.vram_gb = reply.get("vram_gb", self.vram_gb)
                 return reply
             finally:
+                self.owner = None
                 self.last_used = time.monotonic()
 
 
