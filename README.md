@@ -41,11 +41,15 @@ English script. Unmute the player to listen.
 
 **Turkish**
 
-<!-- vokalit-designed-voices-tr.mp4 -->
+
+https://github.com/user-attachments/assets/3ae4f506-6cbf-43e7-b548-e0e4650fcc7b
+
 
 **English**
 
-<!-- vokalit-designed-voices-en.mp4 -->
+
+https://github.com/user-attachments/assets/9a7e00d0-6b1f-4899-ae08-8941af1a514b
+
 
 <sub>Made with Boson AI's Higgs Audio.</sub>
 
