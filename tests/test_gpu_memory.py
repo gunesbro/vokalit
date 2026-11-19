@@ -103,3 +103,38 @@ def test_least_recently_used_goes_first(fakes, monkeypatch):
     monkeypatch.setattr(models, "stop", lambda name: (original_stop(name), free.update(gb=free["gb"] + 2))[0])
     models._request("big", {})  # unloading one 2 GB model is enough
     assert "mid" not in models._workers and "small" in models._workers
+
+
+class SlowWorker(FakeWorker):
+    """Loads until `release` is set, like a model that takes a while to reach the GPU."""
+    release = threading.Event()
+
+    def __init__(self, name):
+        SlowWorker.release.wait(5)
+        super().__init__(name)
+
+
+def test_two_requests_while_a_model_loads_share_one_worker(fakes, monkeypatch):
+    # Generate on two lines at once, before the model is loaded: one process, not two (twice the GPU memory, and an
+    # untracked copy that is never unloaded).
+    monkeypatch.setattr(models, "_Worker", SlowWorker)
+    SlowWorker.release.clear()
+    replies = []
+    threads = [threading.Thread(target=lambda: replies.append(models._request("small", {}))) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    threading.Event().wait(0.2)  # both are now asking for the model
+    SlowWorker.release.set()
+    for thread in threads:
+        thread.join(5)
+    assert FakeWorker.started == ["small"]
+    assert len(replies) == 2 and all(r["ok"] for r in replies)
+
+
+def test_a_failed_load_lets_the_waiting_request_load_again(fakes, monkeypatch):
+    monkeypatch.setattr(models, "_Worker", SlowWorker)
+    SlowWorker.release.set()
+    FakeWorker.script["small"] = ["oom-load", "oom-load"]  # the first request's load and its retry
+    with pytest.raises(RuntimeError):
+        models._request("small", {})
+    assert models._request("small", {})["ok"]  # nothing is left half-loaded

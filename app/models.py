@@ -787,18 +787,29 @@ def _out_of_memory(name):
         "that use the GPU (games, video editors, other AI tools), or generate with one model at a time.")
 
 
+_load_locks = {}  # name -> held while that model loads, so requests arriving meanwhile wait for it
+_load_locks_guard = threading.Lock()
+
+
+def _load_lock(name):
+    with _load_locks_guard:
+        return _load_locks.setdefault(name, threading.Lock())
+
+
 def _send(name, message):
     try:
-        if name not in _workers:
-            need = spec(name).get("vram_gb")
-            if need:
-                _make_room(name, need + 0.5)  # make room before loading, not after failing
-            _workers[name] = _Worker(name)
-            global _watcher
-            if _watcher is None:  # unloads idle models from now on
-                _watcher = threading.Thread(target=_watch_idle, daemon=True)
-                _watcher.start()
-        return _workers[name].request(message)
+        with _load_lock(name):  # two lines generated at once must not load the model twice
+            worker = _workers.get(name)
+            if worker is None:
+                need = spec(name).get("vram_gb")
+                if need:
+                    _make_room(name, need + 0.5)  # make room before loading, not after failing
+                worker = _workers[name] = _Worker(name)
+                global _watcher
+                if _watcher is None:  # unloads idle models from now on
+                    _watcher = threading.Thread(target=_watch_idle, daemon=True)
+                    _watcher.start()
+        return worker.request(message)
     except Exception:
         stop(name)
         raise
