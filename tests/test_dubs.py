@@ -505,3 +505,19 @@ def test_fit_shows_the_speed(tmp_workspace, tmp_path):
     dub = _long_take(tmp_path, 4.0)
     dubs.fit_take(dub, "d1")
     assert dubs.fit(dubs.load_dub(dub))["d1"] == {"state": "fits", "over": 0.0, "speed": 1.16}
+
+
+def test_select_takes_changes_several_at_once(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    first = dubs.load_dub(dub)["tracks"][1]["clips"][0]["selected"]
+    take = dubs.new_take_path(dub, "d2")
+    make_wav(take, 1.0)
+    dubs.add_take(dub, "d2", {"file": str(take), "seed": 1, "duration": 1.0})
+    second = dubs.load_dub(dub)["tracks"][1]["clips"][1]["selected"]
+    dubs.select_takes(dub, {"d1": None, "d2": None})
+    assert [c["selected"] for c in dubs.load_dub(dub)["tracks"][1]["clips"]] == [None, None]
+    with pytest.raises(ws.WorkspaceError, match="no longer exists"):
+        dubs.select_takes(dub, {"d1": first, "d2": "takes/en/gone.wav"})
+    assert [c["selected"] for c in dubs.load_dub(dub)["tracks"][1]["clips"]] == [None, None]  # all or nothing
+    dubs.select_takes(dub, {"d1": first, "d2": second})
+    assert [c["selected"] for c in dubs.load_dub(dub)["tracks"][1]["clips"]] == [first, second]

@@ -1121,6 +1121,15 @@ def select_dub_take(req, did, cid):
     return _dub_view(did)
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/select")
+def select_dub_takes(req, did):
+    """Several sentences' takes in one request: {selections: {clip id: file or null}}."""
+    code = _dub_language(req, _dub_or_404(did))
+    selections = req["json"].get("selections") or {}
+    dubs.select_takes(did, {str(k): None if v is None else str(v) for k, v in selections.items()}, language=code)
+    return _dub_view(did)
+
+
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/generate")
 def generate_dub(req, did):
     """Speaks the given sentences' translations in the target language, each cloning its "voice from" sentence."""

@@ -20,6 +20,8 @@ const WAVE_PER_SECOND = 50; // waveform values per second of the original
 // Pane sizes, dragged by the user and kept between runs: the right column's width and the timeline's lane height.
 const SIZES = { right: 400, lane: 22 }; // the defaults; the lane default is also the smallest
 const MIN_TABLE = 360;
+const MAX_SPEEDUP = 1.25; // as the server's: how much a take may be sped up to fit
+const speedText = (speed) => `${speed.toFixed(2)}\u00d7`;
 const ROW = 38; // px, one sentence row; only the rows in view (and OVERSCAN more each side) are drawn
 const OVERSCAN = 10;
 const MIN_RIGHT = 320;
@@ -338,7 +340,6 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     drawHeader();
   }
 
-  const sequence = async (requests) => { let last = null; for (const request of requests) last = await request(); return last; };
 
   // Ctrl+Enter: the typed translation is saved first, so the take speaks it.
   async function saveThenGenerate(clip, box) {
@@ -412,7 +413,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   async function follow(started, kind, ids = [], language = track().language) {
     // The generated sentences' takes before (in the job's language), for undoing the generation.
     const generating = tracks().find((t) => t.language === language)?.clips || [];
-    const before = Object.fromEntries(generating.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.selected]));
+    const wanted = new Set(ids);
+    const before = Object.fromEntries(generating.filter((c) => wanted.has(c.id)).map((c) => [c.id, c.selected]));
     job = { id: started.id, kind, clips: new Set(ids), progress: started.progress || "" };
     // Also shown when the screen comes back to a transcription that is still running.
     if (kind === "transcribe") setMessage(message, LISTENING);
@@ -430,13 +432,13 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         setMessage(message, `Found ${plural(sources().length, "sentence")}. Use \u201cCopy for translation\u201d, then `
           + "\u201cPaste translations\u201d, or type them in the table.");
       }
-      if (kind === "generate") recordGeneration(before, language);
+      if (kind === "generate" || kind === "fit") recordSelection(before, language, kind);
     } catch (error) {
       if (stopped) return;
       if (error.cancelled) setMessage(message, "Cancelled.");
       else fail(error);
       apply(await api("GET", path()).catch(() => dub));
-      if (kind === "generate") recordGeneration(before, language);
+      if (kind === "generate" || kind === "fit") recordSelection(before, language, kind);
     } finally {
       if (!stopped) {
         job = null;
@@ -446,23 +448,33 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     }
   }
 
-  // A generation selects the new takes; undo selects the previous ones again (the new takes stay in the list).
-  function recordGeneration(before, language) {
-    const generated = tracks().find((t) => t.language === language)?.clips || [];
-    const changed = generated.filter((c) => c.id in before && c.selected !== before[c.id]).map((c) => [c.id, before[c.id], c.selected]);
+  // A generation or a fit selects new takes; undo selects the previous ones again (the new takes stay in the list), in
+  // one request however many sentences changed.
+  function recordSelection(before, language, kind) {
+    const changed = (tracks().find((t) => t.language === language)?.clips || [])
+      .filter((c) => c.id in before && c.selected !== before[c.id]);
     if (!changed.length) return;
     const at = q(language);
-    const select = (index) => sequence(changed.map((item) => () => api("POST", path(`/clips/${item[0]}/select${at}`),
-      { file: item[index] })));
-    const label = `generating ${plural(changed.length, "sentence")}`;
-    history().push({ label: tracks().length > 1 ? `${label} (${languageName(language)})` : label, undo: () => select(1),
-      redo: () => select(2), language });
+    const select = (files) => api("POST", path(`/select${at}`), { selections: files });
+    const previous = Object.fromEntries(changed.map((c) => [c.id, before[c.id]]));
+    const next = Object.fromEntries(changed.map((c) => [c.id, c.selected]));
+    const label = `${kind === "fit" ? "fitting" : "generating"} ${plural(changed.length, "sentence")}`;
+    history().push({ label: tracks().length > 1 ? `${label} (${languageName(language)})` : label, undo: () => select(previous),
+      redo: () => select(next), language });
   }
 
   async function transcribe() {
     if (!whisper) return setMessage(message, "Install Whisper on the Models screen to find the sentences.", "warn");
     try {
       await follow(await api("POST", path("/transcribe"), {}), "transcribe");
+    } catch (error) { fail(error); }
+  }
+
+  // Speeds the takes up (same pitch) to fit before the next sentence; past 1.25x the server says to shorten them.
+  async function fitTakes(ids) {
+    if (!ids.length) return;
+    try {
+      await follow(await api("POST", path(`/fit${q()}`), { clips: ids }), "fit", ids);
     } catch (error) { fail(error); }
   }
 
@@ -629,6 +641,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       el("div", { class: "row dub-filters", role: "tablist" }, Object.entries(names).map(([key, label]) => el("button", {
         class: `btn btn-small ${filter === key ? "active" : "btn-ghost"}`, role: "tab", "aria-selected": String(filter === key),
         disabled: !all.length, onclick: () => { filter = key; drawTable(); } }, `${label} ${counts[key]}`))),
+      filter === "long" && fitButton(all),
       el("div", { class: "spacer" }),
       el("button", { class: "btn btn-small", disabled: !all.length, onclick: copyTranscript,
         title: "Copy every sentence, numbered, with an instruction for a translation tool" }, "Copy for translation"),
@@ -653,6 +666,14 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     rendered.clear();
     rowsBox.replaceChildren();
     renderRows();
+  }
+
+  // In "Too long": fit every take that runs over (sped-up ones are listed too, but already fitted).
+  function fitButton(all) {
+    const over = all.filter((c) => fit()[c.id]?.state === "long").map((c) => c.id);
+    return el("button", { class: "btn btn-small", disabled: !over.length || Boolean(job),
+      title: `Speed the takes up to fit, same pitch, up to ${MAX_SPEEDUP}\u00d7; longer ones need a shorter translation`,
+      onclick: () => fitTakes(over) }, over.length ? `Fit ${over.length}` : "Fit");
   }
 
   // The rows in view, plus the one being typed in (scrolled away, it keeps its text and focus). Rows already drawn stay.
@@ -703,6 +724,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     input.addEventListener("focus", () => choose(clip.id, false));
     const status = clipFit.state === "kept" ? el("span", { class: "dub-status faint", title: "The original plays here" }, "\u266a")
       : clipFit.state === "long" ? el("span", { class: "dub-status warn", title: "Runs into the next sentence" }, `+${clipFit.over.toFixed(1)} s`)
+      : clipFit.speed > 1 ? el("span", { class: "dub-status warn", title: `Sped up ${speedText(clipFit.speed)} to fit` },
+        speedText(clipFit.speed))
       : clipFit.state === "fits" ? el("span", { class: "dub-status ok", title: "Fits" }, "\u2713")
         : el("span", { class: "dub-status faint", title: "No take yet" }, "\u25cb");
     const generating = job?.kind === "generate" && job.clips.has(clip.id);
@@ -744,17 +767,17 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       onkeydown: (e) => {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); saveThenGenerate(clip, translation); }
       } });
-    const voice = el("select", { class: "select select-small", "aria-label": `Voice from, sentence ${number}`,
-      title: "Whose voice and mood the sentence copies. A very short sentence clones weakly: pick a longer one of the same speaker.",
-      onchange: () => {
-        const before = clip.voice_from;
-        const at = q();
-        act(inLanguage(`voice of sentence ${number}`), () => api("PATCH", path(`/clips/${clip.id}${at}`), { voice_from: voice.value }),
-          () => api("PATCH", path(`/clips/${clip.id}${at}`), { voice_from: before }), track().language);
-      } },
-    sources().map((s, n) => el("option", { value: s.id }, s.id === clip.source_clip ? "This sentence"
-      : `${n + 1} \u00b7 ${s.text.slice(0, 32)}${s.text.length > 32 ? "\u2026" : ""}`)));
-    voice.value = clip.voice_from;
+    // A search list, not a <select>: a dub can have tens of thousands of sentences to take a voice from.
+    const voice = searchSelect({ label: `Voice from, sentence ${number}: whose voice and mood it copies. A very short sentence `
+      + "clones weakly: pick a longer one of the same speaker.", placeholder: "Search by number or words", small: true,
+    value: clip.voice_from, options: sources().map((s, n) => ({ value: s.id, label: s.id === clip.source_clip ? "This sentence"
+      : `${n + 1} \u00b7 ${s.text.slice(0, 32)}${s.text.length > 32 ? "\u2026" : ""}` })),
+    onChange: (value) => {
+      const before = clip.voice_from;
+      const at = q();
+      act(inLanguage(`voice of sentence ${number}`), () => api("PATCH", path(`/clips/${clip.id}${at}`), { voice_from: value }),
+        () => api("PATCH", path(`/clips/${clip.id}${at}`), { voice_from: before }), track().language);
+    } });
     const generating = job?.kind === "generate" && job.clips.has(clip.id);
     const takes = clip.takes.map((take, n) => el("div", { class: `row dub-take ${take.file === clip.selected ? "selected" : ""}` },
       el("button", { class: "btn btn-ghost btn-small", "aria-pressed": String(take.file === clip.selected),
@@ -766,7 +789,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
             () => api("POST", path(`/clips/${clip.id}/select${at}`), { file: before }), track().language);
         } }, take.file === clip.selected ? "\u25cf" : "\u25cb"),
       player(fileUrl(take.file), { buckets: 30, showTime: false, label: `Play take ${n + 1}` }),
-      el("span", { class: "faint small num" }, `${take.duration.toFixed(1)} s \u00b7 seed ${take.seed}`)));
+      el("span", { class: "faint small num" }, `${take.duration.toFixed(1)} s \u00b7 seed ${take.seed}`
+        + (take.speed ? ` \u00b7 ${speedText(take.speed)}` : ""))));
     const remove = el("button", { class: "btn btn-ghost btn-small danger", title: "Delete this sentence (undo brings it back)",
       onclick: () => deleteSentence(clip) }, "Delete sentence");
     const kept = isKept(clip);
@@ -787,7 +811,10 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       el("div", { class: "row" }, el("strong", {}, `Sentence ${number}`),
         el("span", { class: "faint small num" }, `${formatTime(source.start)}\u2013${formatTime(source.end)}`),
         el("div", { class: "spacer" }),
-        clipFit.state === "long" ? el("span", { class: "warn small" }, `${clipFit.over.toFixed(1)} s too long`)
+        clipFit.state === "long" ? el("span", { class: "row" }, el("span", { class: "warn small" }, `${clipFit.over.toFixed(1)} s too long`),
+          el("button", { class: "btn btn-small", disabled: Boolean(job), onclick: () => fitTakes([clip.id]),
+            title: `Speed the take up to fit, same pitch, up to ${MAX_SPEEDUP}\u00d7` }, "Fit"))
+          : clipFit.speed > 1 ? el("span", { class: "warn small" }, `Sped up ${speedText(clipFit.speed)} to fit`)
           : clipFit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet")),
       el("label", { class: "field-label" }, "Original"), original, keep,
       el("label", { class: "field-label" }, "Translation"), translation,
@@ -835,7 +862,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   // --- Panels ----------------------------------------------------------------------------------
 
   async function copyTranscript() {
-    const text = transcriptForTranslation(clips().map((c) => sourceOf(c)?.text || ""), languageName(track().language));
+    // Each sentence's time: until the next one starts (as fit sees it), or the end of the file.
+    const { sorted } = lookup();
+    const until = new Map(sorted.map((c, i) => [c.id, sorted[i + 1]?.start ?? dub.source.duration ?? c.start + c.length]));
+    const text = transcriptForTranslation(clips().map((c) => sourceOf(c)?.text || ""), languageName(track().language),
+      clips().map((c) => Math.max(0, until.get(c.id) - c.start)));
     try {
       await navigator.clipboard.writeText(text);
     } catch { // no clipboard permission: copy through a hidden text box

@@ -311,3 +311,10 @@ def test_fitting_one_sentence_says_why_not(api, tmp_path, monkeypatch):
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/fit", {"clips": ["d2"]})
     done = _wait(api, job["id"])
     assert done["state"] == "failed" and "1.26× faster" in done["error"]
+
+
+def test_select_route_changes_several_takes(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    _take(dub["id"], "d1", 1.0)
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/select?language=en", {"selections": {"d1": None}})
+    assert status == 200 and body["tracks"][1]["clips"][0]["selected"] is None

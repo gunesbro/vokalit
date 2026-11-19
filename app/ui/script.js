@@ -175,10 +175,13 @@ export function pasteTranslations(clipIds, fromIndex, text) {
   return Object.fromEntries(lines.slice(0, clipIds.length - fromIndex).map((line, i) => [clipIds[fromIndex + i], line]));
 }
 
-// The transcript to give a translation tool: an instruction, then the sentences numbered, one per line.
-export const transcriptForTranslation = (sentences, languageName) =>
-  `Translate each numbered line into ${languageName}. Keep the numbers, one line per sentence.\n\n`
-  + sentences.map((text, i) => `${i + 1}. ${text}`).join("\n");
+// The transcript to give a translation tool: an instruction, then the sentences numbered, one per line. With `seconds`
+// (each sentence's time before the next one), each line gives its time so the translations come out short enough.
+export const transcriptForTranslation = (sentences, languageName, seconds = null) =>
+  `Translate each numbered line into ${languageName}. Keep the numbers, one line per sentence.`
+  + (seconds ? " The number in brackets is how many seconds the sentence may take when spoken: keep each translation "
+    + "short enough to say in that time, and leave the brackets out of your reply." : "") + "\n\n"
+  + sentences.map((text, i) => `${i + 1}. ${seconds ? `[${seconds[i].toFixed(1)} s] ` : ""}${text}`).join("\n");
 
 // A translation tool's reply as one text per sentence (null where none): numbered lines ("3." "3)" "3 -") go to their
 // number, other lines are ignored; without any numbers, the non-empty lines are taken in order.
@@ -187,7 +190,9 @@ export function parseTranslations(reply, count) {
   const lines = reply.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const numbered = lines.map((line) => line.match(/^(\d+)\s*[.):-]\s*(.+)$/)).filter(Boolean);
   if (numbered.length) {
-    for (const [, number, text] of numbered) if (number >= 1 && number <= count) texts[number - 1] = text.trim();
+    for (const [, number, text] of numbered) {
+      if (number >= 1 && number <= count) texts[number - 1] = text.replace(/^\[\d+(\.\d+)?\s*s\]\s*/, "").trim();
+    }
   } else {
     lines.slice(0, count).forEach((line, i) => { texts[i] = line; });
   }
@@ -238,7 +243,7 @@ export function clipFilter(clips, fit, name) {
     all: () => true,
     untranslated: (c) => !c.translation.trim() && fit[c.id]?.state !== "kept", // kept ones need no translation
     missing: (c) => fit[c.id]?.state === "missing",
-    long: (c) => fit[c.id]?.state === "long",
+    long: (c) => fit[c.id]?.state === "long" || fit[c.id]?.speed > 1, // sped up to fit: still listed, with the speed
     kept: (c) => fit[c.id]?.state === "kept",
   }[name] || (() => true);
   return clips.filter(keep).map((c) => c.id);

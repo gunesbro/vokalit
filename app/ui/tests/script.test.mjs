@@ -330,3 +330,19 @@ test("inWindow returns the clips that overlap a time range", () => {
   assert.deepEqual(inWindow(clips, 5, 10, 10).map((c) => c.id), ["endsIn", "spans", "inside", "startsIn"]);
   assert.deepEqual(inWindow([], 5, 10, 0), []);
 });
+
+test("clipFilter's Too long also lists takes that were sped up to fit", () => {
+  const clips = [{ id: "d1", translation: "a" }, { id: "d2", translation: "b" }, { id: "d3", translation: "c" }];
+  const fit = { d1: { state: "fits", over: 0 }, d2: { state: "fits", over: 0, speed: 1.18 }, d3: { state: "long", over: 0.4 } };
+  assert.deepEqual(clipFilter(clips, fit, "long"), ["d2", "d3"]);
+});
+
+test("transcriptForTranslation gives each sentence its time when there are times", () => {
+  const text = transcriptForTranslation(["Merhaba.", "Evet."], "English", [3.45, 0.8]);
+  assert.match(text, /seconds/);
+  assert.match(text, /\n1\. \[3\.5 s\] Merhaba\.\n2\. \[0\.8 s\] Evet\.$/);
+});
+
+test("parseTranslations drops a time the tool copied back", () => {
+  assert.deepEqual(parseTranslations("1. [3.5 s] Hello.\n2. [3 s] Yes.", 2).texts, ["Hello.", "Yes."]);
+});

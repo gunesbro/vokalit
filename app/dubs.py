@@ -335,6 +335,19 @@ def select_take(dub_id: str, clip_id: str, file: str | None, language: str | Non
         clip["selected"] = file
 
 
+def select_takes(dub_id: str, selections: dict, language: str | None = None) -> None:
+    """Several clips' takes at once ({clip id: file or None}), in one save: undoing a generation or a fit of thousands
+    of sentences. All or nothing."""
+    with _editing(dub_id) as data:
+        clips = {c["id"]: c for c in _dub_clips(data, language)}
+        for clip_id, file in selections.items():
+            clip = clips.get(clip_id)
+            if clip is None or (file is not None and not any(t["file"] == file for t in clip["takes"])):
+                raise ws.WorkspaceError("This take no longer exists.")
+        for clip_id, file in selections.items():
+            clips[clip_id]["selected"] = file
+
+
 # --- References, fit, export --------------------------------------------------------------------
 
 
