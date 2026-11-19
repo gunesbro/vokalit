@@ -68,7 +68,7 @@ export async function renderCharacters(root) {
     },
     avatar(c.id, c.name),
     el("div", {},
-      el("div", { class: "name" }, c.name),
+      el("div", { class: "name", title: c.name }, c.name),
       el("div", { class: "sub" }, c.samples.length
         ? `${plural(c.samples.length, "sample")} · ${plural(c.used_in.length, "session")}`
         : "No samples · default voice")))));

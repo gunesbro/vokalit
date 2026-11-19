@@ -44,7 +44,7 @@ export async function renderDub(root) {
     const current = selectedId();
     list.replaceChildren(...items.map((d) => el("a", { class: "list-item", href: `#/dub/${d.id}`,
       "aria-current": d.id === current ? "true" : "false" },
-    el("div", { class: "name" }, d.name),
+    el("div", { class: "name", title: d.name }, d.name),
     el("div", { class: "sub" }, `${d.kind === "video" ? "Video" : "Audio"}${d.duration ? ` \u00b7 ${formatTime(d.duration)}` : ""}`
       + ` \u00b7 ${plural(d.clips, "sentence")}`))));
     if (!items.length) list.append(el("p", { class: "muted small pad" }, "No dubs yet."));

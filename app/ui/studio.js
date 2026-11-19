@@ -220,7 +220,7 @@ export async function renderStudio(root) {
     list.replaceChildren(...sessions.filter((s) => s.name.toLowerCase().includes(term)).map((s) => {
       const item = el("a", { class: "list-item", href: `#/studio/${s.id}`, "aria-current": s.id === current ? "true" : "false",
         title: "Right-click to rename or delete" },
-      el("div", { class: "name" }, s.name),
+      el("div", { class: "name", title: s.name }, s.name),
       el("div", { class: "sub" }, `${plural(s.lines, "line")} \u00b7 ${when(s.created)}`));
       const more = el("button", { class: "btn btn-ghost icon-btn list-more", "aria-label": `Actions for ${s.name}`, title: "Rename or delete" },
         icon(ICON_MORE));
