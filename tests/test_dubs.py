@@ -268,3 +268,43 @@ def test_set_translations_saves_many_at_once(tmp_workspace):
     with pytest.raises(ws.WorkspaceError):
         dubs.set_translations(dub, {"d9": "x"})
     assert dubs.load_dub(dub)["tracks"][1]["clips"][0]["translation"] == "Hello."
+
+
+def _with_take(dub, clip_id):
+    take = dubs.new_take_path(dub, clip_id)
+    make_wav(take, 1)
+    dubs.add_take(dub, clip_id, {"file": str(take), "seed": 1, "duration": 1.0})
+    return take
+
+
+def test_deleting_a_sentence_keeps_its_take_files(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    take = _with_take(dub, "d2")
+    dubs.delete_source_clip(dub, "o2")
+    assert take.exists()  # so undo can bring the sentence back with its takes
+
+
+def test_restore_sentence_puts_it_back_with_its_takes(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    _with_take(dub, "d1")
+    dubs.update_dub_clip(dub, "d1", translation="Hello.")
+    before = dubs.load_dub(dub)
+    source, clip = before["tracks"][0]["clips"][0], before["tracks"][1]["clips"][0]
+    dubs.delete_source_clip(dub, "o1")
+    dubs.restore_sentence(dub, source, clip, 0)
+    after = dubs.load_dub(dub)
+    assert after["tracks"] == before["tracks"]
+    dubs.delete_source_clip(dub, "o1")
+    dubs.delete_source_clip(dub, "o2")
+    dubs.restore_sentence(dub, source, clip, 5)  # the place no longer exists: appended
+    assert [c["id"] for c in dubs.load_dub(dub)["tracks"][1]["clips"]] == ["d1"]
+
+
+def test_restore_refuses_an_existing_sentence(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    data = dubs.load_dub(dub)
+    with pytest.raises(ws.WorkspaceError):
+        dubs.restore_sentence(dub, data["tracks"][0]["clips"][0], data["tracks"][1]["clips"][0], 0)

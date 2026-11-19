@@ -1052,6 +1052,15 @@ def delete_dub_source(req, did, oid):
     return _dub_view(did)
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/restore")
+def restore_dub_sentence(req, did):
+    """Undo of a deleted sentence: puts it back as it was."""
+    _dub_or_404(did)
+    body = req["json"]
+    dubs.restore_sentence(did, dict(body["source"]), dict(body["clip"]), int(body.get("index", 0)))
+    return _dub_view(did)
+
+
 @route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/clips/(?P<cid>d[0-9]+)")
 def update_dub_clip(req, did, cid):
     _dub_or_404(did)

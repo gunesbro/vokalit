@@ -219,3 +219,11 @@ def test_paste_all_translations(api, tmp_path, monkeypatch):
     status, dub, _ = api("PATCH", f"/api/dubs/{dub['id']}/translations",
                          {"translations": {"d1": "Hello.", "d2": "How are you?"}})
     assert status == 200 and [c["translation"] for c in dub["tracks"][1]["clips"]] == ["Hello.", "How are you?"]
+
+
+def test_restore_route(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    source, clip = dub["tracks"][0]["clips"][1], dub["tracks"][1]["clips"][1]
+    api("DELETE", f"/api/dubs/{dub['id']}/source/o2")
+    status, dub, _ = api("POST", f"/api/dubs/{dub['id']}/source/restore", {"source": source, "clip": clip, "index": 1})
+    assert status == 200 and [c["id"] for c in dub["tracks"][1]["clips"]] == ["d1", "d2"]

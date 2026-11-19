@@ -149,18 +149,30 @@ def update_source_clip(dub_id: str, clip_id: str, text: str) -> None:
 
 
 def delete_source_clip(dub_id: str, clip_id: str) -> None:
-    """Deletes a sentence with its translation and takes; clips that took their voice from it use their own."""
+    """Deletes a sentence with its translation and takes; clips that took their voice from it use their own. The take
+    files stay (they go with the dub), so undo can bring the sentence back."""
     with _editing(dub_id) as data:
         _find(_source_clips(data), clip_id)
         data["tracks"][0]["clips"] = [c for c in _source_clips(data) if c["id"] != clip_id]
-        for clip in _dub_clips(data):
-            if clip["source_clip"] == clip_id:
-                for take in clip["takes"]:
-                    (dub_dir(dub_id) / take["file"]).unlink(missing_ok=True)
         data["tracks"][1]["clips"] = [c for c in _dub_clips(data) if c["source_clip"] != clip_id]
         for clip in _dub_clips(data):
             if clip["voice_from"] == clip_id:
                 clip["voice_from"] = clip["source_clip"]
+
+
+def restore_sentence(dub_id: str, source: dict, clip: dict, index: int) -> None:
+    """Puts a deleted sentence (its source clip and dub clip, as they were) back at `index`, or at the end."""
+    with _editing(dub_id) as data:
+        taken = {c["id"] for c in _source_clips(data)} | {c["id"] for c in _dub_clips(data)}
+        if source["id"] in taken or clip["id"] in taken:
+            raise ws.WorkspaceError("This sentence is already there.")
+        if clip["source_clip"] != source["id"]:
+            raise ws.WorkspaceError("The sentence and its translation do not belong together.")
+        place = max(0, min(int(index), len(_source_clips(data))))
+        _source_clips(data).insert(place, source)
+        _dub_clips(data).insert(place, {**clip, "voice_from": clip["voice_from"]
+                                        if any(c["id"] == clip["voice_from"] for c in _source_clips(data))
+                                        else source["id"]})
 
 
 def update_dub_clip(dub_id: str, clip_id: str, *, start: float | None = None, translation: str | None = None,
