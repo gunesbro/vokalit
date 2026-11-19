@@ -253,7 +253,7 @@ All interface text is English. The visual design is the design canvas; behaviour
   (speaker, sample, text, selected take player) with drag-and-drop reordering, "+ Insert line" between lines and a
   ⋯ menu; line details with text, sample, pause, Generate with + seed, line settings ("Reset to session settings"),
   takes (select, play, "custom settings", "text changed", "Use these settings", delete) and "Perform this line";
-  "Paste script" (`Name: text` lines); "Play all" in the footer plays the selected takes in order with each line's
+  "Paste script" (`Name: text` lines; a name not in the cast uses the library character of that name when there is exactly one, otherwise a new session-only character); "Play all" in the footer plays the selected takes in order with each line's
   pause (previous/next, Space to pause, "Play from here" in the line menu; lines without takes are skipped).
   Lines can be ticked (Shift+click for a range, Ctrl+A for all, Esc to clear) for bulk Generate, Character, Sample,
   Pause (one value for all; empty with "mixed" when they differ), Delete takes and Delete lines; the session menu has "Delete empty lines".

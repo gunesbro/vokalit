@@ -568,7 +568,8 @@ def split_sentences(text: str, limit: int) -> list[str]:
 
 def paste_script(session_id: str, text: str, split_over: int | None = None, chunk: int = 250) -> tuple[int, int]:
     """Adds `Character: text` lines. A line without a speaker continues the previous line.
-    Unknown characters become session-only characters without samples. Speeches longer than `split_over`
+    A name not in the cast is taken from the library when exactly one library character has it; otherwise it
+    becomes a session-only character without samples. Speeches longer than `split_over`
     characters become several lines of at most `chunk` characters, split by sentence.
     Returns (lines added, speeches split)."""
     parsed = []
@@ -588,10 +589,18 @@ def paste_script(session_id: str, text: str, split_over: int | None = None, chun
         character = cast_character(data, entry["character"])
         if character:
             by_name.setdefault(character["name"].casefold(), entry["character"])
+    library = {}
+    for char_id, character in list_characters():
+        library.setdefault(character["name"].casefold(), []).append(char_id)
     for name, _ in parsed:
         if name.casefold() not in by_name:
-            char_id = create_character(name, session_id=session_id)
-            add_to_cast(session_id, char_id, "session")
+            matches = library.get(name.casefold(), [])
+            if len(matches) == 1:
+                char_id = matches[0]
+                add_to_cast(session_id, char_id, "library")
+            else:
+                char_id = create_character(name, session_id=session_id)
+                add_to_cast(session_id, char_id, "session")
             by_name[name.casefold()] = char_id
     added = split = 0
     for name, line_text in parsed:

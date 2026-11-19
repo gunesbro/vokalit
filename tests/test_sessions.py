@@ -138,6 +138,26 @@ def test_paste_script_edge_cases(tmp_workspace):
     assert guest["name"] == "Guest" and guest["samples"] == []
 
 
+def test_paste_script_uses_a_library_character_of_that_name(tmp_workspace):
+    # Pasting "Designed Female: ..." into a session without her in the cast used to make a sample-less namesake.
+    sid = ws.create_session("E")
+    female = ws.create_character("Designed Female")
+    ws.paste_script(sid, "designed female: Hi everyone.")
+    data = ws.load_session(sid)
+    assert data["cast"] == [{"character": female, "scope": "library"}]
+    assert data["lines"][0]["character"] == female
+    assert ws.list_characters(session_id=sid) == []
+
+
+def test_paste_script_does_not_guess_between_library_namesakes(tmp_workspace):
+    sid = ws.create_session("E")
+    ws.create_character("Twin")
+    ws.create_character("Twin")
+    ws.paste_script(sid, "Twin: Which one am I?")
+    data = ws.load_session(sid)
+    assert [entry["scope"] for entry in data["cast"]] == ["session"]
+
+
 def test_paste_script_without_speaker_is_refused(tmp_workspace):
     sid = ws.create_session("E")
     with pytest.raises(ws.WorkspaceError, match="speaker"):
