@@ -37,7 +37,13 @@ file. Everything is done by clicking in a desktop window.
   - Settings are sliders (`min`, `max`, `step`) or, with `"type": "text"`, a text box (`max_length`, `placeholder`,
     `suggestions` as buttons that fill it). `models.clean_settings` checks them; text loses parentheses and extra
     whitespace. A line override equal to the session's value is not stored.
-  - **Playback volume:** a speaker button at the bottom of the rail opens a slider (0-100 %, squared, kept between runs)
+  - **Dub voice separation:** with the tool installed, transcribing a dub first separates its sound
+  (`voices.wav`, `background.wav` next to `audio.wav`, written as `*.part.wav` and kept only when both are done; a
+  failure goes on with the full mix and says so); Whisper hears the voices, references are cut from them, and the
+  export and preview play the background in full and the original voices at `voices_volume` (default 0, "Original
+  voices"; `original_volume`, "Original", applies without stems). The More menu has "Separate voices (again)" and "Use
+  the full mix" (deletes the stems). The timeline waveform is the voices'.
+- **Playback volume:** a speaker button at the bottom of the rail opens a slider (0-100 %, squared, kept between runs)
   and Mute; every sound the app plays follows it (players, Studio playback, the Dub preview), never exported or
   generated files (`volume.js`). It and the Dub panes' sizes are kept by the server (`GET`/`PATCH /api/preferences`,
   `.local/webview/preferences.json`): the page's own storage belongs to its address, whose port changes every launch.
@@ -85,6 +91,12 @@ on the CPU (no PyTorch; the GPU stays free). Optional and recommended. When inst
 before the sample is saved (the user can correct it) and detects its language; installing it transcribes every
 sample without a transcript in the background. Without it the transcript is typed. A new sample cannot be saved
 without a transcript; samples from before this rule fail only for models with `needs_transcript`.
+
+**Voice separation** (`TOOLS["demucs"]`, Dub only): PyTorch (shared CUDA build) and `demucs==4.0.1`, model `htdemucs`,
+on the GPU when there is one, else the CPU. It splits a dub's sound into voices (speech, singing) and background
+(music, effects), one request per file, the network blocked like every worker. The code is MIT; the pretrained weights
+have no clear license, so the install downloads them and Vokalit never ships them (shown on the Models screen).
+`python worker.py --selftest` checks an install.
 
 ## 5. Architecture
 

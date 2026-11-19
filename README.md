@@ -53,7 +53,9 @@ English script. Unmute the player to listen.
   from the Too long / Too short tabs; fitted sentences stay listed with their speed, can go back to the original take,
   and the rest need a shorter or longer translation. One dub can have several target languages (tabs), each with its own translations, takes,
   timing and model. Music or singing that Whisper wrote down can be marked *Keep the original here* (K): the original
-  plays there at full volume in every language, and nothing is translated or generated. Every change can be undone
+  plays there at full volume in every language, and nothing is translated or generated. With **Voice separation**
+  (Demucs, on the Models screen) the speech is separated from the music and effects first: voices are copied from
+  clean speech, and the music stays at full level under the dub. Every change can be undone
   (Ctrl+Z). The mix is exported as one audio file. The screen stays quick with tens of thousands of sentences; the
   file itself is best kept to about 20 minutes, as the window decodes its sound.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
