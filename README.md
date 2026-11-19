@@ -6,6 +6,9 @@
 characters, generate takes, compare them and export the result — all on your own computer with an NVIDIA GPU.
 Your voice, your text and the generated audio never leave your machine.
 
+It is deliberately small: a few hundred KB of plain Python and JavaScript, no build step, and models chosen to run on
+everyday graphics cards with **8–12 GB of video memory** (developed and measured on a 12 GB RTX 4070 SUPER).
+
 **Listen** — two characters made with **Design voice** (OmniVoice, from a description; no one's voice was recorded), then used as
 samples for a short podcast voiced with Higgs TTS 3. The second clip has the same Turkish-designed voices reading an
 English script. Unmute the player to listen.
@@ -100,6 +103,8 @@ version.
   about 6.1 GB in 8-bit or 9.7 GB in full precision (it picks full precision when there is room, and the Models
   screen says which and why). Models left unused for 5 minutes are unloaded, and others are unloaded when one needs
   room.
+  In short, from these measurements (not yet tried on an 8 GB card): with **8 GB**, Chatterbox, OmniVoice and Higgs TTS 3 (in 8-bit) run, while VoxCPM2 is tight; with
+  **12 GB**, every model runs, Higgs TTS 3 in full precision when nothing else is using the GPU.
 - **Windows 10/11** (tested) or **Linux** (less tested).
 - An internet connection only while installing. Nothing else needs to be installed beforehand: Vokalit downloads its
   own Python and packages into its folder, and the models are installed later from inside the app.
