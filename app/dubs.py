@@ -231,6 +231,10 @@ def restore_sentence(dub_id: str, source: dict, clips: dict[str, dict], index: i
             clip = clips.get(track["language"])
             if clip is None or any(c["id"] == clip["id"] for c in track["clips"]) or clip["source_clip"] != source["id"]:
                 clip = {**_new_clip(0, source), "id": _free_clip_id(track)}  # a language added after the delete
+            # Takes whose files are gone (the language was removed and added again) are forgotten.
+            takes = [t for t in clip["takes"] if (dub_dir(dub_id) / t["file"]).exists()]
+            clip = {**clip, "takes": takes,
+                    "selected": clip["selected"] if any(t["file"] == clip["selected"] for t in takes) else None}
             track["clips"].insert(place, {**clip, "voice_from": clip["voice_from"] if clip["voice_from"] in known
                                           else source["id"]})
             for other in track["clips"]:

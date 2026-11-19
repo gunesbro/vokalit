@@ -190,7 +190,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       const before = clips().find((c) => c.id === clipId)?.start;
       const at = q();
       act(inLanguage(`move sentence ${numberOf(clipId)}`), () => api("PATCH", path(`/clips/${clipId}${at}`), { start }),
-        () => api("PATCH", path(`/clips/${clipId}${at}`), { start: before }));
+        () => api("PATCH", path(`/clips/${clipId}${at}`), { start: before }), track().language);
     } });
   main.replaceChildren(header,
     el("div", { class: "dub-layout" },
@@ -215,10 +215,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   }
 
   // Does a change and records how to undo it. `run` and `revert` return the dub view (one request, or the last of several).
-  async function act(label, run, revert) {
+  // `language`: the language the step belongs to (none for shared ones), so removing a language forgets its steps.
+  async function act(label, run, revert, language = null) {
     try {
       apply(await run());
-      history().push({ label, undo: revert, redo: run });
+      history().push({ label, undo: revert, redo: run, language });
       drawHeader();
     } catch (error) { fail(error); }
   }
@@ -252,7 +253,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const at = q();
     return act(inLanguage(`translation of sentence ${numberOf(clip.id)}`),
       () => api("PATCH", path(`/clips/${clip.id}${at}`), { translation: text }),
-      () => api("PATCH", path(`/clips/${clip.id}${at}`), { translation: before }));
+      () => api("PATCH", path(`/clips/${clip.id}${at}`), { translation: before }), track().language);
   }
 
   function editOriginal(clip, text) {
@@ -270,7 +271,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const before = perLanguage ? track()[key] : dub[key];
     if (before === null || before === undefined) return change(api("PATCH", path(at), { [key]: value }));
     act(perLanguage ? inLanguage(label) : label, () => api("PATCH", path(at), { [key]: value }),
-      () => api("PATCH", path(at), { [key]: before }));
+      () => api("PATCH", path(at), { [key]: before }), perLanguage ? track().language : null);
   }
 
   function pasteMany(translations) {
@@ -278,7 +279,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const at = q();
     act(inLanguage(`pasted ${plural(Object.keys(translations).length, "translation")}`),
       () => api("PATCH", path(`/translations${at}`), { translations }),
-      () => api("PATCH", path(`/translations${at}`), { translations: before }));
+      () => api("PATCH", path(`/translations${at}`), { translations: before }), track().language);
   }
 
   function deleteSentence(clip) {
@@ -298,8 +299,9 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   // --- Jobs ------------------------------------------------------------------------------------
 
   async function follow(started, kind, ids = [], language = track().language) {
-    // The generated sentences' takes before, for undoing the generation.
-    const before = Object.fromEntries(clips().filter((c) => ids.includes(c.id)).map((c) => [c.id, c.selected]));
+    // The generated sentences' takes before (in the job's language), for undoing the generation.
+    const generating = tracks().find((t) => t.language === language)?.clips || [];
+    const before = Object.fromEntries(generating.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.selected]));
     job = { id: started.id, kind, clips: new Set(ids), progress: started.progress || "" };
     draw();
     try {
@@ -341,7 +343,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       { file: item[index] })));
     const label = `generating ${plural(changed.length, "sentence")}`;
     history().push({ label: tracks().length > 1 ? `${label} (${languageName(language)})` : label, undo: () => select(1),
-      redo: () => select(2) });
+      redo: () => select(2), language });
   }
 
   async function transcribe() {
@@ -473,6 +475,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         try {
           const data = await api("DELETE", path(`/languages/${code}`));
           if (code === track().language) { lang = null; openLanguage.delete(dub.id); }
+          history().drop((step) => step.language === code); // its steps could only fail now
           apply(data);
         } catch (error) { fail(error); }
       } }, "Remove")), { align: "left" });
@@ -587,7 +590,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         const before = clip.voice_from;
         const at = q();
         act(inLanguage(`voice of sentence ${number}`), () => api("PATCH", path(`/clips/${clip.id}${at}`), { voice_from: voice.value }),
-          () => api("PATCH", path(`/clips/${clip.id}${at}`), { voice_from: before }));
+          () => api("PATCH", path(`/clips/${clip.id}${at}`), { voice_from: before }), track().language);
       } },
     sources().map((s, n) => el("option", { value: s.id }, s.id === clip.source_clip ? "This sentence"
       : `${n + 1} \u00b7 ${s.text.slice(0, 32)}${s.text.length > 32 ? "\u2026" : ""}`)));
@@ -600,7 +603,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
           const before = clip.selected;
           const at = q();
           act(inLanguage(`take of sentence ${number}`), () => api("POST", path(`/clips/${clip.id}/select${at}`), { file: take.file }),
-            () => api("POST", path(`/clips/${clip.id}/select${at}`), { file: before }));
+            () => api("POST", path(`/clips/${clip.id}/select${at}`), { file: before }), track().language);
         } }, take.file === clip.selected ? "\u25cf" : "\u25cb"),
       player(fileUrl(take.file), { buckets: 30, showTime: false, label: `Play take ${n + 1}` }),
       el("span", { class: "faint small num" }, `${take.duration.toFixed(1)} s \u00b7 seed ${take.seed}`)));
@@ -893,7 +896,12 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   if (dub.notice) setMessage(message, dub.notice, "warn");
   // A job started before the screen was left keeps running on the server: follow it again.
   api("GET", path("/jobs")).then(([running]) => {
-    if (running && !job && main.isConnected) follow(running, running.kind, running.clips, running.language || track().language);
+    if (!running || job || !main.isConnected) return;
+    if (running.language && tracks().some((t) => t.language === running.language)) {
+      lang = running.language; // show the language being generated
+      openLanguage.set(dub.id, lang);
+    }
+    follow(running, running.kind, running.clips, running.language || track().language);
   }).catch(() => {});
   return { stop: () => { stopped = true; play.stop(); document.removeEventListener("keydown", onKey); }, transcribe };
 }

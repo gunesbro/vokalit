@@ -222,6 +222,10 @@ export function createHistory(limit = 100) {
     },
     undo: () => move(done, undone, "undo"),
     redo: () => move(undone, done, "redo"),
+    // Forgets the steps `match` picks, e.g. those of a removed language, which could only fail now.
+    drop(match) {
+      for (const list of [done, undone]) list.splice(0, list.length, ...list.filter((step) => !match(step)));
+    },
     undoLabel: () => done.at(-1)?.label ?? null,
     redoLabel: () => undone.at(-1)?.label ?? null,
     lastResult: () => result,

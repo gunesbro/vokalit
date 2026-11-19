@@ -265,3 +265,15 @@ test("createHistory ignores an undo while another is running", async () => {
   assert.deepEqual(log, ["undo s2"]);
   assert.equal(h.undoLabel(), "s1");
 });
+
+test("createHistory drops the steps of something that no longer exists", async () => {
+  const h = createHistory();
+  const step = (label, language) => ({ label, language, undo: async () => {}, redo: async () => {} });
+  h.push(step("a", "en"));
+  h.push(step("b", "de"));
+  h.push(step("c", "de"));
+  await h.undo();
+  h.drop((s) => s.language === "de");
+  assert.equal(h.undoLabel(), "a");
+  assert.equal(h.redoLabel(), null);
+});

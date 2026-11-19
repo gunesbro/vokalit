@@ -387,3 +387,27 @@ def test_sentences_are_shared_by_every_language(tmp_workspace):
     assert dubs.load_dub(dub)["tracks"] == data["tracks"]
     dubs.set_transcript(dub, "tr", SEGMENTS[:1])
     assert [len(t["clips"]) for t in dubs.load_dub(dub)["tracks"]] == [1, 1, 1]
+
+
+def test_restore_sentence_forgets_takes_whose_files_are_gone(tmp_workspace):
+    # Undo of a delete after its language was removed and added again: the old take files no longer exist.
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.add_language(dub, "de")
+    take = _with_take_in(dub, "d2", "de")
+    data = dubs.load_dub(dub)
+    source, clips = data["tracks"][0]["clips"][1], {"de": data["tracks"][2]["clips"][1]}
+    dubs.delete_source_clip(dub, "o2")
+    dubs.remove_language(dub, "de")
+    dubs.add_language(dub, "de")
+    assert not take.exists()
+    dubs.restore_sentence(dub, source, clips, 1)
+    clip = dubs.load_dub(dub)["tracks"][2]["clips"][1]
+    assert clip["takes"] == [] and clip["selected"] is None
+
+
+def _with_take_in(dub, clip_id, language):
+    take = dubs.new_take_path(dub, clip_id, language=language)
+    make_wav(take, 1)
+    dubs.add_take(dub, clip_id, {"file": str(take), "seed": 1, "duration": 1.0}, language=language)
+    return take

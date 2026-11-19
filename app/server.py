@@ -1026,9 +1026,10 @@ def add_dub_language(req, did):
 @route("DELETE", "/api/dubs/(?P<did>[0-9-]+)/languages/(?P<code>[a-z]{2,3}(?:-[A-Za-z0-9]+)?)")
 def remove_dub_language(req, did, code):
     _dub_or_404(did)
-    if any(j.get("language") == code for j in _dub_jobs(did)):
-        raise ws.WorkspaceError("This language is generating. Wait for it to finish or cancel it.")
-    dubs.remove_language(did, code)
+    with _dub_job_lock:  # a generation cannot start for it between the check and the removal
+        if any(j.get("language") == code for j in _dub_jobs(did)):
+            raise ws.WorkspaceError("This language is generating. Wait for it to finish or cancel it.")
+        dubs.remove_language(did, code)
     return _dub_view(did)
 
 
