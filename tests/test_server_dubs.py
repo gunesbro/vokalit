@@ -285,3 +285,29 @@ def test_kept_sentences_are_not_generated(api, tmp_path, monkeypatch):
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
     done = _wait(api, job["id"])
     assert done["state"] == "failed" and "Sentence 1 keeps the original" in done["error"]
+
+
+def _take(dub_id, clip_id, seconds):
+    take = dubs.new_take_path(dub_id, clip_id)
+    make_wav(take, seconds)
+    dubs.add_take(dub_id, clip_id, {"file": str(take), "seed": 1, "duration": float(seconds)})
+
+
+def test_fit_route_runs_a_job(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    _take(dub["id"], "d1", 4.0)  # 3.45 s of room: 1.16x
+    _take(dub["id"], "d2", 10.0)  # 7.95 s to the end of the file: would need 1.26x
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/fit?language=en", {"clips": ["d1", "d2"]})
+    assert server_job(job["id"])["kind"] == "fit"
+    done = _wait(api, job["id"])
+    assert done["state"] == "done", done
+    assert done["result"]["notice"] == "Fitted 1 sentence. 1 needs a shorter translation."
+    assert done["result"]["fit"]["en"]["d1"]["speed"] == 1.16 and done["result"]["fit"]["en"]["d2"]["state"] == "long"
+
+
+def test_fitting_one_sentence_says_why_not(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    _take(dub["id"], "d2", 10.0)
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/fit", {"clips": ["d2"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "1.26× faster" in done["error"]

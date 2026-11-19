@@ -14,12 +14,19 @@ import numpy as np
 import soundfile as sf
 
 import workspace as ws
+from stretch import stretch
 
 SOURCE_TYPES = {"wav", "mp3", "m4a", "ogg", "flac"}
 VIDEO_TYPES = {"mp4", "webm"}
 DEFAULT_ORIGINAL_VOLUME = 0.15
 REFERENCE_PADDING = 0.15  # seconds kept around a sentence cut out as a voice reference
 KEPT_FADE = 0.05  # seconds to fade the original up and down around a sentence that keeps it
+MAX_SPEEDUP = 1.25  # a take is sped up at most this much to fit; beyond it speech stops sounding natural
+FIT_GAP = 0.05  # seconds left free before the next sentence when a take is fitted
+
+
+class NeedsShorter(ws.WorkspaceError):
+    """A take cannot be fitted by speeding it up: its translation has to be shorter."""
 
 
 def _root() -> Path:
@@ -359,6 +366,47 @@ def cut_reference(dub_id: str, clip_id: str, language: str | None = None) -> tup
     return path, source["text"]
 
 
+def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
+    """Speeds a clip's selected take up (same pitch) to end FIT_GAP before the next sentence, as a new selected take
+    that remembers the take it came from; fitting again starts from that one, not from a sped-up copy. Returns the
+    speed. Refused when it already fits, or would need more than MAX_SPEEDUP (NeedsShorter)."""
+    data = load_dub(dub_id)
+    clips = _dub_clips(data, language)
+    clip = _find(clips, clip_id)
+    number = clips.index(clip) + 1
+    if clip["source_clip"] in {s["id"] for s in _kept(data)}:
+        raise ws.WorkspaceError(f"Sentence {number} keeps the original.")
+    selected = next((t for t in clip["takes"] if t["file"] == clip["selected"]), None)
+    if selected is None:
+        raise ws.WorkspaceError(f"Sentence {number} has no take yet.")
+    base = next((t for t in clip["takes"] if t["file"] == selected.get("from")), selected)
+    path = dub_dir(dub_id) / base["file"]
+    if not path.exists():
+        raise ws.WorkspaceError(f"Sentence {number}: the take file is missing ({base['file']}). Generate it again.")
+    order = sorted(clips, key=lambda c: c["start"])  # the next sentence as fit() sees it
+    following = order[order.index(clip) + 1:order.index(clip) + 2]
+    limits = [c["start"] for c in following] + ([data["source"]["duration"]] if data["source"]["duration"] else [])
+    room = (min(limits) - clip["start"] - FIT_GAP) if limits else float("inf")
+    if room <= 0:
+        raise NeedsShorter(f"Sentence {number} has no time before the next sentence. Move it or shorten the translation.")
+    if base["duration"] <= room:  # the take it came from fits again (the next sentence moved): use that one
+        if selected is base:
+            raise ws.WorkspaceError(f"Sentence {number} already fits.")
+        select_take(dub_id, clip_id, base["file"], language)
+        return 1.0
+    speed = base["duration"] / room
+    if speed > MAX_SPEEDUP:
+        raise NeedsShorter(f"Sentence {number} would need {speed:.2f}\u00d7 faster. Shorten the translation.")
+    rate, samples = _read(path)
+    faster = stretch(samples.astype(np.float32) / 32768, rate, speed)
+    out = new_take_path(dub_id, clip_id, language)
+    _write(out, rate, np.clip(np.round(faster * 32768), -32768, 32767))
+    take = {key: value for key, value in base.items() if key not in ("file", "duration", "speed", "from")}
+    add_take(dub_id, clip_id, {**take, "file": str(out), "duration": round(len(faster) / rate, 2),
+                               "speed": round(speed, 2), "from": base["file"]}, language)
+    return speed
+
+
 def _selected_duration(clip: dict) -> float | None:
     take = next((t for t in clip["takes"] if t["file"] == clip["selected"]), None)
     return take["duration"] if take else None
@@ -366,7 +414,7 @@ def _selected_duration(clip: dict) -> float | None:
 
 def fit(data: dict, language: str | None = None) -> dict[str, dict]:
     """Per dub clip: "missing" (no take), "fits", or "long" with `over` = seconds it runs into the next clip (by start)
-    or past the end of the file."""
+    or past the end of the file; "speed" too when its take was sped up to fit."""
     clips = sorted(_dub_clips(data, language), key=lambda c: c["start"])
     end_of_file = data["source"]["duration"]
     kept = {s["id"] for s in _kept(data)}
@@ -382,6 +430,9 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
         limits = [c["start"] for c in clips[i + 1:i + 2]] + ([end_of_file] if end_of_file is not None else [])
         over = round(clip["start"] + duration - min(limits), 1) if limits else 0.0
         result[clip["id"]] = {"state": "long", "over": over} if over > 0 else {"state": "fits", "over": 0.0}
+        speed = next((t.get("speed") for t in clip["takes"] if t["file"] == clip["selected"]), None)
+        if speed:  # sped up to fit: still listed under "Too long", with how much
+            result[clip["id"]]["speed"] = speed
     return result
 
 

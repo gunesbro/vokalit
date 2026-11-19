@@ -1188,6 +1188,38 @@ def generate_dub(req, did):
     return _start_dub_job(did, work, "generate", ids, language)
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/fit")
+def fit_dub(req, did):
+    """Speeds the given sentences' takes up to fit before the next sentence, as a job. One sentence that cannot be
+    fitted fails with the reason; several report how many were fitted and how many need a shorter translation."""
+    language = _dub_language(req, _dub_or_404(did))
+    ids = [str(c) for c in req["json"].get("clips", [])]
+    _dub_free(did)
+
+    def work(job):
+        fitted, shorter, problems = 0, [], []
+        for i, cid in enumerate(ids, 1):
+            if job.get("cancelled"):
+                raise Cancelled()
+            job["progress"] = f"Sentence {i} of {len(ids)}"
+            try:
+                dubs.fit_take(did, cid, language)
+                fitted += 1
+            except dubs.NeedsShorter as error:
+                shorter.append(str(error))
+            except ws.WorkspaceError as error:
+                problems.append(str(error))
+        if len(ids) == 1 and (shorter or problems):
+            raise ws.WorkspaceError((shorter + problems)[0])
+        notice = f"Fitted {fitted} sentence{'' if fitted == 1 else 's'}."
+        if shorter:
+            notice += f" {len(shorter)} need{'s' if len(shorter) == 1 else ''} a shorter translation."
+        if problems:
+            notice += f" {len(problems)} could not be fitted: {problems[0]}"
+        return _dub_view(did, notice)
+    return _start_dub_job(did, work, "fit", ids, language)
+
+
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/export")
 def export_dub(req, did):
     code = _dub_language(req, _dub_or_404(did))

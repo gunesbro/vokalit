@@ -439,3 +439,69 @@ def test_dub_json_is_written_compact(tmp_workspace):
     text = (dubs.dub_dir(did) / "dub.json").read_text(encoding="utf-8")
     assert "\n  " not in text
     assert dubs.load_dub(did) == data
+
+
+def _long_take(tmp_path, seconds):
+    """A dub whose first sentence (0.5 s; the next starts at 4.0 s, so 3.45 s of room) has a take of `seconds`."""
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    take = dubs.new_take_path(dub, "d1")
+    make_wav(take, seconds)
+    dubs.add_take(dub, "d1", {"file": str(take), "seed": 1, "duration": float(seconds)})
+    return dub
+
+
+def test_fit_take_speeds_up_to_the_slot(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    speed = dubs.fit_take(dub, "d1")
+    clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
+    fitted = next(t for t in clip["takes"] if t["file"] == clip["selected"])
+    assert len(clip["takes"]) == 2 and fitted["file"] != clip["takes"][0]["file"]
+    assert abs(speed - 4.0 / 3.45) < 0.01 and fitted["speed"] == round(speed, 2)
+    assert fitted["duration"] <= 3.46 and abs(ws.wav_duration(dubs.dub_dir(dub) / fitted["file"]) - 3.45) < 0.02
+    assert fitted["from"] == clip["takes"][0]["file"]
+
+
+def test_fit_refuses_over_the_limit(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 5.0)
+    with pytest.raises(dubs.NeedsShorter, match="1.45× faster"):
+        dubs.fit_take(dub, "d1")
+    assert len(dubs.load_dub(dub)["tracks"][1]["clips"][0]["takes"]) == 1
+
+
+def test_fit_refuses_a_take_that_fits(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 3.0)
+    with pytest.raises(ws.WorkspaceError, match="already fits"):
+        dubs.fit_take(dub, "d1")
+
+
+def test_fit_with_no_room_before_the_next_sentence(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 3.0)
+    dubs.update_dub_clip(dub, "d2", start=0.5)
+    with pytest.raises(dubs.NeedsShorter, match="no time"):
+        dubs.fit_take(dub, "d1")
+
+
+def test_fit_without_a_take_or_its_file(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    with pytest.raises(ws.WorkspaceError, match="no take yet"):
+        dubs.fit_take(dub, "d2")
+    clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
+    (dubs.dub_dir(dub) / clip["selected"]).unlink()
+    with pytest.raises(ws.WorkspaceError, match="missing"):
+        dubs.fit_take(dub, "d1")
+
+
+def test_fitting_again_starts_from_the_original_take(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    dubs.fit_take(dub, "d1")
+    dubs.update_dub_clip(dub, "d2", start=3.8)  # less room: 3.25 s
+    speed = dubs.fit_take(dub, "d1")
+    clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
+    fitted = next(t for t in clip["takes"] if t["file"] == clip["selected"])
+    assert abs(speed - 4.0 / 3.25) < 0.01 and fitted["from"] == clip["takes"][0]["file"]
+
+
+def test_fit_shows_the_speed(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    dubs.fit_take(dub, "d1")
+    assert dubs.fit(dubs.load_dub(dub))["d1"] == {"state": "fits", "over": 0.0, "speed": 1.16}
