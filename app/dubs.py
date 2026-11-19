@@ -5,13 +5,18 @@ dub.json, source.<ext> (the imported file), audio.wav (its sound, decoded by the
 """
 import shutil
 import time
+import wave
 from pathlib import Path
+
+import numpy as np
+import soundfile as sf
 
 import workspace as ws
 
 SOURCE_TYPES = {"wav", "mp3", "m4a", "ogg", "flac"}
 VIDEO_TYPES = {"mp4", "webm"}
 DEFAULT_ORIGINAL_VOLUME = 0.15
+REFERENCE_PADDING = 0.15  # seconds kept around a sentence cut out as a voice reference
 
 
 def _root() -> Path:
@@ -206,3 +211,96 @@ def select_take(dub_id: str, clip_id: str, file: str) -> None:
         raise ws.WorkspaceError("This take no longer exists.")
     clip["selected"] = file
     save_dub(dub_id, data)
+
+
+# --- References, fit, export --------------------------------------------------------------------
+
+
+def _read(path: Path) -> tuple[int, np.ndarray]:
+    with wave.open(str(path), "rb") as w:
+        return w.getframerate(), np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+
+
+def _write(path: Path, rate: int, samples: np.ndarray) -> None:
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(samples.astype("<i2").tobytes())
+
+
+def cut_reference(dub_id: str, clip_id: str) -> tuple[Path, str]:
+    """The voice reference for a dub clip: only the original audio of its "voice from" sentence (never neighbours,
+    which in a dialogue are often the other speaker), with a little padding; and that sentence's text."""
+    data = load_dub(dub_id)
+    source = _find(_source_clips(data), _find(_dub_clips(data), clip_id)["voice_from"])
+    rate, samples = _read(audio_path(dub_id))
+    first = max(0, round((source["start"] - REFERENCE_PADDING) * rate))
+    last = min(len(samples), round((source["end"] + REFERENCE_PADDING) * rate))
+    folder = dub_dir(dub_id) / "refs"
+    folder.mkdir(exist_ok=True)
+    path = folder / f"{source['id']}.wav"
+    _write(path, rate, samples[first:last])
+    return path, source["text"]
+
+
+def _selected_duration(clip: dict) -> float | None:
+    take = next((t for t in clip["takes"] if t["file"] == clip["selected"]), None)
+    return take["duration"] if take else None
+
+
+def fit(data: dict) -> dict[str, dict]:
+    """Per dub clip: "missing" (no take), "fits", or "long" with `over` = seconds it runs into the next clip (by start)
+    or past the end of the file."""
+    clips = sorted(_dub_clips(data), key=lambda c: c["start"])
+    end_of_file = data["source"]["duration"]
+    result = {}
+    for i, clip in enumerate(clips):
+        duration = _selected_duration(clip)
+        if duration is None:
+            result[clip["id"]] = {"state": "missing", "over": 0.0}
+            continue
+        limits = [c["start"] for c in clips[i + 1:i + 2]] + ([end_of_file] if end_of_file is not None else [])
+        over = round(clip["start"] + duration - min(limits), 1) if limits else 0.0
+        result[clip["id"]] = {"state": "long", "over": over} if over > 0 else {"state": "fits", "over": 0.0}
+    return result
+
+
+def export_dub(dub_id: str, fmt: str = "wav") -> Path:
+    """Mixes every selected take at its start over the original (at original_volume) into exports/<name>-<time>.<fmt>.
+    Sentences without a take are silent; the original still plays under them."""
+    if fmt not in ws.export_formats():
+        raise ws.WorkspaceError(f"This computer cannot export {fmt.upper()} files.")
+    data = load_dub(dub_id)
+    if not audio_path(dub_id).exists():
+        raise ws.WorkspaceError("The dub has no sound yet. Import the file again.")
+    source_rate, source = _read(audio_path(dub_id))
+    takes = []
+    for n, clip in enumerate(_dub_clips(data), 1):
+        if not clip["selected"]:
+            continue
+        path = dub_dir(dub_id) / clip["selected"]
+        if not path.exists():
+            raise ws.WorkspaceError(f"Sentence {n}: the selected take file is missing ({clip['selected']}). "
+                                    "Generate it again or choose another take.")
+        takes.append((clip["start"], *_read(path)))
+    # Models write different sample rates (VoxCPM2 48 kHz, others 24 kHz): mix at the highest, so nothing is lost.
+    rate = max([source_rate] + [take_rate for _, take_rate, _ in takes])
+    original = source if source_rate == rate else ws._resample(source, source_rate, rate)
+    mix = original.astype(np.float64) * data["original_volume"]
+    for start, take_rate, samples in takes:
+        samples = samples if take_rate == rate else ws._resample(samples, take_rate, rate)
+        first = round(start * rate)
+        if first + len(samples) > len(mix):
+            mix = np.concatenate([mix, np.zeros(first + len(samples) - len(mix))])
+        mix[first:first + len(samples)] += samples
+    mix = np.clip(np.round(mix), -32768, 32767).astype("<i2")
+    folder = dub_dir(dub_id) / "exports"
+    folder.mkdir(exist_ok=True)
+    out = folder / f"{ws.slugify(data['name'])}-{time.strftime('%Y%m%d-%H%M%S')}.{fmt}"
+    if fmt == "wav":
+        _write(out, rate, mix)
+    else:
+        major, subtype = ws.EXPORT_ENCODINGS[fmt]
+        sf.write(str(out), mix.astype(np.float32) / 32768, rate, format=major, subtype=subtype)
+    return out
