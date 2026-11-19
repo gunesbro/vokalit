@@ -6,6 +6,20 @@
 characters, generate takes, compare them and export the result — all on your own computer with an NVIDIA GPU.
 Your voice, your text and the generated audio never leave your machine.
 
+**Listen** — two characters made with **Design voice** (OmniVoice, from a description; no one's voice was recorded), then used as
+samples for a short podcast voiced with Higgs TTS 3. The second clip has the same Turkish-designed voices reading an
+English script. Unmute the player to listen.
+
+<table>
+<tr><th>Turkish</th><th>English</th></tr>
+<tr>
+<td><video src="https://github.com/user-attachments/assets/3ae4f506-6cbf-43e7-b548-e0e4650fcc7b" controls muted width="100%"></video></td>
+<td><video src="https://github.com/user-attachments/assets/9a7e00d0-6b1f-4899-ae08-8941af1a514b" controls muted width="100%"></video></td>
+</tr>
+</table>
+
+<sub>Made with Boson AI's Higgs Audio.</sub>
+
 ![The Studio: a script with several characters, takes for each line, and Play all](docs/images/studio.png)
 
 - **Studio** — sessions with a cast of characters and a script. Generate one or more takes per line, pick the best,
@@ -32,26 +46,6 @@ Your voice, your text and the generated audio never leave your machine.
   emotions, styles, delivery and sounds; OmniVoice performs its sounds, more clearly with a higher Quality.
 - **Transcripts** — every sample keeps what is said in it, which some models use to copy the voice. The optional
   Whisper component writes it for you (and detects the language); otherwise you type it.
-
-## Listen
-
-Two characters made with **Design voice** (OmniVoice, from a description; no one's voice was recorded), then used as
-samples for a short podcast voiced with Higgs TTS 3. The second clip has the same Turkish-designed voices reading an
-English script. Unmute the player to listen.
-
-**Turkish**
-
-
-https://github.com/user-attachments/assets/3ae4f506-6cbf-43e7-b548-e0e4650fcc7b
-
-
-**English**
-
-
-https://github.com/user-attachments/assets/9a7e00d0-6b1f-4899-ae08-8941af1a514b
-
-
-<sub>Made with Boson AI's Higgs Audio.</sub>
 
 ## Screenshots
 
