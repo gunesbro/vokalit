@@ -17,6 +17,7 @@ const close = () => document.querySelector(".popover")?.dispatchEvent(new Event(
 const histories = new Map(); // dub id -> undo history, kept while the app runs (across screen changes)
 const openLanguage = new Map(); // dub id -> the language shown, kept across screen changes
 const WAVE_PER_SECOND = 50; // waveform values per second of the original
+const LISTENING = "Whisper is finding the sentences on the CPU; a long file takes a while.";
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select, [contenteditable]"));
 
 export async function renderDub(root) {
@@ -316,6 +317,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const generating = tracks().find((t) => t.language === language)?.clips || [];
     const before = Object.fromEntries(generating.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.selected]));
     job = { id: started.id, kind, clips: new Set(ids), progress: started.progress || "" };
+    // Also shown when the screen comes back to a transcription that is still running.
+    if (kind === "transcribe") setMessage(message, LISTENING);
     draw();
     try {
       const result = await waitForJob(started.id, (update) => {
@@ -362,7 +365,6 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   async function transcribe() {
     if (!whisper) return setMessage(message, "Install Whisper on the Models screen to find the sentences.", "warn");
     try {
-      setMessage(message, "Whisper is listening on the CPU; a long file takes a while.");
       await follow(await api("POST", path("/transcribe"), {}), "transcribe");
     } catch (error) { fail(error); }
   }
@@ -521,6 +523,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     if (!all.length) {
       table.replaceChildren(el("div", { class: "empty small" }, dub.source.language
         ? el("p", { class: "muted" }, "No sentences. Transcribe again, or import another file.")
+        : job?.kind === "transcribe" ? el("p", { class: "muted" }, LISTENING)
         : whisper ? el("button", { class: "btn btn-primary", disabled: Boolean(job), onclick: transcribe }, "Find the sentences")
           : el("p", { class: "muted" }, "Install Whisper on the ", el("a", { href: "#/models" }, "Models screen"),
             " to find the sentences and their times.")));
