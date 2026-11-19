@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { filterOptions, formatTime, insertTag, moveLine, pickerLabel, settingsChanges, takeNumber } from "../script.js";
+import { designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, pickerLabel, settingsChanges,
+  takeNumber } from "../script.js";
 
 test("moveLine places a line before or after the target", () => {
   assert.deepEqual(moveLine(["a", "b", "c", "d"], "d", "b", false), ["a", "d", "b", "c"]);
@@ -89,4 +90,23 @@ test("filterOptions puts names starting with the search first, then words, then 
   assert.deepEqual(filterOptions(options, "  TUR ").map((o) => o.value), ["tk", "tr", "ota", "x"]);
   assert.deepEqual(filterOptions(options, "zh").map((o) => o.value), ["zh"]);
   assert.equal(filterOptions(options, "").length, 6);
+});
+
+test("designLanguage keeps a language the model has, else English, else its first", () => {
+  assert.equal(designLanguage(["en", "tr"], "tr"), "tr");
+  assert.equal(designLanguage(["en", "de"], "kk"), "en");
+  assert.equal(designLanguage(["zh", "ja"], "kk"), "zh");
+});
+
+test("designText has its own sentence only for English and Turkish", () => {
+  assert.equal(designText("tr").own, true);
+  assert.equal(designText("en").own, true);
+  assert.deepEqual(designText("de"), { text: designText("en").text, own: false });
+});
+
+test("isCut tells a trimmed clip from the whole one", () => {
+  assert.equal(isCut(0, 12, 12), false);
+  assert.equal(isCut(0.02, 11.99, 12), false);
+  assert.equal(isCut(1.5, 12, 12), true);
+  assert.equal(isCut(0, 9, 12), true);
 });

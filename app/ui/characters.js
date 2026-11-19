@@ -1,6 +1,7 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
 import { api, editableTitle, el, icon, ICONS, rememberMicrophone, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
+import { designLanguage, designText, isCut } from "./script.js";
 import { searchSelect } from "./settings.js";
 import { player, rangeEditor, stopAudio } from "./waveform.js";
 
@@ -29,15 +30,6 @@ function languages() {
   }).catch(() => []);
   return allLanguages;
 }
-
-// What designed voices read: about 12 seconds of speech, so a candidate is long enough to keep as a sample.
-const DESIGN_TEXT = {
-  en: "The morning was quiet, and the city was just waking up. I poured a cup of coffee, opened the window, "
-    + "and listened to the rain for a while before the long day began.",
-  tr: "Sabah sessizdi ve \u015fehir yeni uyan\u0131yordu. Bir fincan kahve koydum, pencereyi a\u00e7t\u0131m ve uzun "
-    + "g\u00fcn ba\u015flamadan \u00f6nce bir s\u00fcre ya\u011fmuru dinledim. Hava serindi ve sokaklar bombo\u015ftu.",
-};
-const designText = (language) => DESIGN_TEXT[language] || DESIGN_TEXT.en;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const query = (sessionId) => (sessionId ? `?session=${encodeURIComponent(sessionId)}` : "");
@@ -427,8 +419,9 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
         m.installed ? m.title : `${m.title} (install it in Models)`)));
       modelSelect.value = model.name;
       const text = el("textarea", { class: "textarea", rows: 3, "aria-label": "Text the voices read",
-        oninput: () => { typedText = true; } });
+        oninput: () => { typedText = true; textNote.hidden = true; } });
       const languageHolder = el("span");
+      const textNote = el("div", { class: "warn small", hidden: true });
       const description = el("div", { class: "row wrap" });
       const generate = el("button", { class: "btn btn-primary", onclick: () => run() }, "Generate 3 voices");
       const status = el("span", { class: "small muted" });
@@ -436,16 +429,20 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       let describe = () => "";
 
       function setLanguage(code) {
-        if (!typedText) text.value = designText(code);
+        const sentence = designText(code);
+        if (!typedText) text.value = sentence.text;
         language = code;
+        const name = model.languages.find((l) => l.code === code)?.name || code;
+        textNote.hidden = typedText || sentence.own;
+        textNote.textContent = `This sentence is English: write one in ${name} so the voices speak it.`;
         drawDescription(); // OmniVoice accents are for English only
       }
 
       function drawOptions() {
-        const codes = model.languages.map((l) => l.code);
-        languageHolder.replaceChildren(searchSelect({ label: "Language", small: true, value: language,
+        const code = designLanguage(model.languages.map((l) => l.code), language);
+        languageHolder.replaceChildren(searchSelect({ label: "Language", small: true, value: code,
           options: model.languages.map((l) => ({ value: l.code, label: l.name })), onChange: setLanguage }));
-        setLanguage(codes.includes(language) ? language : codes.includes("en") ? "en" : codes[0]);
+        setLanguage(code);
       }
 
       function drawDescription() {
@@ -507,7 +504,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       designer.replaceChildren(head,
         el("div", { class: "row wrap" }, el("label", { class: "row muted" }, "Model", modelSelect),
           el("label", { class: "row muted" }, "Language", languageHolder)),
-        el("label", { class: "field-label" }, "Text the voices read"), text,
+        el("label", { class: "field-label" }, "Text the voices read"), text, textNote,
         el("label", { class: "field-label" }, "Voice"), description,
         el("div", { class: "faint small" }, `Keep the text long enough for ${MIN_SECONDS} seconds of speech.`),
         el("div", { class: "row" }, generate, status), results);
@@ -564,6 +561,12 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       }
 
       const range = rangeEditor(samples, sampleRate, (start, end) => {
+        if (known && typed) {
+          const cut = isCut(start, end, samples.length / sampleRate);
+          fieldNote.className = cut ? "warn small" : "muted small";
+          fieldNote.textContent = cut ? "You cut the clip: make sure the text matches only what is left."
+            : "The text the voice read.";
+        }
         lengthOk = end - start >= MIN_SECONDS;
         paintSave();
         status.textContent = lengthOk ? "" : `Select at least ${MIN_SECONDS} seconds.`;

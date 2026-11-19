@@ -102,3 +102,19 @@ export function filterOptions(options, search) {
   };
   return options.map((o) => [rank(o), o]).filter(([r]) => r !== null).sort((a, b) => a[0] - b[0]).map(([, o]) => o);
 }
+
+// What designed voices read: about 12 seconds of speech, so a candidate is long enough to keep as a sample.
+const DESIGN_TEXT = {
+  en: "The morning was quiet, and the city was just waking up. I poured a cup of coffee, opened the window, "
+    + "and listened to the rain for a while before the long day began.",
+  tr: "Sabah sessizdi ve \u015fehir yeni uyan\u0131yordu. Bir fincan kahve koydum, pencereyi a\u00e7t\u0131m ve uzun "
+    + "g\u00fcn ba\u015flamadan \u00f6nce bir s\u00fcre ya\u011fmuru dinledim. Hava serindi ve sokaklar bombo\u015ftu.",
+};
+// The sentence for a language; own is false when it falls back to English.
+export const designText = (language) => ({ text: DESIGN_TEXT[language] || DESIGN_TEXT.en, own: language in DESIGN_TEXT });
+
+// The design language after a model change: the current one if the model has it, else English, else its first.
+export const designLanguage = (codes, current) => (codes.includes(current) ? current : codes.includes("en") ? "en" : codes[0]);
+
+// Whether a review range cuts the clip (more than a hair at either end), so its known text may no longer match.
+export const isCut = (start, end, duration) => start > 0.05 || end < duration - 0.05;
