@@ -85,6 +85,7 @@ export async function renderStudio(root) {
   let justClosed = null; // the row that replaces closed details fades in
   let editing = null; // session-only character whose card is shown
   let editingOpen = true; // that card expanded (samples visible) or collapsed to its header
+  let editingPanel = null; // {character, node}: that card's samples panel, reused by redraws so its state survives
   let seed = "";
   let batch = null;
   let pasting = false;
@@ -165,7 +166,7 @@ export async function renderStudio(root) {
         el("button", { class: "btn btn-primary", onclick: newSession }, "New session")));
       return;
     }
-    if (session?.id !== id) { stopAll(); picked.clear(); lastPicked = null; openLine = null; editing = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
+    if (session?.id !== id) { stopAll(); picked.clear(); lastPicked = null; openLine = null; editing = null; editingPanel = null; pasting = false; setMessage(message, ""); exportInfo.replaceChildren(); }
     const changed = session?.id !== id;
     try {
       session = await api("GET", `/api/sessions/${id}`);
@@ -304,6 +305,7 @@ export async function renderStudio(root) {
     const listed = sessions.find((s) => s.id === session.id);
     if (listed && listed.lines !== session.lines.length) { listed.lines = session.lines.length; drawList(); }
     const scroll = main.querySelector(".main-body")?.scrollTop || 0;
+    if (!editing) editingPanel = null; // a closed card opens with a fresh panel
     const card = editing && castEntry(editing)?.name ? sessionCharacterEditor(castEntry(editing)) : null;
     const divider = card && el("div", { class: "script-divider", role: "separator" }, `Script \u00b7 ${plural(session.lines.length, "line")}`);
     main.replaceChildren(header(), cast(), el("div", { class: "main-body" }, card, divider, script()), footer());
@@ -406,8 +408,8 @@ export async function renderStudio(root) {
     const sessionOnly = entry.scope === "session";
     const deleted = entry.name === null;
     const label = deleted ? "Deleted character" : entry.name;
-    const meta = deleted ? "" : sessionOnly ? "this session"
-      : entry.samples.length ? plural(entry.samples.length, "sample") : "default voice";
+    const voice = entry.samples.length ? plural(entry.samples.length, "sample") : "default voice";
+    const meta = deleted ? "" : sessionOnly ? `this session \u00b7 ${voice}` : voice;
     const nameNode = deleted ? el("span", { class: "warn" }, label)
       : sessionOnly ? el("button", { class: "link-btn", title: "Edit samples", onclick: () => { editing = editing === entry.character ? null : entry.character; editingOpen = true; justOpened = "card"; draw(); } }, label)
         : el("a", { class: "link-btn", href: `#/characters/${entry.character}`, title: "Open in Characters" }, label);
@@ -499,11 +501,18 @@ export async function renderStudio(root) {
     }
     card.append(head);
     if (editingOpen) {
-      let first = true;
-      card.append(el("div", { class: "character-body" }, samplePanel(null, entry.character, sid(), async () => {
-        if (first) { first = false; return; }
-        session = await api("GET", `/api/sessions/${sid()}`); // keep the panel; chips update on the next redraw
-      })));
+      if (editingPanel?.character !== entry.character) {
+        const id = sid();
+        let first = true;
+        editingPanel = { character: entry.character, node: samplePanel(null, entry.character, id, async () => {
+          if (first) { first = false; return; }
+          const data = await api("GET", `/api/sessions/${id}`);
+          if (session?.id !== id) return;
+          session = data;
+          draw(); // open lines and chips show the new samples; this panel is reused, so a review in progress stays
+        }) };
+      }
+      card.append(el("div", { class: "character-body" }, editingPanel.node));
     }
     return card;
   }
