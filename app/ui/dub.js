@@ -2,8 +2,8 @@
 import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, revealButton, setMessage, waitForJob }
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
-import { activeClip, clipFilter, clipsToPlay, createHistory, formatTime, parseTranslations, pasteTranslations,
-  pickSelected, transcriptForTranslation, volumeRamps } from "./script.js";
+import { activeClip, clampSize, clipFilter, clipsToPlay, createHistory, formatTime, onlyModel, parseTranslations,
+  pasteTranslations, pickSelected, transcriptForTranslation, volumeRamps } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { timeline } from "./timeline.js";
 import { player } from "./waveform.js";
@@ -17,6 +17,18 @@ const close = () => document.querySelector(".popover")?.dispatchEvent(new Event(
 const histories = new Map(); // dub id -> undo history, kept while the app runs (across screen changes)
 const openLanguage = new Map(); // dub id -> the language shown, kept across screen changes
 const WAVE_PER_SECOND = 50; // waveform values per second of the original
+// Pane sizes, dragged by the user and kept between runs: the right column's width and the timeline's lane height.
+const SIZES = { right: 400, lane: 22 }; // the defaults; the lane default is also the smallest
+const MIN_TABLE = 360;
+const MIN_RIGHT = 320;
+const MIN_ABOVE_TIMELINE = 200;
+const SPLIT = 7; // px, a separator's width
+const sizes = (() => {
+  try { return { ...SIZES, ...JSON.parse(localStorage.getItem("vokalit.dubSizes") || "{}") }; } catch { return { ...SIZES }; }
+})();
+const saveSizes = () => {
+  try { localStorage.setItem("vokalit.dubSizes", JSON.stringify(sizes)); } catch { /* storage may be unavailable */ }
+};
 const LISTENING = "Whisper is finding the sentences on the CPU; a long file takes a while.";
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select, [contenteditable]"));
 
@@ -197,12 +209,74 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       act(inLanguage(`move sentence ${numberOf(clipId)}`), () => api("PATCH", path(`/clips/${clipId}${at}`), { start }),
         () => api("PATCH", path(`/clips/${clipId}${at}`), { start: before }), track().language);
     } });
-  main.replaceChildren(header,
-    el("div", { class: "dub-layout" },
-      el("section", { class: "dub-left" }, tableHead, table),
-      el("aside", { class: "dub-right" }, stage, inspector),
-      el("div", { class: "dub-bottom" }, lanes.element)),
-    el("footer", { class: "dub-foot" }, message));
+  const bottom = el("div", { class: "dub-bottom" }, lanes.element);
+  const layout = el("div", { class: "dub-layout" });
+  const showSizes = () => {
+    layout.style.setProperty("--dub-right", `${sizes.right}px`);
+    layout.style.setProperty("--tl-lane", `${sizes.lane}px`);
+  };
+  // Dragging the column separator: the right column takes what the table gives.
+  let startRight = 0;
+  const columns = separator("Resize the sentences and the video", true, {
+    begin: () => { startRight = sizes.right; },
+    drag: (dx) => { sizes.right = clampSize(startRight - dx, MIN_RIGHT, layout.clientWidth - MIN_TABLE - SPLIT); },
+    reset: () => { sizes.right = SIZES.right; } });
+  // Dragging the timeline separator up makes the lanes and the waveform taller; their default height is the smallest.
+  let startLane = 0;
+  let startBottom = 0;
+  const laneCount = () => bottom.querySelectorAll(".tl-lane").length || 2;
+  const rows = separator("Resize the timeline", false, {
+    begin: () => { startLane = sizes.lane; startBottom = bottom.offsetHeight; },
+    drag: (dy) => {
+      const smallest = startBottom - laneCount() * (startLane - SIZES.lane);
+      const height = clampSize(startBottom - dy, smallest, layout.clientHeight - SPLIT - MIN_ABOVE_TIMELINE);
+      sizes.lane = SIZES.lane + (height - smallest) / laneCount();
+    },
+    reset: () => { sizes.lane = SIZES.lane; } });
+  showSizes();
+  layout.append(el("section", { class: "dub-left" }, tableHead, table), columns,
+    el("aside", { class: "dub-right" }, stage, inspector), rows, bottom);
+  main.replaceChildren(header, layout, el("footer", { class: "dub-foot" }, message));
+
+  // A separator between two panes: dragged, moved with the arrow keys, or double-clicked back to the default.
+  // `drag` gets the distance from where the drag began; sizes are saved when it ends.
+  function separator(label, vertical, { begin, drag, reset }) {
+    const node = el("div", { class: `dub-split ${vertical ? "vertical" : "horizontal"}`, role: "separator", tabindex: "0",
+      "aria-label": label, "aria-orientation": vertical ? "vertical" : "horizontal",
+      title: `${label}: drag it, or double-click to reset` });
+    const at = (e) => (vertical ? e.clientX : e.clientY);
+    node.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      node.setPointerCapture(e.pointerId);
+      node.classList.add("dragging");
+      begin();
+      const from = at(e);
+      const move = (m) => { drag(at(m) - from); showSizes(); };
+      const end = () => {
+        node.classList.remove("dragging");
+        node.removeEventListener("pointermove", move);
+        node.removeEventListener("pointerup", end);
+        node.removeEventListener("pointercancel", end);
+        saveSizes();
+      };
+      node.addEventListener("pointermove", move);
+      node.addEventListener("pointerup", end);
+      node.addEventListener("pointercancel", end);
+    });
+    node.addEventListener("dblclick", () => { reset(); showSizes(); saveSizes(); });
+    node.addEventListener("keydown", (e) => {
+      const keys = vertical ? { ArrowLeft: -16, ArrowRight: 16 } : { ArrowUp: -16, ArrowDown: 16 };
+      if (!(e.key in keys)) return;
+      e.preventDefault();
+      e.stopPropagation(); // not the sentence list's arrow keys
+      begin();
+      drag(keys[e.key]);
+      showSizes();
+      saveSizes();
+    });
+    return node;
+  }
 
   // --- Changes and undo ------------------------------------------------------------------------
 
@@ -371,9 +445,23 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
 
   async function generate(ids) {
     if (!ids.length) return;
+    if (!model()) return needModel();
     try {
       await follow(await api("POST", path(`/generate${q()}`), { clips: ids }), "generate", ids);
     } catch (error) { fail(error); }
+  }
+
+  // Generate without a model: point at the Model select and say why.
+  function needModel() {
+    header.querySelector(".dub-model")?.focus();
+    setMessage(message, installed.length ? `Choose the model that speaks ${languageName(track().language)} first.`
+      : "Install a voice model on the Models screen first.", "warn");
+  }
+
+  // A language without a model gets the one installed model that speaks it (no undo step, like a first choice).
+  function chooseOnlyModel() {
+    const name = !track().model && !job && onlyModel(installed, track().language);
+    if (name) setOption("choosing the model", "model", name);
   }
 
   // --- Drawing ---------------------------------------------------------------------------------
@@ -408,9 +496,9 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       refreshList();
     } });
     const chosen = model();
-    const modelSelect = el("select", { class: "select", "aria-label": "Model", title: "The model that speaks the translations",
-      onchange: () => setOption("changing the model", "model", modelSelect.value) },
-    !chosen && el("option", { value: "" }, installed.length ? "Choose a model" : "No model installed"),
+    const modelSelect = el("select", { class: `select dub-model ${chosen ? "" : "needs-choice"}`, "aria-label": "Model",
+      title: "The model that speaks the translations", onchange: () => setOption("changing the model", "model", modelSelect.value) },
+    !chosen && el("option", { value: "" }, installed.length ? "Choose a voice model" : "No model installed"),
     installed.map((m) => el("option", { value: m.name }, m.title)));
     modelSelect.value = chosen?.name || "";
     const target = languageTabs();
@@ -446,8 +534,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         title: redoLabel ? `Redo: ${redoLabel} (Ctrl+Shift+Z)` : "Nothing to redo", onclick: () => step("redo") }, "\u21b7"),
       job ? el("span", { class: "row small muted" }, el("span", { class: "job-progress" }, job.progress || "Working\u2026"),
         el("button", { class: "btn btn-small", onclick: () => api("POST", `/api/jobs/${job.id}/cancel`).catch(fail) }, "Cancel"))
-        : el("button", { class: "btn btn-primary", disabled: !missing.length || !chosen,
-          title: !chosen ? "Choose a model first" : missing.length
+        : el("button", { class: "btn btn-primary", disabled: !missing.length,
+          title: !chosen ? "Choose a voice model first" : missing.length
             ? `Generate the ${plural(missing.length, "translated sentence")} without a take`
             : "Every translated sentence has a take", onclick: () => generate(missing) },
         missing.length ? `Generate ${missing.length}` : "Generate missing"),
@@ -469,6 +557,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
           openLanguage.set(dub.id, code);
           apply(data);
           setMessage(message, `Added ${languageName(code)}. Its sentences are empty: translate them, then generate.`);
+          chooseOnlyModel();
         } catch (error) { fail(error); }
       } });
     return el("span", { class: "row dub-tabs", role: "tablist", "aria-label": "Target languages" }, tracks().map((t) => {
@@ -478,7 +567,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       "\u00d7");
       return el("span", { class: `dub-tab ${on ? "active" : ""}` },
         el("button", { class: "btn btn-ghost btn-small", role: "tab", "aria-selected": String(on), disabled: Boolean(job) && !on,
-          onclick: () => { if (on) return; lang = t.language; openLanguage.set(dub.id, lang); filter = "all"; draw(); play.changed(); } },
+          onclick: () => { if (on) return; lang = t.language; openLanguage.set(dub.id, lang); filter = "all"; draw(); play.changed();
+            chooseOnlyModel(); } },
         languageName(t.language)), remove);
     }), add);
   }
@@ -655,8 +745,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       takes.length ? el("div", { class: "dub-takes" }, takes) : el("p", { class: "faint small" }, "No takes yet."),
       el("div", { class: "row" },
         generating ? el("span", { class: "small muted" }, "Generating\u2026")
-          : el("button", { class: "btn btn-primary btn-small", disabled: Boolean(job) || !clip.translation.trim() || !model(),
-            title: !clip.translation.trim() ? "Write the translation first" : !model() ? "Choose a model first" : "Ctrl+Enter",
+          : el("button", { class: "btn btn-primary btn-small", disabled: Boolean(job) || !clip.translation.trim(),
+            title: !clip.translation.trim() ? "Write the translation first" : !model() ? "Choose a voice model first" : "Ctrl+Enter",
             onclick: () => generate([clip.id]) }, clip.takes.length ? "Generate again" : "Generate"),
         el("div", { class: "spacer" }), remove));
   }
@@ -954,7 +1044,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   if (dub.notice) setMessage(message, dub.notice, "warn");
   // A job started before the screen was left keeps running on the server: follow it again.
   api("GET", path("/jobs")).then(([running]) => {
-    if (!running || job || !main.isConnected) return;
+    if (!main.isConnected || job) return;
+    if (!running) return chooseOnlyModel();
     if (running.language && tracks().some((t) => t.language === running.language)) {
       lang = running.language; // show the language being generated
       openLanguage.set(dub.id, lang);

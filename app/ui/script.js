@@ -261,3 +261,12 @@ export function volumeRamps(kept, base, fade) {
   for (const { start, end } of kept) points.push([Math.max(0, start - fade), base], [start, 1], [end, 1], [end + fade, base]);
   return points;
 }
+
+// Dub: the installed model to choose by itself for a language, only when exactly one speaks it.
+export function onlyModel(installed, language) {
+  const speakers = installed.filter((m) => m.languages.some((l) => l.code === language));
+  return speakers.length === 1 ? speakers[0].name : null;
+}
+
+// A dragged size between its limits; when the limits cross (a small window) the minimum wins.
+export const clampSize = (size, min, max) => Math.max(min, Math.min(size, max));

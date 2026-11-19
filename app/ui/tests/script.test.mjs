@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeClip, clipFilter, createHistory, followWindow, volumeRamps } from "../script.js";
+import { activeClip, clampSize, clipFilter, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -289,4 +289,20 @@ test("clipFilter leaves kept sentences out of the work to do", () => {
 test("volumeRamps raises the original to full volume over kept stretches", () => {
   assert.deepEqual(volumeRamps([{ start: 2, end: 4 }], 0.15, 0.05),
     [[0, 0.15], [1.95, 0.15], [2, 1], [4, 1], [4.05, 0.15]]);
+});
+
+test("onlyModel picks the one installed model that speaks the language", () => {
+  const a = { name: "a", languages: [{ code: "en", name: "English" }, { code: "tr", name: "Turkish" }] };
+  const b = { name: "b", languages: [{ code: "en", name: "English" }] };
+  assert.equal(onlyModel([a, b], "tr"), "a");
+  assert.equal(onlyModel([a, b], "en"), null); // two speak it: the user chooses
+  assert.equal(onlyModel([a, b], "de"), null);
+  assert.equal(onlyModel([], "en"), null);
+});
+
+test("clampSize keeps a size between its limits, the minimum winning when they cross", () => {
+  assert.equal(clampSize(500, 320, 800), 500);
+  assert.equal(clampSize(100, 320, 800), 320);
+  assert.equal(clampSize(900, 320, 800), 800);
+  assert.equal(clampSize(400, 320, 200), 320);
 });
