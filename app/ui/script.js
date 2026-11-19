@@ -270,3 +270,41 @@ export function onlyModel(installed, language) {
 
 // A dragged size between its limits; when the limits cross (a small window) the minimum wins.
 export const clampSize = (size, min, max) => Math.max(min, Math.min(size, max));
+
+// Long lists render a slice: the rows in view, `overscan` more on each side. Returns [first, end), end exclusive.
+export function visibleRows(scrollTop, viewHeight, rowHeight, count, overscan) {
+  const first = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const end = Math.min(count, Math.ceil((scrollTop + viewHeight) / rowHeight) + overscan);
+  return [Math.min(first, end), end];
+}
+
+// The index of the first item, in a list sorted by start, whose start is at least `t`.
+function firstFrom(sorted, t) {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (sorted[middle].start < t) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+// activeClip for a list sorted by start, by halving: the first clip with start <= t < start + length. `longest`, the
+// longest clip, bounds how far back a clip can still reach t.
+export function clipAt(sorted, t, longest = Infinity) {
+  let found = null;
+  for (let i = firstFrom(sorted, t + 1e-9) - 1; i >= 0 && sorted[i].start > t - longest; i--) {
+    if (t < sorted[i].start + sorted[i].length) found = sorted[i];
+  }
+  return found ? found.id : null;
+}
+
+// The clips of a list sorted by start that overlap [from, to]; `longest` as for clipAt.
+export function inWindow(sorted, from, to, longest) {
+  const out = [];
+  for (let i = firstFrom(sorted, from - longest); i < sorted.length && sorted[i].start <= to; i++) {
+    if (sorted[i].start + sorted[i].length > from) out.push(sorted[i]);
+  }
+  return out;
+}

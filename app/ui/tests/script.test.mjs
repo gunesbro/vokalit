@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeClip, clampSize, clipFilter, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
+import { activeClip, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -305,4 +305,28 @@ test("clampSize keeps a size between its limits, the minimum winning when they c
   assert.equal(clampSize(100, 320, 800), 320);
   assert.equal(clampSize(900, 320, 800), 800);
   assert.equal(clampSize(400, 320, 200), 320);
+});
+
+test("visibleRows covers the rows in view plus a margin, within the list", () => {
+  assert.deepEqual(visibleRows(0, 380, 38, 1000, 5), [0, 15]);
+  assert.deepEqual(visibleRows(3800, 380, 38, 1000, 5), [95, 115]);
+  assert.deepEqual(visibleRows(37620, 380, 38, 1000, 5), [985, 1000]); // scrolled to the bottom
+  assert.deepEqual(visibleRows(0, 380, 38, 0, 5), [0, 0]);
+});
+
+test("clipAt finds the same clip as activeClip, by halving", () => {
+  const clips = [{ id: "a", start: 0, length: 2 }, { id: "b", start: 3, length: 2 }, { id: "c", start: 4, length: 3 },
+    { id: "d", start: 10, length: 1 }];
+  for (const t of [-1, 0, 1.9, 2, 2.5, 3, 4, 4.5, 5, 6.9, 7, 9.99, 10, 10.5, 11, 50]) {
+    assert.equal(clipAt(clips, t), activeClip(clips, t), `at ${t}`);
+  }
+  assert.equal(clipAt([], 1), null);
+});
+
+test("inWindow returns the clips that overlap a time range", () => {
+  const clips = [{ id: "before", start: 0, length: 1 }, { id: "endsIn", start: 4, length: 2 },
+    { id: "spans", start: 4.5, length: 10 }, { id: "inside", start: 6, length: 1 }, { id: "startsIn", start: 9, length: 3 },
+    { id: "after", start: 11, length: 1 }];
+  assert.deepEqual(inWindow(clips, 5, 10, 10).map((c) => c.id), ["endsIn", "spans", "inside", "startsIn"]);
+  assert.deepEqual(inWindow([], 5, 10, 0), []);
 });
