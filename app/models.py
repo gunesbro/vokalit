@@ -68,6 +68,17 @@ HIGGS_SOUNDS = {
 _TAG = re.compile(r"\[(" + "|".join(re.escape(tag) for tag in TAGS) + r")\]")
 
 
+# The voice attributes OmniVoice's voice design accepts (anything else raises an error); one per group. The accent
+# only works on English text.
+OMNIVOICE_VOICE = {
+    "gender": ["male", "female"],
+    "age": ["child", "teenager", "young adult", "middle-aged", "elderly"],
+    "pitch": ["very low pitch", "low pitch", "moderate pitch", "high pitch", "very high pitch"],
+    "style": ["whisper"],
+    "accent": ["american accent", "british accent", "australian accent", "canadian accent", "indian accent",
+               "chinese accent", "korean accent", "japanese accent", "portuguese accent", "russian accent"],
+}
+
 # VoxCPM2's Style suggestions: instructions in English, which its style control follows best.
 VOXCPM_STYLES = [{"label": "Neutral", "value": ""}, {"label": "Happy", "value": "cheerful, warm"},
                  {"label": "Sad", "value": "sad, quiet"}, {"label": "Angry", "value": "angry, tense"},
@@ -112,6 +123,7 @@ MODELS = {
         "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
         "supports_convert": False,
         "vram_gb": 2.7,  # measured on an RTX 4070 SUPER (Windows): ~2.6 GB
+        "design": {"kind": "attributes", "options": OMNIVOICE_VOICE},  # a voice from attributes, no sample
         "sounds": {tag: f"[{tag}]" for tag in OMNIVOICE_TAGS},  # Vokalit's first sound tags are OmniVoice's
         "needs_transcript": True,  # it copies a voice from the sample and what is said in it
         # Every language it lists, and "ar" (Chatterbox's Arabic), which it calls Standard Arabic.
@@ -138,6 +150,7 @@ MODELS = {
         "license": "Apache-2.0",
         "supports_convert": False,
         "needs_transcript": False,  # clones from the sample alone, the mode its style instructions work with
+        "design": {"kind": "text", "max_length": 200},  # a voice from a description, no sample
         "vram_gb": 8.4,  # measured on an RTX 4070 SUPER (Windows): 5.8 GB loaded, 8.3 GB peak
         "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "id", "it", "ja", "km", "ko", "lo",
                       "ms", "my", "nl", "no", "pl", "pt", "ru", "sv", "sw", "th", "tl", "tr", "vi", "zh"],
@@ -841,6 +854,40 @@ def generate(name, text, ref, out, seed, settings, language, ref_text=None):
     settings = validate_settings(name, settings)
     return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings,
                        "language": model_language(name, language), "ref_text": ref_text})
+
+
+def check_description(name, description):
+    """A voice description cleaned for `name`'s voice design. ValueError if the model cannot design a voice or the
+    description is not one it takes (OmniVoice: its attributes, one per group; VoxCPM2: text). "" = a random voice."""
+    design = MODELS.get(name, {}).get("design")
+    if not design:
+        raise ValueError(f"{spec(name)['title']} cannot design a voice from a description.")
+    description = description or ""
+    if design["kind"] == "text":
+        text = " ".join(re.sub(r"[()]", " ", description).split())  # sent in parentheses
+        if len(text) > design["max_length"]:
+            raise ValueError(f"A description for {spec(name)['title']} can be at most {design['max_length']} "
+                             "characters.")
+        return text
+    chosen = {}
+    for item in [part.strip().lower() for part in description.split(",") if part.strip()]:
+        group = next((g for g, options in design["options"].items() if item in options), None)
+        if group is None:
+            raise ValueError(f"OmniVoice does not know \u201c{item}\u201d. It takes a gender, an age, a pitch, "
+                             "whisper and an English accent.")
+        if group in chosen:
+            raise ValueError(f"OmniVoice takes one {group}: \u201c{chosen[group]}\u201d or \u201c{item}\u201d.")
+        chosen[group] = item
+    return ", ".join(chosen.values())
+
+
+def design(name, text, out, seed, language, description):
+    """Speaks `text` in a voice made from `description` (no sample); returns the generation time in seconds."""
+    description = check_description(name, description)
+    if language not in MODELS[name].get("languages", []):
+        raise ValueError(f"{MODELS[name]['title']} does not support {LANGUAGE_NAMES.get(language, language)}.")
+    return _ask(name, {"text": text, "ref": None, "out": out, "seed": seed, "settings": default_settings(name),
+                       "language": model_language(name, language), "ref_text": None, "description": description})
 
 
 def convert(name, source, ref, out):

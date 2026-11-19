@@ -81,7 +81,9 @@ def main():
                 torch.manual_seed(request["seed"])
             settings = request.get("settings", {})
             # The line's language is not passed: VoxCPM2 reads it from the text.
-            audio = model.generate(text=prompt(request["text"], settings.get("style", "")),
+            # A voice design request has a description and no reference: it goes where a style would.
+            style = request.get("description") or settings.get("style", "")
+            audio = model.generate(text=prompt(request["text"], style),
                                    reference_wav_path=request.get("ref"),
                                    cfg_value=settings.get("cfg_value", 2.0),
                                    inference_timesteps=int(settings.get("inference_timesteps", 10)),

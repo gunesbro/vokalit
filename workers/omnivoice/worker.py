@@ -70,10 +70,14 @@ def main():
             if request.get("seed") is not None:
                 torch.manual_seed(request["seed"])
             settings = request.get("settings", {})
-            # Without a reference OmniVoice picks a random voice (repeatable with a seed).
+            # Without a reference OmniVoice picks a random voice (repeatable with a seed), or designs one from the
+            # description's attributes ("female, low pitch"; checked by the app).
+            designed = request.get("description") and not request.get("ref")
+            design = {"instruct": request["description"]} if designed else {}
             audio = model.generate(text=request["text"], language=request.get("language"),
                                    ref_audio=request.get("ref"), ref_text=request.get("ref_text"),
-                                   speed=settings.get("speed", 1.0), num_step=int(settings.get("num_step", 32)))
+                                   speed=settings.get("speed", 1.0), num_step=int(settings.get("num_step", 32)),
+                                   **design)
             # 16-bit PCM so the app can join takes with the standard wave module.
             sf.write(request["out"], audio[0], SAMPLE_RATE, subtype="PCM_16")
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1),

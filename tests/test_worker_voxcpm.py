@@ -134,3 +134,11 @@ def test_cancel_stops_the_worker_at_once(installed):
     assert not thread.is_alive() and errors and time.monotonic() - started < 5
     assert "voxcpm" not in models._workers
     assert "text=Merhaba.|" in _generate(local, "again", "Merhaba.")  # the next take loads it again
+
+
+def test_design_sends_the_description_as_style_without_a_sample(installed):
+    _, local = installed
+    out = str(Path(local) / "design.wav")
+    models.design("voxcpm", "Merhaba.", out, seed=4, language="tr", description="a young woman")
+    text = _read(out)
+    assert "text=(a young woman)Merhaba.|" in text and "reference_wav_path=None" in text

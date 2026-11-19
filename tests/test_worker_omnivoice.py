@@ -81,3 +81,18 @@ def test_out_of_memory_keeps_the_worker(installed):
     with pytest.raises(RuntimeError, match="Not enough GPU memory for OmniVoice"):
         models.generate("omnivoice", "OOM", None, str(Path(local) / "oom.wav"), seed=1, settings={}, language="en")
     assert models._workers["omnivoice"].process is process and process.poll() is None
+
+
+def test_design_sends_the_attributes_as_instruct(installed):
+    _, local = installed
+    out = str(Path(local) / "design.wav")
+    models.design("omnivoice", "hello", out, seed=3, language="en", description="female, british accent")
+    text = _read(out)
+    assert "ref_audio=None" in text and "instruct=female, british accent" in text and "seed=3" in text
+
+
+def test_clone_sends_no_instruct(installed):
+    _, local = installed
+    out = str(Path(local) / "clone2.wav")
+    models.generate("omnivoice", "hello", "/refs/me.wav", out, seed=1, settings={}, language="en", ref_text="Hi")
+    assert "instruct=" not in _read(out)
