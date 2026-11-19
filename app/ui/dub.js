@@ -2,7 +2,7 @@
 import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, revealButton, setMessage, waitForJob }
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
-import { clampSize, clipAt, clipFilter, clipsToPlay, createHistory, formatTime, onlyModel, parseTranslations,
+import { clampSize, clipAt, clipFilter, clipsToPlay, MAX_SPEEDUP, createHistory, formatTime, onlyModel, parseTranslations,
   pasteTranslations, pickSelected, transcriptForTranslation, visibleRows, volumeRamps } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { timeline } from "./timeline.js";
@@ -20,8 +20,12 @@ const WAVE_PER_SECOND = 50; // waveform values per second of the original
 // Pane sizes, dragged by the user and kept between runs: the right column's width and the timeline's lane height.
 const SIZES = { right: 400, lane: 22 }; // the defaults; the lane default is also the smallest
 const MIN_TABLE = 360;
-const MAX_SPEEDUP = 1.25; // as the server's: how much a take may be sped up to fit
 const speedText = (speed) => `${speed.toFixed(2)}\u00d7`;
+const FILTERS = { all: "All", untranslated: "Untranslated", missing: "No take", long: "Too long", "long-fit": "Can fit",
+  "long-fitted": "Fitted", "long-shorter": "Need shorter", kept: "Original" };
+// Why a too-long take cannot be fitted, or null when it can.
+const cannotFit = (clipFit) => (clipFit.need == null ? "No time before the next sentence: move it or shorten the translation"
+  : clipFit.need > MAX_SPEEDUP ? `Needs ${speedText(clipFit.need)}: shorten the translation` : null);
 const ROW = 38; // px, one sentence row; only the rows in view (and OVERSCAN more each side) are drawn
 const OVERSCAN = 10;
 const MIN_RIGHT = 320;
@@ -444,6 +448,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         job = null;
         draw();
         refreshList().catch(() => {});
+        chooseOnlyModel(); // skipped while the job ran (an import opens the screen with Whisper already listening)
       }
     }
   }
@@ -635,17 +640,25 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
 
   function drawTable() {
     const all = clips();
-    const counts = Object.fromEntries(["all", "untranslated", "missing", "long", "kept"].map((f) => [f, clipFilter(all, fit(), f).length]));
-    const names = { all: "All", untranslated: "Untranslated", missing: "No take", long: "Too long", kept: "Original" };
+    const counts = Object.fromEntries(Object.keys(FILTERS).map((f) => [f, clipFilter(all, fit(), f).length]));
+    const names = FILTERS;
+    const chip = (key, label, on) => el("button", {
+      class: `btn btn-small ${on ? "active" : "btn-ghost"}`, role: "tab", "aria-selected": String(on),
+      disabled: !all.length, onclick: () => { filter = key; drawTable(); } }, `${label} ${counts[key]}`);
+    const tooLong = filter.startsWith("long");
     tableHead.replaceChildren(
-      el("div", { class: "row dub-filters", role: "tablist" }, Object.entries(names).map(([key, label]) => el("button", {
-        class: `btn btn-small ${filter === key ? "active" : "btn-ghost"}`, role: "tab", "aria-selected": String(filter === key),
-        disabled: !all.length, onclick: () => { filter = key; drawTable(); } }, `${label} ${counts[key]}`))),
-      filter === "long" && fitButton(all),
+      el("div", { class: "row dub-filters", role: "tablist" }, ["all", "untranslated", "missing", "long", "kept"]
+        .map((key) => chip(key, names[key], key === "long" ? tooLong : filter === key))),
+
       el("div", { class: "spacer" }),
       el("button", { class: "btn btn-small", disabled: !all.length, onclick: copyTranscript,
         title: "Copy every sentence, numbered, with an instruction for a translation tool" }, "Copy for translation"),
-      pasteButton());
+      pasteButton(),
+      // Too long, split on a row of its own: what can still be sped up, what was, and what needs a shorter translation.
+      tooLong && el("div", { class: "row dub-subrow" },
+        el("div", { class: "row dub-filters", role: "tablist", "aria-label": "Too long" },
+          ["long", "long-fit", "long-fitted", "long-shorter"].map((key) => chip(key, key === "long" ? "All" : names[key], filter === key))),
+        el("div", { class: "spacer" }), fitButton(all), originalsButton(all)));
     if (!all.length) {
       table.replaceChildren(el("div", { class: "empty small" }, dub.source.language
         ? el("p", { class: "muted" }, "No sentences. Transcribe again, or import another file.")
@@ -671,12 +684,31 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
 
   const focusedRow = () => document.activeElement?.closest?.(".dub-line")?.dataset.clip;
 
-  // In "Too long": fit every take that runs over (sped-up ones are listed too, but already fitted).
+  // In "Too long": fit every take that can be sped up enough; the ones needing more stay for a shorter translation.
   function fitButton(all) {
-    const over = all.filter((c) => fit()[c.id]?.state === "long").map((c) => c.id);
+    const over = clipFilter(all, fit(), "long-fit");
     return el("button", { class: "btn btn-small", disabled: !over.length || Boolean(job),
       title: `Speed the takes up to fit, same pitch, up to ${MAX_SPEEDUP}\u00d7; longer ones need a shorter translation`,
       onclick: () => fitTakes(over) }, over.length ? `Fit ${over.length}` : "Fit");
+  }
+
+  // In "Too long": the sped-up takes back to the ones they were made from.
+  function originalsButton(all) {
+    const fitted = clipFilter(all, fit(), "long-fitted");
+    return el("button", { class: "btn btn-small", disabled: !fitted.length || Boolean(job),
+      title: "Use the takes as they were generated, before speeding them up", onclick: () => useOriginals(fitted) },
+    fitted.length ? `Use originals ${fitted.length}` : "Use originals");
+  }
+
+  // Selects the takes sped-up ones were made from (undoable; the sped-up takes stay in the list).
+  function useOriginals(ids) {
+    const changed = ids.map((id) => clips()[numberOf(id) - 1]).filter(Boolean)
+      .map((c) => [c.id, c.selected, takeOf(c)?.from]).filter(([, , from]) => from);
+    if (!changed.length) return;
+    const at = q();
+    const select = (index) => api("POST", path(`/select${at}`), { selections: Object.fromEntries(changed.map((c) => [c[0], c[index]])) });
+    act(inLanguage(changed.length === 1 ? `original take of sentence ${numberOf(changed[0][0])}`
+      : `original takes of ${plural(changed.length, "sentence")}`), () => select(2), () => select(1), track().language);
   }
 
   // The rows in view, plus the one being typed in (scrolled away, it keeps its text and focus). Rows already drawn stay.
@@ -726,7 +758,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     });
     input.addEventListener("focus", () => choose(clip.id, false));
     const status = clipFit.state === "kept" ? el("span", { class: "dub-status faint", title: "The original plays here" }, "\u266a")
-      : clipFit.state === "long" ? el("span", { class: "dub-status warn", title: "Runs into the next sentence" }, `+${clipFit.over.toFixed(1)} s`)
+      : clipFit.state === "long" ? el("span", { class: "dub-status warn", title: cannotFit(clipFit)
+        || `Runs into the next sentence; fits sped up ${speedText(clipFit.need)}` }, `+${clipFit.over.toFixed(1)} s`)
       : clipFit.speed > 1 ? el("span", { class: "dub-status warn", title: `Sped up ${speedText(clipFit.speed)} to fit` },
         speedText(clipFit.speed))
       : clipFit.state === "fits" ? el("span", { class: "dub-status ok", title: "Fits" }, "\u2713")
@@ -815,9 +848,12 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         el("span", { class: "faint small num" }, `${formatTime(source.start)}\u2013${formatTime(source.end)}`),
         el("div", { class: "spacer" }),
         clipFit.state === "long" ? el("span", { class: "row" }, el("span", { class: "warn small" }, `${clipFit.over.toFixed(1)} s too long`),
-          el("button", { class: "btn btn-small", disabled: Boolean(job), onclick: () => fitTakes([clip.id]),
-            title: `Speed the take up to fit, same pitch, up to ${MAX_SPEEDUP}\u00d7` }, "Fit"))
-          : clipFit.speed > 1 ? el("span", { class: "warn small" }, `Sped up ${speedText(clipFit.speed)} to fit`)
+          cannotFit(clipFit) ? el("span", { class: "faint small" }, cannotFit(clipFit))
+            : el("button", { class: "btn btn-small", disabled: Boolean(job), onclick: () => fitTakes([clip.id]),
+              title: `Speed the take up ${speedText(clipFit.need)} to fit, same pitch` }, "Fit"))
+          : clipFit.speed > 1 ? el("span", { class: "row" }, el("span", { class: "warn small" }, `Sped up ${speedText(clipFit.speed)} to fit`),
+            el("button", { class: "btn btn-small", disabled: Boolean(job), onclick: () => useOriginals([clip.id]),
+              title: "Use the take as it was generated, before speeding it up" }, "Use the original"))
           : clipFit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet")),
       el("label", { class: "field-label" }, "Original"), original, keep,
       el("label", { class: "field-label" }, "Translation"), translation,

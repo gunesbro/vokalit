@@ -351,3 +351,13 @@ test("parseTranslations drops a copied-back time however the tool wrote it, and 
   const reply = "1. [3,4 s] Merhaba.\n2. [3.4 sec] Evet.\n3. [ 2 sn ] Tamam.\n4. [laughs] Hello.";
   assert.deepEqual(parseTranslations(reply, 4).texts, ["Merhaba.", "Evet.", "Tamam.", "[laughs] Hello."]);
 });
+
+test("clipFilter splits Too long into can fit, fitted and need shorter", () => {
+  const clips = ["d1", "d2", "d3", "d4", "d5"].map((id) => ({ id, translation: "x" }));
+  const fit = { d1: { state: "long", over: 0.3, need: 1.1 }, d2: { state: "fits", over: 0, speed: 1.18 },
+    d3: { state: "long", over: 0.9, need: 1.4 }, d4: { state: "long", over: 0.2, need: null }, d5: { state: "fits", over: 0 } };
+  assert.deepEqual(clipFilter(clips, fit, "long"), ["d1", "d2", "d3", "d4"]);
+  assert.deepEqual(clipFilter(clips, fit, "long-fit"), ["d1"]);
+  assert.deepEqual(clipFilter(clips, fit, "long-fitted"), ["d2"]);
+  assert.deepEqual(clipFilter(clips, fit, "long-shorter"), ["d3", "d4"]);
+});

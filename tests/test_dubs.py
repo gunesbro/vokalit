@@ -195,7 +195,8 @@ def test_fit_reports_overlaps_and_missing_takes():
         {"id": "d1", "start": 0.5, "selected": "a", "takes": [{"file": "a", "duration": 4.3}]},
         {"id": "d2", "start": 4.0, "selected": "b", "takes": [{"file": "b", "duration": 6.0}]},
         {"id": "d3", "start": 9.5, "selected": None, "takes": []}]}]}
-    assert dubs.fit(data) == {"d1": {"state": "long", "over": 0.8}, "d2": {"state": "long", "over": 0.5},
+    assert dubs.fit(data) == {"d1": {"state": "long", "over": 0.8, "need": 1.25},
+                              "d2": {"state": "long", "over": 0.5, "need": 1.1},
                               "d3": {"state": "missing", "over": 0.0}}
 
 
@@ -203,7 +204,7 @@ def test_fit_uses_start_order_and_the_file_end():
     data = {"source": {"duration": 10.0}, "tracks": [{"clips": []}, {"clips": [
         {"id": "d2", "start": 6.0, "selected": "b", "takes": [{"file": "b", "duration": 4.5}]},
         {"id": "d1", "start": 1.0, "selected": "a", "takes": [{"file": "a", "duration": 2.0}]}]}]}
-    assert dubs.fit(data) == {"d1": {"state": "fits", "over": 0.0}, "d2": {"state": "long", "over": 0.5}}
+    assert dubs.fit(data) == {"d1": {"state": "fits", "over": 0.0}, "d2": {"state": "long", "over": 0.5, "need": 1.14}}
 
 
 def test_export_mixes_takes_at_their_times(tmp_workspace, tmp_path):
@@ -521,3 +522,32 @@ def test_select_takes_changes_several_at_once(tmp_workspace, tmp_path):
     assert [c["selected"] for c in dubs.load_dub(dub)["tracks"][1]["clips"]] == [None, None]  # all or nothing
     dubs.select_takes(dub, {"d1": first, "d2": second})
     assert [c["selected"] for c in dubs.load_dub(dub)["tracks"][1]["clips"]] == [first, second]
+
+
+def test_fit_tells_long_takes_the_speed_they_need(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)  # 3.45 s of room
+    take = dubs.new_take_path(dub, "d2")
+    make_wav(take, 10.0)  # 7.95 s to the end of the file
+    dubs.add_take(dub, "d2", {"file": str(take), "seed": 1, "duration": 10.0})
+    result = dubs.fit(dubs.load_dub(dub))
+    assert result["d1"]["need"] == 1.16 and result["d2"]["need"] == 1.26
+
+
+def test_fit_need_comes_from_the_original_take(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    dubs.fit_take(dub, "d1")
+    dubs.update_dub_clip(dub, "d2", start=3.0)  # the fitted take is long again: 2.45 s of room
+    result = dubs.fit(dubs.load_dub(dub))["d1"]
+    assert result["state"] == "long" and result["need"] == round(4.0 / 2.45, 2)
+
+
+def test_fit_need_without_room_is_none(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    dubs.update_dub_clip(dub, "d2", start=0.5)
+    assert dubs.fit(dubs.load_dub(dub))["d1"]["need"] is None
+
+
+def test_fit_limit_is_on_the_speed_as_shown(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.3294)  # 1.2549x: shown as 1.25x, so it is fitted, not refused as "1.25x faster"
+    assert dubs.fit(dubs.load_dub(dub))["d1"]["need"] == 1.25
+    assert round(dubs.fit_take(dub, "d1"), 2) == 1.25

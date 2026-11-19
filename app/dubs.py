@@ -392,7 +392,7 @@ def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
     selected = next((t for t in clip["takes"] if t["file"] == clip["selected"]), None)
     if selected is None:
         raise ws.WorkspaceError(f"Sentence {number} has no take yet.")
-    base = next((t for t in clip["takes"] if t["file"] == selected.get("from")), selected)
+    base = _original_take(clip, selected)
     path = dub_dir(dub_id) / base["file"]
     if not path.exists():
         raise ws.WorkspaceError(f"Sentence {number}: the take file is missing ({base['file']}). Generate it again.")
@@ -408,7 +408,7 @@ def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
         select_take(dub_id, clip_id, base["file"], language)
         return 1.0
     speed = base["duration"] / room
-    if speed > MAX_SPEEDUP:
+    if round(speed, 2) > MAX_SPEEDUP:  # as shown: a speed shown as 1.25x is within the limit
         raise NeedsShorter(f"Sentence {number} would need {speed:.2f}\u00d7 faster. Shorten the translation.")
     rate, samples = _read(path)
     faster = stretch(samples.astype(np.float32) / 32768, rate, speed)
@@ -420,6 +420,11 @@ def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
     return speed
 
 
+def _original_take(clip: dict, take: dict) -> dict:
+    """The take a sped-up take was made from (itself when it was not sped up, or its original is gone)."""
+    return next((t for t in clip["takes"] if t["file"] == take.get("from")), take)
+
+
 def _selected_duration(clip: dict) -> float | None:
     take = next((t for t in clip["takes"] if t["file"] == clip["selected"]), None)
     return take["duration"] if take else None
@@ -427,7 +432,8 @@ def _selected_duration(clip: dict) -> float | None:
 
 def fit(data: dict, language: str | None = None) -> dict[str, dict]:
     """Per dub clip: "missing" (no take), "fits", or "long" with `over` = seconds it runs into the next clip (by start)
-    or past the end of the file; "speed" too when its take was sped up to fit."""
+    or past the end of the file; "speed" too when its take was sped up to fit; and for a long one "need", the speed its
+    original take would need to fit (None: no time before the next sentence)."""
     clips = sorted(_dub_clips(data, language), key=lambda c: c["start"])
     end_of_file = data["source"]["duration"]
     kept = {s["id"] for s in _kept(data)}
@@ -443,9 +449,12 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
         limits = [c["start"] for c in clips[i + 1:i + 2]] + ([end_of_file] if end_of_file is not None else [])
         over = round(clip["start"] + duration - min(limits), 1) if limits else 0.0
         result[clip["id"]] = {"state": "long", "over": over} if over > 0 else {"state": "fits", "over": 0.0}
-        speed = next((t.get("speed") for t in clip["takes"] if t["file"] == clip["selected"]), None)
-        if speed:  # sped up to fit: still listed under "Too long", with how much
-            result[clip["id"]]["speed"] = speed
+        selected = next(t for t in clip["takes"] if t["file"] == clip["selected"])
+        if selected.get("speed"):  # sped up to fit: still listed under "Too long", with how much
+            result[clip["id"]]["speed"] = selected["speed"]
+        if over > 0:
+            room = min(limits) - clip["start"] - FIT_GAP
+            result[clip["id"]]["need"] = round(_original_take(clip, selected)["duration"] / room, 2) if room > 0 else None
     return result
 
 

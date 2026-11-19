@@ -274,7 +274,10 @@ All interface text is English. The visual design is the design canvas; behaviour
   0.05 s before the next sentence, as a new selected take that remembers its original (fitting again starts from it),
   up to 1.25x; beyond that, "Shorten the translation". "Fit" on the selected sentence, "Fit N" in the Too long tab (a
   job, cancellable); sped-up sentences stay under Too long, showing their speed ("1.18x") in the table, the details
-  and the takes list; on the right the video
+  and the takes list; Too long splits into Can fit (needs at most 1.25x, from the original take), Fitted, and Need
+  shorter (more than 1.25x, or no time before the next sentence; the reason is shown); "Use originals N" (and "Use the
+  original" on one sentence) selects the takes sped-up ones were made from, undoable; the only installed model that
+  speaks a language is also chosen when a job ends (an import opens the screen while Whisper listens); on the right the video
   (muted; or a clock for audio) with the original under the takes through Web Audio, and the selected sentence:
   original text (the voice sample's transcript), translation, Voice from (a search list; default this sentence; never neighbours,
   which may be another speaker), takes to pick and play, Generate, Delete; below, the timeline (`timeline.js`: lanes and

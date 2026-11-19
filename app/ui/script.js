@@ -238,12 +238,18 @@ export function createHistory(limit = 100) {
 }
 
 // Dub sentences shown by a filter: "all", "untranslated", "missing" (no take) or "long" (runs into the next).
+export const MAX_SPEEDUP = 1.25; // as the server's: how much a take may be sped up to fit
+
 export function clipFilter(clips, fit, name) {
   const keep = {
     all: () => true,
     untranslated: (c) => !c.translation.trim() && fit[c.id]?.state !== "kept", // kept ones need no translation
     missing: (c) => fit[c.id]?.state === "missing",
     long: (c) => fit[c.id]?.state === "long" || fit[c.id]?.speed > 1, // sped up to fit: still listed, with the speed
+    // Too long, split: can be sped up to fit, was sped up, or needs a shorter translation (over MAX_SPEEDUP, or no time).
+    "long-fit": (c) => fit[c.id]?.state === "long" && fit[c.id].need != null && fit[c.id].need <= MAX_SPEEDUP,
+    "long-fitted": (c) => fit[c.id]?.state !== "long" && fit[c.id]?.speed > 1,
+    "long-shorter": (c) => fit[c.id]?.state === "long" && (fit[c.id].need == null || fit[c.id].need > MAX_SPEEDUP),
     kept: (c) => fit[c.id]?.state === "kept",
   }[name] || (() => true);
   return clips.filter(keep).map((c) => c.id);
