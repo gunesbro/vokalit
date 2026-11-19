@@ -2,8 +2,8 @@
 import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, revealButton, setMessage, waitForJob }
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
-import { activeClip, clampSize, clipFilter, clipsToPlay, createHistory, formatTime, onlyModel, parseTranslations,
-  pasteTranslations, pickSelected, transcriptForTranslation, volumeRamps } from "./script.js";
+import { clampSize, clipAt, clipFilter, clipsToPlay, createHistory, formatTime, onlyModel, parseTranslations,
+  pasteTranslations, pickSelected, transcriptForTranslation, visibleRows, volumeRamps } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { timeline } from "./timeline.js";
 import { player } from "./waveform.js";
@@ -20,6 +20,8 @@ const WAVE_PER_SECOND = 50; // waveform values per second of the original
 // Pane sizes, dragged by the user and kept between runs: the right column's width and the timeline's lane height.
 const SIZES = { right: 400, lane: 22 }; // the defaults; the lane default is also the smallest
 const MIN_TABLE = 360;
+const ROW = 38; // px, one sentence row; only the rows in view (and OVERSCAN more each side) are drawn
+const OVERSCAN = 10;
 const MIN_RIGHT = 320;
 const MIN_ABOVE_TIMELINE = 200;
 const SPLIT = 7; // px, a separator's width
@@ -181,9 +183,21 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   const model = () => models.find((m) => m.name === track().model);
   const clips = () => track().clips;
   const sources = () => dub.tracks[0].clips;
-  const sourceOf = (clip) => sources().find((c) => c.id === clip.source_clip);
+  // Lookups built once per dub and language, not per row: a dub can have tens of thousands of sentences.
+  let index = null;
+  const lookup = () => {
+    if (index?.dub !== dub || index.language !== track().language) {
+      const number = new Map(clips().map((c, i) => [c.id, i + 1]));
+      const source = new Map(sources().map((c) => [c.id, c]));
+      index = { dub, language: track().language, number, source }; // set first: lengthOf below reads sources
+      const sorted = clips().map((c) => ({ id: c.id, start: c.start, length: lengthOf(c) })).sort((a, b) => a.start - b.start);
+      Object.assign(index, { sorted, longest: sorted.reduce((most, c) => Math.max(most, c.length), 0) });
+    }
+    return index;
+  };
+  const sourceOf = (clip) => lookup().source.get(clip.source_clip);
   const takeOf = (clip) => clip.takes.find((t) => t.file === clip.selected);
-  const numberOf = (clipId) => clips().findIndex((c) => c.id === clipId) + 1;
+  const numberOf = (clipId) => lookup().number.get(clipId) || 0;
   const isKept = (clip) => Boolean(sourceOf(clip)?.keep_original);
   const keptRanges = () => sources().filter((s) => s.keep_original).map((s) => ({ start: s.start, end: s.end }));
   const sourceLength = (clip) => ((sourceOf(clip)?.end ?? 0) - (sourceOf(clip)?.start ?? 0)) || 1;
@@ -198,6 +212,15 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   const header = el("header", { class: "main-head dub-head" });
   const tableHead = el("div", { class: "dub-table-head" });
   const table = el("div", { class: "dub-table", role: "listbox", "aria-label": "Sentences" });
+  const rowsBox = el("div", { class: "dub-rows" });
+  const rendered = new Map(); // clip id -> its row, for the rows drawn now
+  let tableIds = []; // the table's clip ids, filtered, in order
+  let playingId = null; // the sentence under the playhead while playing
+  let scrollFrame = 0;
+  table.addEventListener("scroll", () => {
+    cancelAnimationFrame(scrollFrame);
+    scrollFrame = requestAnimationFrame(renderRows);
+  });
   const stage = el("div", { class: "dub-stage" });
   const inspector = el("div", { class: "dub-inspector" });
   const play = previewPlayer();
@@ -619,53 +642,80 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
             " to find the sentences and their times.")));
       return;
     }
-    const visible = clipFilter(all, fit(), filter);
-    const shown = new Set(visible);
-    const ids = all.map((c) => c.id);
-    const rows = all.filter((c) => shown.has(c.id)).map((clip) => {
-      const number = numberOf(clip.id);
-      const source = sourceOf(clip);
-      const clipFit = fit()[clip.id] || { state: "missing" };
-      const input = el("input", { class: "input dub-tr", value: clip.translation, "data-saved": clip.translation,
-        disabled: isKept(clip),
-        "data-key": `tr-${clip.id}`, placeholder: "Translation", "aria-label": `Translation of sentence ${number}`,
-        onblur: () => input.value !== input.dataset.saved && editTranslation(clip, input.value),
-        onkeydown: async (e) => {
-          if (e.isComposing) return; // an input method is still composing the text
-          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            await saveThenGenerate(clip, input);
-          } else if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
-            e.preventDefault();
-            const next = visible[visible.indexOf(clip.id) + (e.key === "ArrowUp" ? -1 : 1)]; // within the filter
-            input.blur();
-            if (next) { choose(next); table.querySelector(`[data-key="tr-${next}"]`)?.focus(); }
-          } else if (e.key === "Escape") { input.value = input.dataset.saved; input.blur(); }
-        } });
-      input.addEventListener("paste", (e) => {
-        const text = e.clipboardData.getData("text");
-        if (!/\n/.test(text.trim())) return;
-        e.preventDefault();
-        pasteMany(pasteTranslations(ids, ids.indexOf(clip.id), text));
-      });
-      input.addEventListener("focus", () => choose(clip.id, false));
-      const status = clipFit.state === "kept" ? el("span", { class: "dub-status faint", title: "The original plays here" }, "\u266a")
-        : clipFit.state === "long" ? el("span", { class: "dub-status warn", title: "Runs into the next sentence" }, `+${clipFit.over.toFixed(1)} s`)
-        : clipFit.state === "fits" ? el("span", { class: "dub-status ok", title: "Fits" }, "\u2713")
-          : el("span", { class: "dub-status faint", title: "No take yet" }, "\u25cb");
-      const generating = job?.kind === "generate" && job.clips.has(clip.id);
-      const row = el("div", { class: `dub-line ${clip.id === selected ? "selected" : ""} ${generating ? "busy" : ""} ${isKept(clip) ? "kept" : ""}`,
-        role: "option", "aria-selected": String(clip.id === selected), "data-clip": clip.id, onclick: (e) => {
-          if (!typing(e.target)) choose(clip.id);
-        } },
-      el("span", { class: "num faint small" }, number),
-      el("button", { class: "num small link-btn dub-at", title: "Play from here", onclick: () => { choose(clip.id); play.seek(clip.start, true); } },
-        formatTime(source.start)),
-      el("span", { class: "dub-orig", title: source.text }, source.text),
-      input, generating ? el("span", { class: "dub-status faint" }, "\u2026") : status);
-      return row;
+    const shown = new Set(clipFilter(all, fit(), filter));
+    tableIds = all.filter((c) => shown.has(c.id)).map((c) => c.id); // in table order, within the filter
+    if (!tableIds.length) {
+      table.replaceChildren(el("p", { class: "muted small pad" }, `No sentences in \u201c${names[filter]}\u201d.`));
+      return;
+    }
+    rowsBox.style.height = `${tableIds.length * ROW}px`;
+    if (rowsBox.parentNode !== table) table.replaceChildren(rowsBox);
+    rendered.clear();
+    rowsBox.replaceChildren();
+    renderRows();
+  }
+
+  // The rows in view, plus the one being typed in (scrolled away, it keeps its text and focus). Rows already drawn stay.
+  function renderRows() {
+    const [first, end] = visibleRows(table.scrollTop, table.clientHeight || 600, ROW, tableIds.length, OVERSCAN);
+    const wanted = new Set(tableIds.slice(first, end));
+    const focused = document.activeElement?.closest?.(".dub-line")?.dataset.clip;
+    if (focused && rendered.has(focused)) wanted.add(focused);
+    for (const [id, row] of rendered) if (!wanted.has(id)) { row.remove(); rendered.delete(id); }
+    const position = new Map(tableIds.slice(first, end).map((id, i) => [id, first + i]));
+    for (const id of wanted) {
+      if (rendered.has(id)) continue;
+      const clip = clips()[numberOf(id) - 1];
+      const row = rowFor(clip);
+      row.style.top = `${(position.get(id) ?? tableIds.indexOf(id)) * ROW}px`;
+      rendered.set(id, row);
+      rowsBox.append(row);
+    }
+  }
+
+  function rowFor(clip) {
+    const number = numberOf(clip.id);
+    const source = sourceOf(clip);
+    const clipFit = fit()[clip.id] || { state: "missing" };
+    const input = el("input", { class: "input dub-tr", value: clip.translation, "data-saved": clip.translation,
+      disabled: isKept(clip),
+      "data-key": `tr-${clip.id}`, placeholder: "Translation", "aria-label": `Translation of sentence ${number}`,
+      onblur: () => input.value !== input.dataset.saved && editTranslation(clip, input.value),
+      onkeydown: async (e) => {
+        if (e.isComposing) return; // an input method is still composing the text
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          await saveThenGenerate(clip, input);
+        } else if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const next = tableIds[tableIds.indexOf(clip.id) + (e.key === "ArrowUp" ? -1 : 1)]; // within the filter
+          input.blur();
+          if (next) { choose(next); table.querySelector(`[data-key="tr-${next}"]`)?.focus(); }
+        } else if (e.key === "Escape") { input.value = input.dataset.saved; input.blur(); }
+      } });
+    input.addEventListener("paste", (e) => {
+      const text = e.clipboardData.getData("text");
+      if (!/\n/.test(text.trim())) return;
+      e.preventDefault();
+      const ids = clips().map((c) => c.id);
+      pasteMany(pasteTranslations(ids, numberOf(clip.id) - 1, text));
     });
-    table.replaceChildren(...(rows.length ? rows : [el("p", { class: "muted small pad" }, `No sentences in \u201c${names[filter]}\u201d.`)]));
+    input.addEventListener("focus", () => choose(clip.id, false));
+    const status = clipFit.state === "kept" ? el("span", { class: "dub-status faint", title: "The original plays here" }, "\u266a")
+      : clipFit.state === "long" ? el("span", { class: "dub-status warn", title: "Runs into the next sentence" }, `+${clipFit.over.toFixed(1)} s`)
+      : clipFit.state === "fits" ? el("span", { class: "dub-status ok", title: "Fits" }, "\u2713")
+        : el("span", { class: "dub-status faint", title: "No take yet" }, "\u25cb");
+    const generating = job?.kind === "generate" && job.clips.has(clip.id);
+    const row = el("div", { class: `dub-line ${clip.id === selected ? "selected" : ""} ${generating ? "busy" : ""} ${isKept(clip) ? "kept" : ""} ${clip.id === playingId ? "playing" : ""}`,
+      role: "option", "aria-selected": String(clip.id === selected), "data-clip": clip.id, onclick: (e) => {
+        if (!typing(e.target)) choose(clip.id);
+      } },
+    el("span", { class: "num faint small" }, number),
+    el("button", { class: "num small link-btn dub-at", title: "Play from here", onclick: () => { choose(clip.id); play.seek(clip.start, true); } },
+      formatTime(source.start)),
+    el("span", { class: "dub-orig", title: source.text }, source.text),
+    input, generating ? el("span", { class: "dub-status faint" }, "\u2026") : status);
+    return row;
   }
 
   function pasteButton() {
@@ -766,12 +816,18 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     if (!clipId) return;
     const changed = clipId !== selected;
     selected = clipId;
-    for (const row of table.querySelectorAll(".dub-line")) {
+    const at = tableIds.indexOf(clipId);
+    if (reveal && at >= 0) { // scroll to its row and draw it now, so it can take the focus at once
+      const top = at * ROW;
+      if (top < table.scrollTop) table.scrollTop = top;
+      else if (top + ROW > table.scrollTop + table.clientHeight) table.scrollTop = top + ROW - table.clientHeight;
+      renderRows();
+    }
+    for (const row of rendered.values()) {
       const on = row.dataset.clip === clipId;
       row.classList.toggle("selected", on);
       row.setAttribute("aria-selected", String(on));
     }
-    if (reveal) table.querySelector(`.dub-line[data-clip="${clipId}"]`)?.scrollIntoView({ block: "nearest" });
     lanes.select(clipId, reveal);
     if (changed) drawInspector();
   }
@@ -978,10 +1034,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       lanes.setTime(t, playing);
       if (video && Math.abs(video.currentTime - t) > 0.25) video.currentTime = t;
       // The sentence being played is shown, unless the user is typing.
-      const under = activeClip(clips().map((c) => ({ id: c.id, start: c.start, length: lengthOf(c) })), t);
+      const under = clipAt(lookup().sorted, t, lookup().longest);
       if (playing && under && under !== current) {
         current = under;
-        for (const row of table.querySelectorAll(".dub-line")) row.classList.toggle("playing", row.dataset.clip === under);
+        playingId = under;
+        for (const row of rendered.values()) row.classList.toggle("playing", row.dataset.clip === under);
         if (!typing(document.activeElement)) choose(under);
       }
       if (playing && t >= (dub.source.duration || 0)) { pause(); time = 0; return; }
@@ -1031,7 +1088,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       const index = visible.indexOf(selected);
       choose(visible[Math.max(0, Math.min(visible.length - 1, index + (e.key === "ArrowUp" ? -1 : 1)))] || visible[0]);
     } else if (e.key === "Enter" && mod) { e.preventDefault(); if (selected) generate([selected]); }
-    else if (e.key === "Enter") { e.preventDefault(); table.querySelector(`[data-key="tr-${selected}"]`)?.focus(); }
+    else if (e.key === "Enter") { e.preventDefault(); choose(selected); table.querySelector(`[data-key="tr-${selected}"]`)?.focus(); }
     else if (e.key.toLowerCase() === "k" && !mod && selected) {
       e.preventDefault();
       const clip = clips().find((c) => c.id === selected);

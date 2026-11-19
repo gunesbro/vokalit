@@ -578,7 +578,8 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .dub-filters { gap: 4px; }
 .dub-filters .active { background: var(--hover); }
 .dub-table { flex: 1 1 0; overflow-y: auto; padding: 4px 8px; }
-.dub-line { display: grid; grid-template-columns: 32px 44px minmax(0, 1fr) minmax(0, 1.2fr) 52px; gap: 8px;
+.dub-rows { position: relative; }
+.dub-line { position: absolute; left: 0; right: 0; height: 38px; box-sizing: border-box; display: grid; grid-template-columns: 32px 44px minmax(0, 1fr) minmax(0, 1.2fr) 52px; gap: 8px;
   align-items: center; padding: 3px 8px; border-radius: 6px; border-left: 3px solid transparent; }
 .dub-line:hover { background: var(--raised); }
 .dub-line.selected { background: var(--accent-soft); }
