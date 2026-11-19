@@ -489,6 +489,51 @@ def get_character(req, cid):
             "used_in": [] if _session_arg(req) else ws.sessions_using(cid)}
 
 
+DESIGN_CANDIDATES = 3
+
+
+@route("POST", "/api/characters/(?P<cid>[0-9-]+)/design")
+def design_voice(req, cid):
+    """Speaks a text in DESIGN_CANDIDATES voices made from a description (no sample), to keep one as a sample. The
+    candidates are short-lived files in workspace/.tmp/."""
+    if ws.load_character(cid, _session_arg(req)) is None:
+        raise NotFound()
+    body = req["json"]
+    name, text = body.get("model", ""), (body.get("text") or "").strip()
+    if name not in models.MODELS:
+        raise ws.WorkspaceError("Choose a model.")
+    description = models.check_description(name, body.get("description"))
+    if not models.is_installed(name):
+        raise ws.WorkspaceError(f"{models.MODELS[name]['title']} is not installed. Install it in Models.")
+    language = body.get("language")
+    if language not in models.MODELS[name].get("languages", []):
+        raise ws.WorkspaceError(f"{models.MODELS[name]['title']} does not support "
+                                f"{models.LANGUAGE_NAMES.get(language, language)}.")
+    if not text:
+        raise ws.WorkspaceError("Write the text the voices should read.")
+
+    def work(job):
+        candidates = []
+        for number in range(1, DESIGN_CANDIDATES + 1):
+            if job.get("cancelled"):
+                raise Cancelled()
+            job["progress"] = f"Voice {number} of {DESIGN_CANDIDATES}"
+            out, seed = ws.workspace_temp_file(".wav"), random.randint(0, 2**31 - 1)
+            job["model"] = name  # what cancelling stops
+            try:
+                models.design(name, text, str(out), seed, language, description)
+            except Exception:
+                if job.get("cancelled"):
+                    out.unlink(missing_ok=True)
+                    raise Cancelled() from None
+                raise
+            finally:
+                job["model"] = None
+            candidates.append({"file": out.relative_to(ws.workspace_root()).as_posix(), "seed": seed})
+        return {"candidates": candidates, "text": text, "language": language, "description": description}
+    return _start_job(work, kind="design")
+
+
 @route("PATCH", "/api/characters/(?P<cid>[0-9-]+)")
 def rename_character(req, cid):
     ws.rename_character(cid, req["json"]["name"], _session_arg(req))

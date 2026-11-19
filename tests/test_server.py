@@ -980,3 +980,76 @@ def test_components_show_free_disk_space(api, monkeypatch, tmp_path):
     assert body["free_gb"] == 42.0
     items = {item["name"]: item for item in body["items"]}
     assert items["chatterbox"]["needs_gb"] == 13.3 and items["whisper"]["needs_gb"] == 2.7
+
+
+def _designer(monkeypatch, calls):
+    def fake_design(name, text, out, seed, language, description):
+        calls.append((name, text, seed, language, description))
+        make_wav(out, 1)
+        return 0.5
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "design", fake_design)
+
+
+def test_design_makes_three_candidates(api, tmp_workspace, monkeypatch):
+    calls = []
+    _designer(monkeypatch, calls)
+    cid = ws.create_character("Burak")
+    body = {"model": "omnivoice", "language": "en", "text": "Hello there.", "description": "Female , low pitch"}
+    status, job, _ = api("POST", f"/api/characters/{cid}/design", body)
+    assert status == 200
+    done = _wait(api, job["id"])
+    assert done["state"] == "done"
+    result = done["result"]
+    assert result["text"] == "Hello there." and result["language"] == "en"
+    assert result["description"] == "female, low pitch"
+    assert len(result["candidates"]) == 3 and len({c["seed"] for c in result["candidates"]}) == 3
+    for candidate in result["candidates"]:
+        assert candidate["file"].startswith(".tmp/")
+        assert api("GET", f"/files/{candidate['file']}")[0] == 200
+    assert [c[0] for c in calls] == ["omnivoice"] * 3
+
+
+@pytest.mark.parametrize("body, message", [
+    ({"model": "chatterbox", "language": "en", "text": "Hi.", "description": ""}, "cannot design"),
+    ({"model": "omnivoice", "language": "en", "text": "Hi.", "description": "angry"}, "does not know"),
+    ({"model": "omnivoice", "language": "en", "text": "  ", "description": ""}, "Write"),
+    ({"model": "voxcpm", "language": "xx", "text": "Hi.", "description": ""}, "does not support"),
+])
+def test_design_is_refused_before_it_starts(api, tmp_workspace, monkeypatch, body, message):
+    calls = []
+    _designer(monkeypatch, calls)
+    cid = ws.create_character("Burak")
+    status, error, _ = api("POST", f"/api/characters/{cid}/design", body)
+    assert status == 400 and message in error["error"] and calls == []
+
+
+def test_design_needs_the_model_installed(api, tmp_workspace, monkeypatch):
+    calls = []
+    _designer(monkeypatch, calls)
+    monkeypatch.setattr(models, "is_installed", lambda name: False)
+    cid = ws.create_character("Burak")
+    status, error, _ = api("POST", f"/api/characters/{cid}/design",
+                           {"model": "omnivoice", "language": "en", "text": "Hi.", "description": ""})
+    assert status == 400 and "not installed" in error["error"] and calls == []
+
+
+def test_design_can_be_cancelled(api, tmp_workspace, monkeypatch):
+    import threading
+    release, cancelled = threading.Event(), []
+
+    def slow_design(name, text, out, seed, language, description):
+        release.wait(5)
+        raise RuntimeError("The model process stopped unexpectedly.")
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "design", slow_design)
+    monkeypatch.setattr(models, "cancel", lambda name, owner: cancelled.append(name) or release.set() or True)
+    cid = ws.create_character("Burak")
+    _, job, _ = api("POST", f"/api/characters/{cid}/design",
+                    {"model": "voxcpm", "language": "tr", "text": "Merhaba.", "description": ""})
+    import time
+    time.sleep(0.2)
+    api("POST", f"/api/jobs/{job['id']}/cancel", {})
+    assert _wait(api, job["id"])["state"] == "cancelled" and cancelled == ["voxcpm"]
