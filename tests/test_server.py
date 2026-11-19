@@ -22,9 +22,9 @@ def api(tmp_workspace, tmp_path):
     url, token = server.start(ui)
     port = int(url.rsplit(":", 1)[1].rstrip("/"))
 
-    def call(method, path, body=None, token_value=token, host=None, raw=None, content_type=None):
+    def call(method, path, body=None, token_value=token, host=None, raw=None, content_type=None, extra_headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        headers = {"Host": host or f"127.0.0.1:{port}"}
+        headers = {"Host": host or f"127.0.0.1:{port}", **(extra_headers or {})}
         if token_value:
             headers["X-Vokalit-Token"] = token_value
         data = raw

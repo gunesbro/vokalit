@@ -190,8 +190,8 @@ def test_cut_reference_stays_inside_the_file(tmp_workspace, tmp_path):
 
 def test_fit_reports_overlaps_and_missing_takes():
     data = {"source": {"duration": 10.0}, "tracks": [{"clips": []}, {"clips": [
-        {"id": "d1", "start": 0.5, "selected": "takes/d1-1.wav", "takes": [{"file": "takes/d1-1.wav", "duration": 4.3}]},
-        {"id": "d2", "start": 4.0, "selected": "takes/d2-1.wav", "takes": [{"file": "takes/d2-1.wav", "duration": 6.0}]},
+        {"id": "d1", "start": 0.5, "selected": "a", "takes": [{"file": "a", "duration": 4.3}]},
+        {"id": "d2", "start": 4.0, "selected": "b", "takes": [{"file": "b", "duration": 6.0}]},
         {"id": "d3", "start": 9.5, "selected": None, "takes": []}]}]}
     assert dubs.fit(data) == {"d1": {"state": "long", "over": 0.8}, "d2": {"state": "long", "over": 0.5},
                               "d3": {"state": "missing", "over": 0.0}}

@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import dubs
 import models
 import workspace as ws
 
@@ -298,6 +299,9 @@ _routes = []
 
 # Audio files /files/ may serve and /api/reveal may show (all inside workspace/).
 AUDIO_TYPES = {".wav": "audio/wav", ".flac": "audio/flac", ".mp3": "audio/mpeg", ".ogg": "audio/ogg"}
+# Files /files/ serves: audio, and the dub sources (video, and audio types the window can read).
+RANGE_CHUNK = 4 * 1024 * 1024  # bytes sent for an open-ended range request
+MEDIA_TYPES = {**AUDIO_TYPES, ".m4a": "audio/mp4", ".mp4": "video/mp4", ".webm": "video/webm"}
 
 RENAME_NOTICE = ("Some take files are open in another program, so their 01-, 02- numbers were not updated. "
                  "They will be on the next change.")
@@ -911,6 +915,188 @@ def export_formats(req):
     return [{"id": f, "label": EXPORT_INFO[f][0], "note": EXPORT_INFO[f][1]} for f in ws.export_formats()]
 
 
+# --- Dubs ---------------------------------------------------------------------------------------
+
+
+def _dub_or_404(did):
+    data = dubs.load_dub(did)
+    if data is None:
+        raise NotFound()
+    return data
+
+
+def _dub_view(did, notice=None):
+    data = _dub_or_404(did)
+    folder = dubs.dub_dir(did) / "exports"
+    exports = sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if folder.exists() else []
+    return {**data, "fit": dubs.fit(data), **({"notice": notice} if notice else {}),
+            "exports": [{"name": p.name, "path": p.relative_to(ws.workspace_root()).as_posix()} for p in exports]}
+
+
+@route("GET", "/api/dubs")
+def list_dubs(req):
+    return [{"id": did, "name": d["name"], "created": d["created"], "kind": d["source"]["kind"],
+             "duration": d["source"]["duration"], "clips": len(d["tracks"][1]["clips"])} for did, d in dubs.list_dubs()]
+
+
+@route("POST", "/api/dubs")
+def create_dub(req):
+    """The imported file as the raw body; its audio follows in POST /api/dubs/<id>/audio (decoded by the window)."""
+    did = dubs.create_dub(req["query"].get("name", ""), req["raw"], req["query"].get("ext", ""))
+    return _dub_view(did)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/audio")
+def set_dub_audio(req, did):
+    _dub_or_404(did)
+    dubs.set_source_audio(did, req["raw"])
+    return _dub_view(did)
+
+
+@route("GET", "/api/dubs/(?P<did>[0-9-]+)")
+def get_dub(req, did):
+    return _dub_view(did)
+
+
+@route("PATCH", "/api/dubs/(?P<did>[0-9-]+)")
+def update_dub(req, did):
+    _dub_or_404(did)
+    body = req["json"]
+    if "name" in body:
+        dubs.rename_dub(did, str(body["name"]))
+    model = body.get("model")
+    if model is not None and model not in models.MODELS:
+        raise ws.WorkspaceError("Choose a model.")
+    settings = body.get("settings")
+    if settings is not None:
+        settings = {name: models.clean_settings(name, values) for name, values in settings.items()
+                    if name in models.MODELS}
+    language = _check_language(body["target_language"]) if "target_language" in body else None
+    volume = None if body.get("original_volume") is None else float(body["original_volume"])
+    dubs.set_options(did, target_language=language, model=model, settings=settings, original_volume=volume)
+    return _dub_view(did)
+
+
+@route("DELETE", "/api/dubs/(?P<did>[0-9-]+)")
+def delete_dub(req, did):
+    _dub_or_404(did)
+    dubs.delete_dub(did)
+    return {}
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/transcribe")
+def transcribe_dub(req, did):
+    """Whisper writes the sentences and their times; replaces every sentence, translation and take."""
+    _dub_or_404(did)
+    if not models.is_installed("whisper"):
+        raise ws.WorkspaceError("Whisper is not installed. Install it in Models.")
+    if not dubs.audio_path(did).exists():
+        raise ws.WorkspaceError("The dub has no sound yet. Import the file again.")
+
+    def work(job):
+        job["progress"] = "Listening\u2026"
+        heard = models.transcribe_segments(str(dubs.audio_path(did)), None)
+        if job.get("cancelled"):
+            raise Cancelled()
+        dubs.set_transcript(did, heard["language"], heard["segments"])
+        return _dub_view(did, None if heard["segments"] else "No speech was found in this file.")
+    return _start_job(work, kind="transcribe")
+
+
+@route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)")
+def update_dub_source(req, did, oid):
+    _dub_or_404(did)
+    dubs.update_source_clip(did, oid, str(req["json"].get("text", "")))
+    return _dub_view(did)
+
+
+@route("DELETE", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)")
+def delete_dub_source(req, did, oid):
+    _dub_or_404(did)
+    dubs.delete_source_clip(did, oid)
+    return _dub_view(did)
+
+
+@route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/clips/(?P<cid>d[0-9]+)")
+def update_dub_clip(req, did, cid):
+    _dub_or_404(did)
+    body = req["json"]
+    dubs.update_dub_clip(did, cid, start=float(body["start"]) if "start" in body else None,
+                         translation=body.get("translation"), voice_from=body.get("voice_from"))
+    return _dub_view(did)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/clips/(?P<cid>d[0-9]+)/select")
+def select_dub_take(req, did, cid):
+    _dub_or_404(did)
+    dubs.select_take(did, cid, str(req["json"].get("file", "")))
+    return _dub_view(did)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/generate")
+def generate_dub(req, did):
+    """Speaks the given sentences' translations in the target language, each cloning its "voice from" sentence."""
+    data = _dub_or_404(did)
+    name, language = data["model"], data["target_language"]
+    if name not in models.MODELS:
+        raise ws.WorkspaceError("Choose a model for the dub.")
+    if not models.is_installed(name):
+        raise ws.WorkspaceError(f"{models.MODELS[name]['title']} is not installed. Install it in Models.")
+    if language not in models.MODELS[name].get("languages", []):
+        raise ws.WorkspaceError(f"{models.MODELS[name]['title']} does not support "
+                                f"{models.LANGUAGE_NAMES.get(language, language)}.")
+    ids = [str(c) for c in req["json"].get("clips", [])]
+    seed = req["json"].get("seed")
+    seed = None if seed in (None, "") else int(seed)
+
+    def work(job):
+        errors = []
+        for i, cid in enumerate(ids, 1):
+            if job.get("cancelled"):
+                raise Cancelled()
+            job["progress"] = f"Sentence {i} of {len(ids)}"
+            current = dubs.load_dub(did)
+            clips = current["tracks"][1]["clips"]
+            number = next((n for n, c in enumerate(clips, 1) if c["id"] == cid), None)
+            if number is None:
+                continue  # deleted meanwhile
+            clip = clips[number - 1]
+            text = models.text_for(name, clip["translation"])
+            if not models.has_words(text):
+                errors.append(f"Sentence {number} has no translation yet.")
+                continue
+            ref, ref_text = dubs.cut_reference(did, cid)
+            settings = models.validate_settings(name, current["settings"].get(name, {}))
+            take_seed = _random_seed() if seed is None else seed
+            out = dubs.new_take_path(did, cid)
+            job["model"] = name  # what cancelling stops
+            try:
+                seconds = models.generate(name, text, str(ref), str(out), take_seed, settings, language,
+                                          ref_text=ref_text)
+            except Exception as error:
+                if job.get("cancelled"):
+                    out.unlink(missing_ok=True)  # a take cut off halfway
+                    raise Cancelled() from None
+                errors.append(f"Sentence {number}: {error}")
+                continue
+            finally:
+                job["model"] = None
+            dubs.add_take(did, cid, {"file": str(out), "seed": take_seed, "model": name, "settings": settings,
+                                     "language": language, "text": clip["translation"],
+                                     "generation_seconds": seconds, "duration": round(ws.wav_duration(out), 2)})
+        if errors:
+            raise RuntimeError(" ".join(errors))
+        return _dub_view(did)
+    return _start_job(work, kind="generate")
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/export")
+def export_dub(req, did):
+    _dub_or_404(did)
+    out = dubs.export_dub(did, str(req["json"].get("format", "wav")))
+    return {"path": out.relative_to(ws.workspace_root()).as_posix()}
+
+
 # --- HTTP ---------------------------------------------------------------------------------------
 
 
@@ -945,7 +1131,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path.startswith("/ui/"):
             return self._file(_ui_dir, unquote(path[len("/ui/"):]), STATIC_TYPES)
         if method == "GET" and path.startswith("/files/"):
-            return self._file(ws.workspace_root(), unquote(path[len("/files/"):]), AUDIO_TYPES, ranges=True)
+            return self._file(ws.workspace_root(), unquote(path[len("/files/"):]), MEDIA_TYPES, ranges=True)
         if not path.startswith("/api/"):
             return self._send(404)
         if not secrets.compare_digest(self.headers.get("X-Vokalit-Token", ""), _token):
@@ -981,21 +1167,24 @@ class Handler(BaseHTTPRequestHandler):
         target = (root / relative).resolve()
         if not target.is_relative_to(root) or not target.is_file() or target.suffix not in types:
             return self._send(404)
-        data = target.read_bytes()
-        if not ranges:
-            return self._send(200, data, types[target.suffix])
-        # Byte ranges let the <audio> element seek (clicking a waveform); without them it restarts from 0.
-        match = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
+        # Byte ranges let <audio> and <video> seek (clicking a waveform); without them they restart from 0.
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip()) if ranges else None
         if not match or not (match.group(1) or match.group(2)):
-            return self._send(200, data, types[target.suffix], {"Accept-Ranges": "bytes"})
-        size = len(data)
+            accept = {"Accept-Ranges": "bytes"} if ranges else None
+            return self._send(200, target.read_bytes(), types[target.suffix], accept)
+        size = target.stat().st_size  # only the requested bytes are read: a dub's video can be large
         if match.group(1):
             start, end = int(match.group(1)), min(int(match.group(2) or size - 1), size - 1)
         else:  # last N bytes
             start, end = max(0, size - int(match.group(2))), size - 1
         if start >= size or start > end:
             return self._send(416, b"", types[target.suffix], {"Content-Range": f"bytes */{size}"})
-        self._send(206, data[start:end + 1], types[target.suffix],
+        if not match.group(2):  # "bytes=N-": a part at a time, the player asks for the rest
+            end = min(end, start + RANGE_CHUNK - 1)
+        with open(target, "rb") as f:
+            f.seek(start)
+            part = f.read(end - start + 1)
+        self._send(206, part, types[target.suffix],
                    {"Accept-Ranges": "bytes", "Content-Range": f"bytes {start}-{end}/{size}"})
 
     def do_GET(self):
