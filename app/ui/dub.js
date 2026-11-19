@@ -221,7 +221,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   let scrollFrame = 0;
   table.addEventListener("scroll", () => {
     cancelAnimationFrame(scrollFrame);
-    scrollFrame = requestAnimationFrame(renderRows);
+    scrollFrame = requestAnimationFrame(() => renderRows());
   });
   const stage = el("div", { class: "dub-stage" });
   const inspector = el("div", { class: "dub-inspector" });
@@ -663,10 +663,13 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     }
     rowsBox.style.height = `${tableIds.length * ROW}px`;
     if (rowsBox.parentNode !== table) table.replaceChildren(rowsBox);
+    const typed = focusedRow(); // read before the rows go: a row typed in, even scrolled away, is drawn again
     rendered.clear();
     rowsBox.replaceChildren();
-    renderRows();
+    renderRows(typed);
   }
+
+  const focusedRow = () => document.activeElement?.closest?.(".dub-line")?.dataset.clip;
 
   // In "Too long": fit every take that runs over (sped-up ones are listed too, but already fitted).
   function fitButton(all) {
@@ -677,11 +680,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   }
 
   // The rows in view, plus the one being typed in (scrolled away, it keeps its text and focus). Rows already drawn stay.
-  function renderRows() {
+  function renderRows(typed = null) {
     const [first, end] = visibleRows(table.scrollTop, table.clientHeight || 600, ROW, tableIds.length, OVERSCAN);
     const wanted = new Set(tableIds.slice(first, end));
-    const focused = document.activeElement?.closest?.(".dub-line")?.dataset.clip;
-    if (focused && rendered.has(focused)) wanted.add(focused);
+    const focused = typed || focusedRow();
+    if (focused && (rendered.has(focused) || tableIds.includes(focused))) wanted.add(focused);
     for (const [id, row] of rendered) if (!wanted.has(id)) { row.remove(); rendered.delete(id); }
     const position = new Map(tableIds.slice(first, end).map((id, i) => [id, first + i]));
     for (const id of wanted) {

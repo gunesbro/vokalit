@@ -346,3 +346,8 @@ test("transcriptForTranslation gives each sentence its time when there are times
 test("parseTranslations drops a time the tool copied back", () => {
   assert.deepEqual(parseTranslations("1. [3.5 s] Hello.\n2. [3 s] Yes.", 2).texts, ["Hello.", "Yes."]);
 });
+
+test("parseTranslations drops a copied-back time however the tool wrote it, and keeps sound tags", () => {
+  const reply = "1. [3,4 s] Merhaba.\n2. [3.4 sec] Evet.\n3. [ 2 sn ] Tamam.\n4. [laughs] Hello.";
+  assert.deepEqual(parseTranslations(reply, 4).texts, ["Merhaba.", "Evet.", "Tamam.", "[laughs] Hello."]);
+});

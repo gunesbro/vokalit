@@ -463,7 +463,7 @@ def test_fit_take_speeds_up_to_the_slot(tmp_workspace, tmp_path):
 
 def test_fit_refuses_over_the_limit(tmp_workspace, tmp_path):
     dub = _long_take(tmp_path, 5.0)
-    with pytest.raises(dubs.NeedsShorter, match="1.45× faster"):
+    with pytest.raises(dubs.NeedsShorter, match="1.45\u00d7 faster"):
         dubs.fit_take(dub, "d1")
     assert len(dubs.load_dub(dub)["tracks"][1]["clips"][0]["takes"]) == 1
 

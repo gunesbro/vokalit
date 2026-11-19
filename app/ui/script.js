@@ -191,7 +191,7 @@ export function parseTranslations(reply, count) {
   const numbered = lines.map((line) => line.match(/^(\d+)\s*[.):-]\s*(.+)$/)).filter(Boolean);
   if (numbered.length) {
     for (const [, number, text] of numbered) {
-      if (number >= 1 && number <= count) texts[number - 1] = text.replace(/^\[\d+(\.\d+)?\s*s\]\s*/, "").trim();
+      if (number >= 1 && number <= count) texts[number - 1] = text.replace(/^\[\s*\d+(?:[.,]\d+)?\s*[a-z]*\.?\s*\]\s*/i, "").trim();
     }
   } else {
     lines.slice(0, count).forEach((line, i) => { texts[i] = line; });
