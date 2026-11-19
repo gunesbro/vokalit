@@ -3,6 +3,7 @@ their own voices. Stored as tracks of clips (seconds, never pixels), so the time
 
 dub.json, source.<ext> (the imported file), audio.wav (its sound, decoded by the window), refs/, takes/, exports/.
 """
+import os
 import shutil
 import threading
 import time
@@ -63,6 +64,41 @@ def audio_path(dub_id: str) -> Path:
     return dub_dir(dub_id) / "audio.wav"
 
 
+def voices_path(dub_id: str) -> Path:
+    """The source's speech, separated from its music and effects (Demucs); same rate as audio.wav."""
+    return dub_dir(dub_id) / "voices.wav"
+
+
+def background_path(dub_id: str) -> Path:
+    """The source's music and effects, without the speech."""
+    return dub_dir(dub_id) / "background.wav"
+
+
+def stems_temp(dub_id: str) -> tuple[Path, Path]:
+    """Where a separation writes; keep_stems puts both in place, so half-written files never count."""
+    return dub_dir(dub_id) / "voices.part.wav", dub_dir(dub_id) / "background.part.wav"
+
+
+def keep_stems(dub_id: str) -> None:
+    for temp, path in zip(stems_temp(dub_id), (voices_path(dub_id), background_path(dub_id))):
+        os.replace(temp, path)
+
+
+def has_stems(dub_id: str) -> bool:
+    return voices_path(dub_id).exists() and background_path(dub_id).exists()
+
+
+def remove_stems(dub_id: str) -> None:
+    for path in (voices_path(dub_id), background_path(dub_id), *stems_temp(dub_id)):
+        path.unlink(missing_ok=True)
+
+
+def _fitted(samples: np.ndarray, length: int) -> np.ndarray:
+    """A stem trimmed or padded with silence to the sound's length (resampling can be a few samples off)."""
+    return samples[:length] if len(samples) >= length else np.concatenate([samples, np.zeros(length - len(samples),
+                                                                                           samples.dtype)])
+
+
 def create_dub(name: str, source_bytes: bytes, ext: str) -> str:
     ext = (ext or "").lower()
     if ext not in SOURCE_TYPES | VIDEO_TYPES:
@@ -75,7 +111,8 @@ def create_dub(name: str, source_bytes: bytes, ext: str) -> str:
         "id": dub_id, "name": name.strip() or time.strftime("Dub %Y-%m-%d %H:%M"), "created": ws._now(),
         "source": {"file": f"source.{ext}", "kind": "video" if ext in VIDEO_TYPES else "audio", "duration": None,
                    "language": None},
-        "original_volume": DEFAULT_ORIGINAL_VOLUME,
+        "original_volume": DEFAULT_ORIGINAL_VOLUME,  # the whole original under the dub, without separated stems
+        "voices_volume": 0.0,  # the original voices under the dub, with stems (the background is always at full level)
         "tracks": [{"id": "original", "kind": "source", "clips": []}, _language_track("en")],
     })
     return dub_id
@@ -94,7 +131,9 @@ def _new_clip(n: int, source: dict) -> dict:
 
 
 def _migrate(data: dict) -> dict:
-    """Dubs from before several languages: the single dub track takes the dub's target language, model and settings."""
+    """Dubs from before several languages: the single dub track takes the dub's target language, model and settings.
+    Dubs from before voice separation start with the original voices off once separated."""
+    data.setdefault("voices_volume", 0.0)
     for track in data["tracks"][1:]:
         if "language" not in track:
             language = data.pop("target_language", "en")
@@ -314,12 +353,16 @@ def set_translations(dub_id: str, translations: dict[str, str], language: str | 
             clip["translation"] = str(text).strip()
 
 
-def set_options(dub_id: str, *, original_volume: float | None = None) -> None:
+def set_options(dub_id: str, *, original_volume: float | None = None, voices_volume: float | None = None) -> None:
     if original_volume is not None and not 0 <= original_volume <= 1:
         raise ws.WorkspaceError("The original's volume must be between 0 and 100 %.")
+    if voices_volume is not None and not 0 <= voices_volume <= 1:
+        raise ws.WorkspaceError("The original voices' volume must be between 0 and 100 %.")
     with _editing(dub_id) as data:
         if original_volume is not None:
             data["original_volume"] = round(float(original_volume), 3)
+        if voices_volume is not None:
+            data["voices_volume"] = round(float(voices_volume), 3)
 
 
 # --- Takes --------------------------------------------------------------------------------------
@@ -399,7 +442,7 @@ def cut_reference(dub_id: str, clip_id: str, language: str | None = None) -> tup
     which in a dialogue are often the other speaker), with a little padding; and that sentence's text."""
     data = load_dub(dub_id)
     source = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["voice_from"])
-    rate, samples = _read(audio_path(dub_id))
+    rate, samples = _read(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id))  # clean speech when separated
     first = max(0, round((source["start"] - REFERENCE_PADDING) * rate))
     last = min(len(samples), round((source["end"] + REFERENCE_PADDING) * rate))
     folder = dub_dir(dub_id) / "refs"
@@ -507,8 +550,9 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
 
 
 def export_dub(dub_id: str, fmt: str = "wav", language: str | None = None) -> Path:
-    """Mixes every selected take at its start over the original (at original_volume) into exports/<name>-<time>.<fmt>.
-    Sentences without a take are silent; the original still plays under them."""
+    """Mixes every selected take at its start over the original (at original_volume) into exports/<name>-<time>.<fmt>;
+    with separated stems, over the background at full level and the original voices at voices_volume. Sentences
+    without a take are silent; the original still plays under them."""
     if fmt not in ws.export_formats():
         raise ws.WorkspaceError(f"This computer cannot export {fmt.upper()} files.")
     data = load_dub(dub_id)
@@ -528,19 +572,29 @@ def export_dub(dub_id: str, fmt: str = "wav", language: str | None = None) -> Pa
         takes.append((clip["start"], *_read(path)))
     # Models write different sample rates (VoxCPM2 48 kHz, others 24 kHz): mix at the highest, so nothing is lost.
     rate = max([source_rate] + [take_rate for _, take_rate, _ in takes])
-    original = source if source_rate == rate else ws._resample(source, source_rate, rate)
-    # The original under the dub at its volume, and at full volume where a sentence keeps it (short fades, no clicks).
-    gain = np.full(len(original), float(data["original_volume"]))
+
+    def at_rate(samples):
+        return samples if source_rate == rate else ws._resample(samples, source_rate, rate)
+
+    # Separated: the background at full level and the original voices at their volume; otherwise the whole original.
+    stems = has_stems(dub_id)
+    original = at_rate(_fitted(_read(voices_path(dub_id))[1], len(source)) if stems else source)
+    background = at_rate(_fitted(_read(background_path(dub_id))[1], len(source))) if stems else None
+    volume = float(data["voices_volume"] if stems else data["original_volume"])
+    # Under the dub at its volume, and at full volume where a sentence keeps the original (short fades, no clicks).
+    gain = np.full(len(original), volume)
     fade = max(1, round(KEPT_FADE * rate))
     for source in kept:
         first, last = max(0, round(source["start"] * rate)), min(len(gain), round(source["end"] * rate))
         gain[first:last] = 1.0
         for i in range(fade):
-            level = data["original_volume"] + (1 - data["original_volume"]) * (1 - (i + 1) / (fade + 1))
+            level = volume + (1 - volume) * (1 - (i + 1) / (fade + 1))
             for at in (first - 1 - i, last + i):
                 if 0 <= at < len(gain):
                     gain[at] = max(gain[at], level)
     mix = original.astype(np.float64) * gain
+    if background is not None:
+        mix += background[:len(mix)]
     for start, take_rate, samples in takes:
         samples = samples if take_rate == rate else ws._resample(samples, take_rate, rate)
         first = round(start * rate)

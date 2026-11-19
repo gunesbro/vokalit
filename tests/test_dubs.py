@@ -593,3 +593,60 @@ def test_fit_take_refuses_a_take_far_too_short(tmp_workspace, tmp_path):
     assert dubs.fit(dubs.load_dub(dub))["d1"]["can_fit"] is False
     with pytest.raises(dubs.NeedsLonger, match="Lengthen the translation"):
         dubs.fit_take(dub, "d1")
+
+
+def _stems(dub, voices_value, background_value, voices_extra=0, background_extra=0):
+    """Writes constant stems the length of the dub's sound (plus or minus a few samples)."""
+    import numpy as np
+    rate, audio = dubs._read(dubs.audio_path(dub))
+    dubs._write(dubs.voices_path(dub), rate, np.full(len(audio) + voices_extra, voices_value))
+    dubs._write(dubs.background_path(dub), rate, np.full(len(audio) + background_extra, background_value))
+    return rate, len(audio)
+
+
+def test_references_come_from_the_voices(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    _stems(dub, 1234, 5000)
+    path, _ = dubs.cut_reference(dub, "d1")
+    _, samples = _read_wav(path)
+    assert set(samples.tolist()) == {1234}
+
+
+def test_export_with_stems_plays_the_background_full_and_voices_at_their_volume(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    rate, _ = _stems(dub, 2000, 1000)
+    dubs.set_options(dub, voices_volume=0.5)
+    _, mix = _read_wav(dubs.export_dub(dub))
+    assert mix[int(10 * rate)] == 2000  # background 1000 + voices 2000 at 50 %
+    dubs.set_keep_original(dub, "o1", True)  # spoken 0.5-3.0 s: the whole original there
+    _, mix = _read_wav(dubs.export_dub(dub))
+    assert mix[int(1.5 * rate)] == 3000 and mix[int(10 * rate)] == 2000
+
+
+def test_stems_of_another_length_are_fitted(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    rate, length = _stems(dub, 2000, 1000, voices_extra=-10, background_extra=10)
+    _, mix = _read_wav(dubs.export_dub(dub))
+    assert len(mix) == length and mix[-1] == 1000  # the short voices are padded with silence (voices off by default)
+
+
+def test_half_written_stems_do_not_count(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    assert not dubs.has_stems(dub)
+    voices, background = dubs.stems_temp(dub)
+    make_wav(voices, 12)
+    make_wav(background, 12)
+    assert not dubs.has_stems(dub)  # not kept yet
+    dubs.keep_stems(dub)
+    assert dubs.has_stems(dub) and not voices.exists()
+    dubs.background_path(dub).unlink()
+    assert not dubs.has_stems(dub)
+    dubs.remove_stems(dub)
+    assert not dubs.voices_path(dub).exists()
+
+
+def test_voices_volume_starts_off_and_is_checked(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    assert dubs.load_dub(dub)["voices_volume"] == 0.0
+    with pytest.raises(ws.WorkspaceError, match="voices"):
+        dubs.set_options(dub, voices_volume=1.5)
