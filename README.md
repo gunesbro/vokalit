@@ -33,6 +33,22 @@ Your voice, your text and the generated audio never leave your machine.
 - **Transcripts** — every sample keeps what is said in it, which some models use to copy the voice. The optional
   Whisper component writes it for you (and detects the language); otherwise you type it.
 
+## Listen
+
+Two characters made with **Design voice** (OmniVoice, from a description; no one's voice was recorded), then used as
+samples for a short podcast voiced with Higgs TTS 3. The second clip has the same Turkish-designed voices reading an
+English script. Unmute the player to listen.
+
+**Turkish**
+
+<!-- vokalit-designed-voices-tr.mp4 -->
+
+**English**
+
+<!-- vokalit-designed-voices-en.mp4 -->
+
+<sub>Made with Boson AI's Higgs Audio.</sub>
+
 ## Screenshots
 
 **Line details** — text, sample, language and pause; generate with one or more models; per-line settings; takes
