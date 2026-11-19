@@ -1,5 +1,6 @@
 // App shell: API client, DOM helper, message line, job polling, screen router.
 import { renderCharacters } from "./characters.js";
+import { renderDub } from "./dub.js";
 import { renderModels } from "./models.js";
 import { renderStudio } from "./studio.js";
 
@@ -111,6 +112,7 @@ const SCREENS = {
   models: renderModels,
   studio: renderStudio,
   characters: renderCharacters,
+  dub: renderDub,
 };
 
 let current = null;

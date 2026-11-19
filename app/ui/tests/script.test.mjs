@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampStart, clipsToPlay, overlapRanges, timeToX, xToTime } from "../script.js";
+import { clampStart, clipsToPlay, overlapRanges, pasteTranslations, timeToX, xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
   pickSelected,
   pickerLabel, settingsChanges,
@@ -163,4 +163,9 @@ test("clipsToPlay schedules from the playhead", () => {
 test("overlapRanges finds where a clip runs into the next", () => {
   assert.deepEqual(overlapRanges([{ start: 4, end: 9 }, { start: 0, end: 4.3 }, { start: 9.5, end: 10 }]), [{ start: 4, end: 4.3 }]);
   assert.deepEqual(overlapRanges([]), []);
+});
+
+test("pasteTranslations fills the following sentences, one line each", () => {
+  assert.deepEqual(pasteTranslations(["d1", "d2", "d3"], 1, "Hello.\n\nHow are you?\nExtra"), { d2: "Hello.", d3: "How are you?" });
+  assert.deepEqual(pasteTranslations(["d1"], 0, "  One line  "), { d1: "One line" });
 });

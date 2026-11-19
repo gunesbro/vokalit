@@ -168,3 +168,9 @@ export function overlapRanges(clips) {
   }
   return ranges;
 }
+
+// Several pasted lines fill consecutive sentences from `fromIndex`, one non-empty line each; extra lines are dropped.
+export function pasteTranslations(clipIds, fromIndex, text) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return Object.fromEntries(lines.slice(0, clipIds.length - fromIndex).map((line, i) => [clipIds[fromIndex + i], line]));
+}

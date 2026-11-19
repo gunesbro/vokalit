@@ -47,7 +47,7 @@ export function timeline({ duration, lanes = [], onSeek = () => {}, onSelect = (
       const origin = e.clientX;
       const length = clip.end - clip.start;
       let start = clip.start;
-      node.setPointerCapture(e.pointerId);
+      try { node.setPointerCapture(e.pointerId); } catch { /* a synthetic event has no pointer to capture */ }
       const move = (m) => {
         start = clampStart(clip.start + xToTime(m.clientX - origin, scale), length, duration);
         node.style.left = `${timeToX(start, scale)}px`;

@@ -41,6 +41,11 @@ English script. Unmute the player to listen.
   Calm, …). A take in progress can be cancelled (*Cancel* next to it, or *Stop* for Generate missing); the model then
   loads again for the next take.
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
+- **Dub** — drop in a video (MP4, WebM) or an audio file; Whisper finds the sentences and their times, you write the
+  translations, and each sentence is spoken in the new language **in its own original voice** (cloned from that
+  sentence, so every speaker keeps their voice and mood). A two-lane timeline shows where a translation runs long;
+  drag a clip to move it. The video plays muted with the dub in sync and the original quietly underneath, and the
+  mix is exported as one audio file. Made for clips up to about 20 minutes; translations are typed or pasted.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.
 - **Tags** — sounds (laughter, sighs, …), emotions, styles and delivery (speed, pitch, pauses) as chips inside a
@@ -170,7 +175,7 @@ Everything stays inside the Vokalit folder; deleting the folder removes all of i
 
 ```
 .local/            uv, Python, the app environment, window data, and one folder per installed model
-workspace/         your characters, sessions, takes, recordings and exports
+workspace/         your characters, sessions, dubs, takes, recordings and exports
 ```
 
 Use the folder button next to a sample, take or export to show it in File Explorer.

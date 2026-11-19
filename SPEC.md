@@ -257,6 +257,17 @@ All interface text is English. The visual design is the design canvas; behaviour
   pause (previous/next, Space to pause, "Play from here" in the line menu; lines without takes are skipped).
   Lines can be ticked (Shift+click for a range, Ctrl+A for all, Esc to clear) for bulk Generate, Character, Sample,
   Pause (one value for all; empty with "mixed" when they differ), Delete takes and Delete lines; the session menu has "Delete empty lines".
+- **Dub:** list of dubs (new from a file or by dropping one, rename, delete); import reads the file's sound in the
+  window (MP4, WebM, WAV, MP3, M4A, OGG, FLAC; size and length shown, a warning past 20 minutes; a video whose sound
+  the window cannot read asks for its audio as a separate file) and copies the file into `workspace/dubs/<id>/`;
+  Whisper (timed segments, long ones split at sentence ends) fills the Original lane; each sentence row has its
+  editable original text (it is the voice sample's transcript), the translation (pasting several lines fills the
+  following sentences), "Voice from" (default: this sentence; never neighbours, which may be another speaker),
+  Generate/Again, the selected take, its status (fits / "0.8 s too long" / no take) and Delete. Header: target
+  language, model, settings, Generate missing (Cancel), Export (one audio file: the takes at their starts over the
+  original at its volume), Transcribe again (confirmed: it replaces everything). Preview: the video muted (or a clock
+  for audio) with the original and the takes through Web Audio; a two-lane timeline (`timeline.js`: lanes and clips in
+  seconds, one scale) shows overlaps in red, seeks on click and moves Dub clips by dragging.
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not
