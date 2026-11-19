@@ -107,7 +107,7 @@ def test_dub_generate_uses_its_own_sentence_as_reference(api, tmp_path, monkeypa
 
     def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
         calls.append({"name": name, "text": text, "ref": ref, "language": language, "ref_text": ref_text})
-        make_wav(out, 1.5)
+        make_wav(out, 4.8)  # the sentence is spoken for 5 s: ends with its speaker
         return 0.5
 
     monkeypatch.setattr(models, "generate", fake_generate)
@@ -325,3 +325,13 @@ def test_clear_takes_route(api, tmp_path, monkeypatch):
     _take(dub["id"], "d1", 1.0)
     status, body, _ = api("POST", f"/api/dubs/{dub['id']}/takes/clear?language=en", {})
     assert status == 200 and body["removed"] == 1 and body["tracks"][1]["clips"][0]["takes"] == []
+
+
+def test_fit_route_lengthens_and_counts_the_ones_needing_longer(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    _take(dub["id"], "d1", 1.9)  # 2.5 s spoken: lengthened at 0.85x
+    _take(dub["id"], "d2", 2.0)  # 5 s spoken: far too short
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/fit", {"clips": ["d1", "d2"]})
+    done = _wait(api, job["id"])
+    assert done["result"]["notice"] == "Fitted 1 sentence. 1 needs a longer translation."
+    assert done["result"]["fit"]["en"]["d1"]["speed"] == 0.85

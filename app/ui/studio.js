@@ -7,6 +7,7 @@ import { soundEditor, soundText } from "./editor.js";
 import { commonLanguages, findPlayable, formatTime, moveLine, parsePause, pickSelected, settingsChanges, splitSentences,
   takeNumber } from "./script.js";
 import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, searchSelect, sliders } from "./settings.js";
+import { trackAudio } from "./volume.js";
 import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 
 const ICON_MORE = ["M5 12h.01M12 12h.01M19 12h.01"];
@@ -1535,7 +1536,7 @@ export async function renderStudio(root) {
     }
     const line = session.lines[index];
     pauseAll();
-    const audio = new Audio(`/files/sessions/${sid()}/${playableFile(line)}`);
+    const audio = trackAudio(new Audio(`/files/sessions/${sid()}/${playableFile(line)}`)); // at the app's volume
     Object.assign(playback, { lineId: line.id, audio, paused: false });
     audio.addEventListener("ended", () => {
       // Silence for the line's pause, then the next line (looked up again: the script may have changed).

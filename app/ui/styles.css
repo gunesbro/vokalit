@@ -54,6 +54,12 @@ h2, h3 { font-size: 13px; }
           justify-content: center; }
 .rail a:hover { color: var(--text); background: var(--hover); }
 .rail a[aria-current="page"] { background: var(--hover); color: var(--text); }
+.rail-volume { position: relative; }
+.rail-volume > button { width: 44px; height: 36px; border: 0; border-radius: 8px; background: none; color: var(--muted);
+  display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.rail-volume > button:hover, .rail-volume > button[aria-expanded="true"] { color: var(--text); background: var(--hover); }
+.volume-pop { width: 260px; display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.volume-pop input[type=range] { width: 100%; }
 .gpu { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
 .gpu .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
 .gpu.ok .dot { background: var(--ok); }
@@ -547,6 +553,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .tl-clip.fits { background: var(--accent); }
 .tl-clip.missing { background: transparent; border-style: dashed; }
 .tl-clip.long { background: var(--warn); }
+.tl-clip.short { background: color-mix(in srgb, var(--warn) 45%, transparent); border-color: var(--warn); }
 .tl-clip.selected { outline: 2px solid var(--text); outline-offset: 1px; }
 .tl-overlap { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--danger) 45%, transparent);
   pointer-events: none; z-index: 3; }
@@ -578,6 +585,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .dub-filters { gap: 4px; }
 .dub-filters .active { background: var(--hover); }
 .dub-subrow { flex-basis: 100%; gap: 6px; padding-top: 2px; }
+.dub-exchange { gap: 6px; }
 .dub-table { flex: 1 1 0; overflow-y: auto; padding: 4px 8px; }
 .dub-rows { position: relative; }
 .dub-line { position: absolute; left: 0; right: 0; height: 38px; box-sizing: border-box; display: grid; grid-template-columns: 32px 44px minmax(0, 1fr) minmax(0, 1.2fr) 52px; gap: 8px;

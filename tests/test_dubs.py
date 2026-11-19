@@ -195,8 +195,8 @@ def test_fit_reports_overlaps_and_missing_takes():
         {"id": "d1", "start": 0.5, "selected": "a", "takes": [{"file": "a", "duration": 4.3}]},
         {"id": "d2", "start": 4.0, "selected": "b", "takes": [{"file": "b", "duration": 6.0}]},
         {"id": "d3", "start": 9.5, "selected": None, "takes": []}]}]}
-    assert dubs.fit(data) == {"d1": {"state": "long", "over": 0.8, "need": 1.25},
-                              "d2": {"state": "long", "over": 0.5, "need": 1.1},
+    assert dubs.fit(data) == {"d1": {"state": "long", "over": 0.8, "need": 1.25, "can_fit": True},
+                              "d2": {"state": "long", "over": 0.5, "need": 1.1, "can_fit": True},
                               "d3": {"state": "missing", "over": 0.0}}
 
 
@@ -204,7 +204,7 @@ def test_fit_uses_start_order_and_the_file_end():
     data = {"source": {"duration": 10.0}, "tracks": [{"clips": []}, {"clips": [
         {"id": "d2", "start": 6.0, "selected": "b", "takes": [{"file": "b", "duration": 4.5}]},
         {"id": "d1", "start": 1.0, "selected": "a", "takes": [{"file": "a", "duration": 2.0}]}]}]}
-    assert dubs.fit(data) == {"d1": {"state": "fits", "over": 0.0}, "d2": {"state": "long", "over": 0.5, "need": 1.14}}
+    assert dubs.fit(data) == {"d1": {"state": "fits", "over": 0.0}, "d2": {"state": "long", "over": 0.5, "need": 1.14, "can_fit": True}}
 
 
 def test_export_mixes_takes_at_their_times(tmp_workspace, tmp_path):
@@ -359,7 +359,7 @@ def test_languages_have_their_own_translations_takes_and_timing(tmp_workspace, t
     en, de = data["tracks"][1]["clips"][0], data["tracks"][2]["clips"][0]
     assert (en["translation"], en["start"], en["selected"]) == ("", 0.5, None)
     assert (de["translation"], de["start"], de["selected"]) == ("Hallo.", 1.0, "takes/de/d1-1.wav")
-    assert dubs.fit(data, "de")["d1"]["state"] == "fits" and dubs.fit(data, "en")["d1"]["state"] == "missing"
+    assert dubs.fit(data, "de")["d1"]["state"] != "missing" and dubs.fit(data, "en")["d1"]["state"] == "missing"
     assert "-de-" in dubs.export_dub(dub, language="de").name
     with pytest.raises(ws.WorkspaceError):
         dubs.add_language(dub, "de")
@@ -566,3 +566,30 @@ def test_clear_takes_removes_one_language_s_takes(tmp_workspace, tmp_path):
     assert en["takes"] == [] and en["selected"] is None and en["translation"] == "Hello."
     assert not (dubs.dub_dir(dub) / "takes" / "en").exists()
     assert dubs._track(data, "de")["clips"][0]["takes"] and other.exists()
+
+
+def test_fit_marks_a_take_that_ends_before_the_speaker(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 1.9)  # the first sentence is spoken 0.5-3.0 s: 2.5 s to fill
+    assert dubs.fit(dubs.load_dub(dub))["d1"] == {"state": "short", "over": 0.0, "under": 0.6, "need": 0.76, "can_fit": True}
+
+
+def test_a_take_close_to_the_speaker_s_end_fits(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 2.2)  # 0.3 s early: within SHORT_GAP
+    assert dubs.fit(dubs.load_dub(dub))["d1"]["state"] == "fits"
+
+
+def test_fit_take_lengthens_a_short_take(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 1.9)
+    speed = dubs.fit_take(dub, "d1")
+    assert speed == dubs.MIN_SPEED  # 0.76 would be needed; 0.85 brings it within SHORT_GAP
+    clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
+    slower = next(t for t in clip["takes"] if t["file"] == clip["selected"])
+    assert slower["speed"] == 0.85 and abs(slower["duration"] - 1.9 / 0.85) < 0.02
+    assert dubs.fit(dubs.load_dub(dub))["d1"] == {"state": "fits", "over": 0.0, "speed": 0.85}
+
+
+def test_fit_take_refuses_a_take_far_too_short(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 1.5)  # even at 0.85x it ends 0.74 s early
+    assert dubs.fit(dubs.load_dub(dub))["d1"]["can_fit"] is False
+    with pytest.raises(dubs.NeedsLonger, match="Lengthen the translation"):
+        dubs.fit_take(dub, "d1")

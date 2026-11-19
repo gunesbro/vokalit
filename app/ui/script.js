@@ -175,13 +175,16 @@ export function pasteTranslations(clipIds, fromIndex, text) {
   return Object.fromEntries(lines.slice(0, clipIds.length - fromIndex).map((line, i) => [clipIds[fromIndex + i], line]));
 }
 
-// The transcript to give a translation tool: an instruction, then the sentences numbered, one per line. With `seconds`
-// (each sentence's time before the next one), each line gives its time so the translations come out short enough.
-export const transcriptForTranslation = (sentences, languageName, seconds = null) =>
+// The transcript to give a translation tool: an instruction, then the sentences numbered, one per line. With `times`
+// ({speak, most} per sentence: how long the original takes to say, and the time until the next sentence), each line
+// gives both, so a translation takes about as long as its original, never longer than the most.
+export const transcriptForTranslation = (sentences, languageName, times = null) =>
   `Translate each numbered line into ${languageName}. Keep the numbers, one line per sentence.`
-  + (seconds ? " The number in brackets is how many seconds the sentence may take when spoken: keep each translation "
-    + "short enough to say in that time, and leave the brackets out of your reply." : "") + "\n\n"
-  + sentences.map((text, i) => `${i + 1}. ${seconds ? `[${seconds[i].toFixed(1)} s] ` : ""}${text}`).join("\n");
+  + (times ? " The brackets give how many seconds the original sentence takes to say, and the most its translation may "
+    + "take: make each translation about as long to say as the original, never longer than the most. Leave the brackets "
+    + "out of your reply." : "") + "\n\n"
+  + sentences.map((text, i) => `${i + 1}. ${times ? `[${Math.min(times[i].speak, times[i].most).toFixed(1)} s, at most `
+    + `${times[i].most.toFixed(1)} s] ` : ""}${text}`).join("\n");
 
 // A translation tool's reply as one text per sentence (null where none): numbered lines ("3." "3)" "3 -") go to their
 // number, other lines are ignored; without any numbers, the non-empty lines are taken in order.
@@ -191,7 +194,7 @@ export function parseTranslations(reply, count) {
   const numbered = lines.map((line) => line.match(/^(\d+)\s*[.):-]\s*(.+)$/)).filter(Boolean);
   if (numbered.length) {
     for (const [, number, text] of numbered) {
-      if (number >= 1 && number <= count) texts[number - 1] = text.replace(/^\[\s*\d+(?:[.,]\d+)?\s*[a-z]*\.?\s*\]\s*/i, "").trim();
+      if (number >= 1 && number <= count) texts[number - 1] = text.replace(/^\[\s*\d[^\]]{0,40}\]\s*/, "").trim();
     }
   } else {
     lines.slice(0, count).forEach((line, i) => { texts[i] = line; });
@@ -238,18 +241,21 @@ export function createHistory(limit = 100) {
 }
 
 // Dub sentences shown by a filter: "all", "untranslated", "missing" (no take) or "long" (runs into the next).
-export const MAX_SPEEDUP = 1.25; // as the server's: how much a take may be sped up to fit
-
 export function clipFilter(clips, fit, name) {
   const keep = {
     all: () => true,
     untranslated: (c) => !c.translation.trim() && fit[c.id]?.state !== "kept", // kept ones need no translation
     missing: (c) => fit[c.id]?.state === "missing",
-    long: (c) => fit[c.id]?.state === "long" || fit[c.id]?.speed > 1, // sped up to fit: still listed, with the speed
-    // Too long, split: can be sped up to fit, was sped up, or needs a shorter translation (over MAX_SPEEDUP, or no time).
-    "long-fit": (c) => fit[c.id]?.state === "long" && fit[c.id].need != null && fit[c.id].need <= MAX_SPEEDUP,
-    "long-fitted": (c) => fit[c.id]?.state !== "long" && fit[c.id]?.speed > 1,
-    "long-shorter": (c) => fit[c.id]?.state === "long" && (fit[c.id].need == null || fit[c.id].need > MAX_SPEEDUP),
+    long: (c) => fit[c.id]?.state === "long" || (fit[c.id]?.state === "fits" && fit[c.id].speed > 1), // sped up: still listed
+    // Too long, split: can be sped up to fit, was sped up, or needs a shorter translation (the server says which).
+    "long-fit": (c) => fit[c.id]?.state === "long" && fit[c.id].can_fit,
+    "long-fitted": (c) => fit[c.id]?.state === "fits" && fit[c.id].speed > 1,
+    "long-shorter": (c) => fit[c.id]?.state === "long" && !fit[c.id].can_fit,
+    // Too short (ends while its speaker still talks), split the same way: slowed down, or needs a longer translation.
+    short: (c) => fit[c.id]?.state === "short" || (fit[c.id]?.state === "fits" && fit[c.id].speed < 1),
+    "short-fit": (c) => fit[c.id]?.state === "short" && fit[c.id].can_fit,
+    "short-fitted": (c) => fit[c.id]?.state === "fits" && fit[c.id].speed < 1,
+    "short-longer": (c) => fit[c.id]?.state === "short" && !fit[c.id].can_fit,
     kept: (c) => fit[c.id]?.state === "kept",
   }[name] || (() => true);
   return clips.filter(keep).map((c) => c.id);
@@ -319,3 +325,7 @@ export function inWindow(sorted, from, to, longest) {
   }
   return out;
 }
+
+// The app's playback volume: a slider at `percent` plays at this level (squared: the ear hears level logarithmically,
+// so half the slider sounds about half as loud).
+export const volumeGain = (percent) => (Math.min(100, Math.max(0, percent)) / 100) ** 2;

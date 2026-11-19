@@ -337,10 +337,11 @@ test("clipFilter's Too long also lists takes that were sped up to fit", () => {
   assert.deepEqual(clipFilter(clips, fit, "long"), ["d2", "d3"]);
 });
 
-test("transcriptForTranslation gives each sentence its time when there are times", () => {
-  const text = transcriptForTranslation(["Merhaba.", "Evet."], "English", [3.45, 0.8]);
-  assert.match(text, /seconds/);
-  assert.match(text, /\n1\. \[3\.5 s\] Merhaba\.\n2\. \[0\.8 s\] Evet\.$/);
+test("transcriptForTranslation gives each sentence its speaking time and its most", () => {
+  const text = transcriptForTranslation(["Merhaba.", "Evet."], "English", [{ speak: 2.5, most: 3.45 }, { speak: 1.2, most: 0.8 }]);
+  assert.match(text, /about as long/);
+  assert.match(text, /never longer/);
+  assert.match(text, /\n1\. \[2\.5 s, at most 3\.5 s\] Merhaba\.\n2\. \[0\.8 s, at most 0\.8 s\] Evet\.$/);
 });
 
 test("parseTranslations drops a time the tool copied back", () => {
@@ -348,16 +349,37 @@ test("parseTranslations drops a time the tool copied back", () => {
 });
 
 test("parseTranslations drops a copied-back time however the tool wrote it, and keeps sound tags", () => {
-  const reply = "1. [3,4 s] Merhaba.\n2. [3.4 sec] Evet.\n3. [ 2 sn ] Tamam.\n4. [laughs] Hello.";
-  assert.deepEqual(parseTranslations(reply, 4).texts, ["Merhaba.", "Evet.", "Tamam.", "[laughs] Hello."]);
+  const reply = "1. [3,4 s] Merhaba.\n2. [3.4 sec] Evet.\n3. [ 2 sn ] Tamam.\n4. [laughs] Hello.\n5. [2.8 s, at most 3.4 s] Bye.";
+  assert.deepEqual(parseTranslations(reply, 5).texts, ["Merhaba.", "Evet.", "Tamam.", "[laughs] Hello.", "Bye."]);
 });
 
 test("clipFilter splits Too long into can fit, fitted and need shorter", () => {
   const clips = ["d1", "d2", "d3", "d4", "d5"].map((id) => ({ id, translation: "x" }));
-  const fit = { d1: { state: "long", over: 0.3, need: 1.1 }, d2: { state: "fits", over: 0, speed: 1.18 },
-    d3: { state: "long", over: 0.9, need: 1.4 }, d4: { state: "long", over: 0.2, need: null }, d5: { state: "fits", over: 0 } };
+  const fit = { d1: { state: "long", over: 0.3, need: 1.1, can_fit: true }, d2: { state: "fits", over: 0, speed: 1.18 },
+    d3: { state: "long", over: 0.9, need: 1.4, can_fit: false }, d4: { state: "long", over: 0.2, need: null, can_fit: false },
+    d5: { state: "fits", over: 0 } };
   assert.deepEqual(clipFilter(clips, fit, "long"), ["d1", "d2", "d3", "d4"]);
   assert.deepEqual(clipFilter(clips, fit, "long-fit"), ["d1"]);
   assert.deepEqual(clipFilter(clips, fit, "long-fitted"), ["d2"]);
   assert.deepEqual(clipFilter(clips, fit, "long-shorter"), ["d3", "d4"]);
+});
+
+test("clipFilter splits Too short into can lengthen, lengthened and need longer", () => {
+  const clips = ["d1", "d2", "d3", "d4"].map((id) => ({ id, translation: "x" }));
+  const fit = { d1: { state: "short", under: 0.6, need: 0.76, can_fit: true }, d2: { state: "fits", over: 0, speed: 0.85 },
+    d3: { state: "short", under: 1.4, need: 0.6, can_fit: false }, d4: { state: "fits", over: 0, speed: 1.2 } };
+  assert.deepEqual(clipFilter(clips, fit, "short"), ["d1", "d2", "d3"]);
+  assert.deepEqual(clipFilter(clips, fit, "short-fit"), ["d1"]);
+  assert.deepEqual(clipFilter(clips, fit, "short-fitted"), ["d2"]);
+  assert.deepEqual(clipFilter(clips, fit, "short-longer"), ["d3"]);
+  assert.deepEqual(clipFilter(clips, fit, "long"), ["d4"]);
+});
+
+test("volumeGain follows the ear: half the slider is a quarter of the level", async () => {
+  const { volumeGain } = await import("../script.js");
+  assert.equal(volumeGain(100), 1);
+  assert.equal(volumeGain(50), 0.25);
+  assert.equal(volumeGain(0), 0);
+  assert.equal(volumeGain(150), 1);
+  assert.equal(volumeGain(-5), 0);
 });

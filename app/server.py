@@ -1209,14 +1209,15 @@ def generate_dub(req, did):
 
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/fit")
 def fit_dub(req, did):
-    """Speeds the given sentences' takes up to fit before the next sentence, as a job. One sentence that cannot be
-    fitted fails with the reason; several report how many were fitted and how many need a shorter translation."""
+    """Fits the given sentences' takes, as a job: too long ones sped up to end before the next sentence, too short ones
+    slowed to end with their speaker. One sentence that cannot be fitted fails with the reason; several report how many
+    were fitted and how many need a shorter or a longer translation."""
     language = _dub_language(req, _dub_or_404(did))
     ids = [str(c) for c in req["json"].get("clips", [])]
     _dub_free(did)
 
     def work(job):
-        fitted, shorter, problems = 0, [], []
+        fitted, shorter, longer, problems = 0, [], [], []
         for i, cid in enumerate(ids, 1):
             if job.get("cancelled"):
                 raise Cancelled()
@@ -1226,13 +1227,17 @@ def fit_dub(req, did):
                 fitted += 1
             except dubs.NeedsShorter as error:
                 shorter.append(str(error))
+            except dubs.NeedsLonger as error:
+                longer.append(str(error))
             except ws.WorkspaceError as error:
                 problems.append(str(error))
-        if len(ids) == 1 and (shorter or problems):
-            raise ws.WorkspaceError((shorter + problems)[0])
+        if len(ids) == 1 and (shorter or longer or problems):
+            raise ws.WorkspaceError((shorter + longer + problems)[0])
         notice = f"Fitted {fitted} sentence{'' if fitted == 1 else 's'}."
         if shorter:
             notice += f" {len(shorter)} need{'s' if len(shorter) == 1 else ''} a shorter translation."
+        if longer:
+            notice += f" {len(longer)} need{'s' if len(longer) == 1 else ''} a longer translation."
         if problems:
             notice += f" {len(problems)} could not be fitted: {problems[0]}"
         return _dub_view(did, notice)

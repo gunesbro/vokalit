@@ -46,10 +46,12 @@ English script. Unmute the player to listen.
   sentence, so every speaker keeps their voice and mood). Laid out like a subtitle editor: a compact sentence table
   with filters (untranslated, no take, too long), the video and the selected sentence beside it, and a zoomable
   timeline with the original's waveform where a translation that runs long shows red and clips can be dragged.
-  *Copy for translation* copies every sentence, numbered and with its time, for the translation tool you like, asking
-  for translations short enough to fit; *Paste translations* puts its reply back. A take that still runs a little long
-  can be **fitted**: sped up, same pitch, up to 1.25x (one sentence, or all of them from the Too long tab); fitted
-  sentences stay listed with their speed, and longer ones need a shorter translation. One dub can have several target languages (tabs), each with its own translations, takes,
+  *Copy for translation* copies every sentence, numbered and with its times (how long the original takes to say, and
+  the most it may take), for the translation tool you like, asking for translations about as long as the original;
+  *Paste translations* puts its reply back. A take that still runs a little long, or ends while the speaker is still
+  talking, can be **fitted**: sped up (up to 1.25x) or slowed down (to 0.85x), same pitch, one sentence or all of them
+  from the Too long / Too short tabs; fitted sentences stay listed with their speed, can go back to the original take,
+  and the rest need a shorter or longer translation. One dub can have several target languages (tabs), each with its own translations, takes,
   timing and model. Music or singing that Whisper wrote down can be marked *Keep the original here* (K): the original
   plays there at full volume in every language, and nothing is translated or generated. Every change can be undone
   (Ctrl+Z). The mix is exported as one audio file. The screen stays quick with tens of thousands of sentences; the

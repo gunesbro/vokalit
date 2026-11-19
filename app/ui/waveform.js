@@ -2,6 +2,7 @@
 import { el, icon, ICONS } from "./app.js";
 import { decode, peaks } from "./audio.js";
 import { seekTo } from "./script.js";
+import { outputFor, trackAudio } from "./volume.js";
 
 const peakCache = new Map();
 const peakValues = new Map(); // already decoded: drawn at once, so a redraw does not flash empty waveforms
@@ -32,7 +33,7 @@ const live = new Map(); // url -> { audio, owners: Map<Element, AbortController>
 function audioFor(url, owner) {
   let entry = live.get(url);
   if (!entry) {
-    const audio = new Audio(url);
+    const audio = trackAudio(new Audio(url)); // at the app's volume
     audio.preload = "metadata"; // length known early, so a click on the waveform can jump right away
     entry = { audio, owners: new Map() };
     live.set(url, entry);
@@ -117,6 +118,7 @@ export function player(url, { buckets = 48, selected = false, label = "Play", sh
 function clipPlayer(samples, sampleRate, range, onChange) {
   const duration = samples.length / sampleRate;
   let context = null;
+  let output = null;
   let buffer = null;
   let source = null;
   let startedAt = 0;
@@ -149,7 +151,8 @@ function clipPlayer(samples, sampleRate, range, onChange) {
       stopSource();
       source = context.createBufferSource();
       source.buffer = buffer;
-      source.connect(context.destination);
+      output ||= outputFor(context); // at the app's volume
+      source.connect(output);
       source.onended = () => { source = null; offset = range()[0]; onChange(); };
       context.resume();
       startedAt = context.currentTime;

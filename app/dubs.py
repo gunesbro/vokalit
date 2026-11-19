@@ -23,10 +23,27 @@ REFERENCE_PADDING = 0.15  # seconds kept around a sentence cut out as a voice re
 KEPT_FADE = 0.05  # seconds to fade the original up and down around a sentence that keeps it
 MAX_SPEEDUP = 1.25  # a take is sped up at most this much to fit; beyond it speech stops sounding natural
 FIT_GAP = 0.05  # seconds left free before the next sentence when a take is fitted
+MIN_SPEED = 0.85  # a take that ends early is slowed down at most this much; slower drags
+SHORT_GAP = 0.4  # seconds a take may end before its speaker does without counting as too short
 
 
 class NeedsShorter(ws.WorkspaceError):
     """A take cannot be fitted by speeding it up: its translation has to be shorter."""
+
+
+class NeedsLonger(ws.WorkspaceError):
+    """A take ends too early even slowed down: its translation has to be longer."""
+
+
+def _target(clip: dict, source: dict | None, room: float) -> float:
+    """Where a dub clip's take should end, in seconds from its start: when its speaker stops, but never past the room
+    before the next sentence. Without a source sentence there is no speaker to match: 0, never too short."""
+    return min(room, source["end"] - clip["start"]) if source else 0.0
+
+
+def _can_lengthen(duration: float, target: float) -> bool:
+    """Slowed down to MIN_SPEED at most, the take ends within SHORT_GAP of the target."""
+    return duration / MIN_SPEED >= target - SHORT_GAP
 
 
 def _root() -> Path:
@@ -393,9 +410,10 @@ def cut_reference(dub_id: str, clip_id: str, language: str | None = None) -> tup
 
 
 def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
-    """Speeds a clip's selected take up (same pitch) to end FIT_GAP before the next sentence, as a new selected take
-    that remembers the take it came from; fitting again starts from that one, not from a sped-up copy. Returns the
-    speed. Refused when it already fits, or would need more than MAX_SPEEDUP (NeedsShorter)."""
+    """Speeds a clip's selected take up (same pitch) to end FIT_GAP before the next sentence, or slows one that ends
+    while its speaker still talks down to end with them, as a new selected take that remembers the take it came from;
+    fitting again starts from that one, not from a stretched copy. Returns the speed. Refused when it already fits, or
+    would need more than MAX_SPEEDUP (NeedsShorter) or less than MIN_SPEED (NeedsLonger)."""
     data = load_dub(dub_id)
     clips = _dub_clips(data, language)
     clip = _find(clips, clip_id)
@@ -415,14 +433,21 @@ def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
     room = (min(limits) - clip["start"] - FIT_GAP) if limits else float("inf")
     if room <= 0:
         raise NeedsShorter(f"Sentence {number} has no time before the next sentence. Move it or shorten the translation.")
-    if base["duration"] <= room:  # the take it came from fits again (the next sentence moved): use that one
+    target = _target(clip, next((s for s in _source_clips(data) if s["id"] == clip["source_clip"]), None), room)
+    if base["duration"] > room:  # too long: faster, to end before the next sentence
+        speed = base["duration"] / room
+        if round(speed, 2) > MAX_SPEEDUP:  # as shown: a speed shown as 1.25x is within the limit
+            raise NeedsShorter(f"Sentence {number} would need {speed:.2f}\u00d7 faster. Shorten the translation.")
+    elif base["duration"] < target - SHORT_GAP:  # ends while the speaker still talks: slower, up to MIN_SPEED
+        if not _can_lengthen(base["duration"], target):
+            raise NeedsLonger(f"Sentence {number} would need {base['duration'] / target:.2f}\u00d7 to last as long as "
+                              "its speaker. Lengthen the translation.")
+        speed = max(base["duration"] / target, MIN_SPEED)
+    else:  # the take it came from fits as it is (the next sentence moved): use that one
         if selected is base:
             raise ws.WorkspaceError(f"Sentence {number} already fits.")
         select_take(dub_id, clip_id, base["file"], language)
         return 1.0
-    speed = base["duration"] / room
-    if round(speed, 2) > MAX_SPEEDUP:  # as shown: a speed shown as 1.25x is within the limit
-        raise NeedsShorter(f"Sentence {number} would need {speed:.2f}\u00d7 faster. Shorten the translation.")
     rate, samples = _read(path)
     faster = stretch(samples.astype(np.float32) / 32768, rate, speed)
     out = new_take_path(dub_id, clip_id, language)
@@ -445,11 +470,13 @@ def _selected_duration(clip: dict) -> float | None:
 
 def fit(data: dict, language: str | None = None) -> dict[str, dict]:
     """Per dub clip: "missing" (no take), "fits", or "long" with `over` = seconds it runs into the next clip (by start)
-    or past the end of the file; "speed" too when its take was sped up to fit; and for a long one "need", the speed its
-    original take would need to fit (None: no time before the next sentence)."""
+    or past the end of the file, or "short" with `under` = seconds it ends before its speaker (more than SHORT_GAP);
+    "speed" too when its take was stretched to fit; for a long or short one "need", the speed its original take would
+    need (None: no time before the next sentence), and "can_fit", whether fit_take can do it."""
     clips = sorted(_dub_clips(data, language), key=lambda c: c["start"])
     end_of_file = data["source"]["duration"]
     kept = {s["id"] for s in _kept(data)}
+    sources = {s["id"]: s for s in _source_clips(data)}
     result = {}
     for i, clip in enumerate(clips):
         if clip.get("source_clip") in kept:
@@ -465,9 +492,17 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
         selected = next(t for t in clip["takes"] if t["file"] == clip["selected"])
         if selected.get("speed"):  # sped up to fit: still listed under "Too long", with how much
             result[clip["id"]]["speed"] = selected["speed"]
+        room = (min(limits) - clip["start"] - FIT_GAP) if limits else float("inf")
+        original = _original_take(clip, selected)["duration"]
         if over > 0:
-            room = min(limits) - clip["start"] - FIT_GAP
-            result[clip["id"]]["need"] = round(_original_take(clip, selected)["duration"] / room, 2) if room > 0 else None
+            need = round(original / room, 2) if room > 0 else None
+            result[clip["id"]].update(need=need, can_fit=need is not None and need <= MAX_SPEEDUP)
+            continue
+        target = _target(clip, sources.get(clip.get("source_clip")), room)
+        under = round(target - duration, 1)
+        if duration < target - SHORT_GAP:  # the speaker is still talking when it ends
+            result[clip["id"]].update(state="short", under=under, need=round(original / target, 2),
+                                      can_fit=_can_lengthen(original, target))
     return result
 
 

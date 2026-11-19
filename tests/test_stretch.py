@@ -45,3 +45,10 @@ def test_stretch_keeps_the_level():
     out = stretch(tone(2.0), RATE, 1.15)
     middle = out[len(out) // 4: -len(out) // 4]
     assert 0.4 < np.max(np.abs(middle)) <= 0.55  # no doubled or halved overlap
+
+
+def test_stretch_slows_down_at_the_same_pitch():
+    out = stretch(tone(2.0), RATE, 0.85)
+    assert abs(len(out) / RATE - 2.0 / 0.85) < 0.024
+    assert abs(peak_frequency(out) - 220.0) < 3
+    assert 0.4 < np.max(np.abs(out[len(out) // 4: -len(out) // 4])) <= 0.55

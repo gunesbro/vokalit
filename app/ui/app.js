@@ -2,7 +2,9 @@
 import { renderCharacters } from "./characters.js";
 import { renderDub } from "./dub.js";
 import { renderModels } from "./models.js";
+import { popover } from "./settings.js";
 import { renderStudio } from "./studio.js";
+import { masterVolume, setMasterVolume } from "./volume.js";
 
 const TOKEN = document.querySelector('meta[name="vokalit-token"]').content;
 
@@ -75,6 +77,8 @@ export const ICONS = {
   chevron: ["M6 9l6 6 6-6"],
   folder: ["M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"],
   pencil: ["M4 20h4L19 9l-4-4L4 16v4z", "M13.5 6.5l4 4"],
+  volume: ["M4 9.5h3.5L12 6v12l-4.5-3.5H4z", "M15.5 9a4 4 0 0 1 0 6", "M18 6.5a7.5 7.5 0 0 1 0 11"],
+  muted: ["M4 9.5h3.5L12 6v12l-4.5-3.5H4z", "M16 9.5l5 5M21 9.5l-5 5"],
 };
 
 // A text field that clearly looks editable: the input plus a pencil that focuses it.
@@ -143,6 +147,40 @@ async function showGpu() {
   }
 }
 
+// The rail's speaker: the app's playback volume (a slider, and mute), for listening without the system volume.
+function volumeControl() {
+  const button = document.getElementById("volume");
+  let unmuted = masterVolume() || 100;
+  const paint = () => {
+    button.replaceChildren(icon(masterVolume() ? ICONS.volume : ICONS.muted, 20));
+    button.title = `Playback volume: ${masterVolume()} %`;
+  };
+  button.onclick = () => {
+    const shown = el("span", { class: "num small muted" });
+    const slider = el("input", { type: "range", min: 0, max: 100, step: 1, "aria-label": "Playback volume" });
+    const mute = el("button", { type: "button", class: "btn btn-small" });
+    const set = (value) => {
+      setMasterVolume(value);
+      if (value) unmuted = value;
+      slider.value = masterVolume();
+      shown.textContent = `${masterVolume()} %`;
+      mute.textContent = masterVolume() ? "Mute" : "Unmute";
+      paint();
+    };
+    slider.oninput = () => set(Number(slider.value));
+    mute.onclick = () => set(masterVolume() ? 0 : unmuted);
+    set(masterVolume());
+    popover(button, el("div", { class: "menu volume-pop", role: "dialog", "aria-label": "Playback volume" },
+      el("div", { class: "row" }, el("strong", { class: "small" }, "Playback volume"), el("div", { class: "spacer" }), shown),
+      slider,
+      el("div", { class: "row" }, el("span", { class: "faint small" }, "What plays in the app; exports keep their level."),
+        mute)), { up: true });
+    slider.focus();
+  };
+  paint();
+}
+
 window.addEventListener("hashchange", route);
 route();
 showGpu();
+volumeControl();

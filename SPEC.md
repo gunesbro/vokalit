@@ -37,7 +37,10 @@ file. Everything is done by clicking in a desktop window.
   - Settings are sliders (`min`, `max`, `step`) or, with `"type": "text"`, a text box (`max_length`, `placeholder`,
     `suggestions` as buttons that fill it). `models.clean_settings` checks them; text loses parentheses and extra
     whitespace. A line override equal to the session's value is not stored.
-  - **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
+  - **Playback volume:** a speaker button at the bottom of the rail opens a slider (0-100 %, squared, kept between runs)
+  and Mute; every sound the app plays follows it (players, Studio playback, the Dub preview), never exported or
+  generated files (`volume.js`).
+- **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
     before saving), or designed from a description by OmniVoice (its attributes) or VoxCPM2 (free text).
     Session-only characters can be saved to the library.
   - **Models:** install / remove with size, GPU memory (`vram_gb`), location and license shown first; progress and a
@@ -265,8 +268,9 @@ All interface text is English. The visual design is the design canvas; behaviour
   timing, model and settings (one dub track per language; old dubs migrate on load). Layout: top bar (name, source
   language -> language tabs, model, settings, progress "translated / voiced / too long", Undo/Redo, Generate missing, Export, Transcribe again);
   a compact table (#, time, original, translation edited in place, status), filters with counts (All, Untranslated,
-  No take, Too long), "Copy for translation" (numbered, each line with its time until the next sentence, "[3.4 s]", and
-  an instruction naming the target language and asking for translations short enough) and "Paste
+  No take, Too long), "Copy for translation" (numbered, each line with the original's speaking time and the most its
+  translation may take, until the next sentence: "[2.8 s, at most 3.4 s]"; an instruction naming the target language
+  and asking for translations about as long as the original, never longer than the most) and "Paste
   translations" (placed by number, or in order, a copied-back time dropped; summary of found and missing; one request);
   only the rows in view are drawn (fixed 38 px rows; the row being typed in stays drawn), lookups are built once per
   change, and the timeline draws only the clips around its window, so tens of thousands of sentences stay quick;
@@ -275,8 +279,10 @@ All interface text is English. The visual design is the design canvas; behaviour
   up to 1.25x; beyond that, "Shorten the translation". "Fit" on the selected sentence, "Fit N" in the Too long tab (a
   job, cancellable); sped-up sentences stay under Too long, showing their speed ("1.18x") in the table, the details
   and the takes list; Too long splits into Can fit (needs at most 1.25x, from the original take), Fitted, and Need
-  shorter (more than 1.25x, or no time before the next sentence; the reason is shown); "Use originals N" (and "Use the
-  original" on one sentence) selects the takes sped-up ones were made from, undoable; the only installed model that
+  shorter (more than 1.25x, or no time before the next sentence; the reason is shown); likewise Too short (a take ending more than 0.4 s before its speaker,
+  or before the next sentence): Can lengthen (slowed to at most 0.85x it ends within 0.4 s of its speaker), Lengthened,
+  Need longer, with "Lengthen N"; "Use originals N" (and "Use the original" on one sentence) selects the takes
+  stretched ones were made from, undoable; the only installed model that
   speaks a language is also chosen when a job ends (an import opens the screen while Whisper listens); on the right the video
   (muted; or a clock for audio) with the original under the takes through Web Audio, and the selected sentence:
   original text (the voice sample's transcript), translation, Voice from (a search list; default this sentence; never neighbours,
