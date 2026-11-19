@@ -4,8 +4,8 @@ import { api, editableTitle, el, icon, ICONS, lastOpened, rememberMicrophone, re
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { soundEditor, soundText } from "./editor.js";
-import { commonLanguages, findPlayable, formatTime, moveLine, pickSelected, settingsChanges, splitSentences, takeNumber }
-  from "./script.js";
+import { commonLanguages, findPlayable, formatTime, moveLine, parsePause, pickSelected, settingsChanges, splitSentences,
+  takeNumber } from "./script.js";
 import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, searchSelect, sliders } from "./settings.js";
 import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 
@@ -1401,6 +1401,24 @@ export async function renderStudio(root) {
       shared.samples.map((sample) => el("button", { class: "menu-item", onclick: () => bulkUpdate(ids,
         { sample: sample.id }, `${plural(ids.length, "line")} now use \u201c${sample.label}\u201d.`) },
       sample.label, sample.id === shared.default_sample && el("span", { class: "faint small" }, "default")))), { up: true });
+    const pauses = new Set(lines.map((l) => l.pause_after));
+    const pauseButton = el("button", { class: "btn btn-small", "aria-haspopup": "dialog",
+      title: "Set the silence after the selected lines in the export" }, "Pause", icon(ICONS.chevron, 12));
+    pauseButton.onclick = () => {
+      const input = el("input", { class: "input pause", inputmode: "decimal", "aria-label": "Pause after each line in seconds",
+        value: pauses.size === 1 ? lines[0].pause_after : "", placeholder: pauses.size === 1 ? "" : "mixed" });
+      const set = () => {
+        const value = parsePause(input.value);
+        if (value === null) return setMessage(message, "Pause must be between 0 and 10 seconds.", "warn");
+        bulkUpdate(ids, { pause_after: value }, `${plural(ids.length, "line")} now pause ${value} s.`);
+      };
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); set(); } });
+      popover(pauseButton, el("div", { class: "menu pause-menu" },
+        el("label", { class: "row field" }, "Pause", input, "s"),
+        el("button", { class: "btn btn-primary btn-small", onclick: set }, "Set")), { up: true });
+      input.focus();
+      input.select();
+    };
     const takeCount = lines.reduce((n, l) => n + l.takes.length, 0);
     const clearButton = el("button", { class: "btn btn-small", disabled: !takeCount || !!batch,
       title: takeCount ? "Delete every take of the selected lines; the lines stay" : "The selected lines have no takes" },
@@ -1414,6 +1432,7 @@ export async function renderStudio(root) {
         title: "Generate a take for each selected line with the models in \u201cGenerate with\u201d" }, "Generate"),
       el("div", { class: "pop-holder" }, characterButton),
       el("div", { class: "pop-holder" }, sampleButton),
+      el("div", { class: "pop-holder" }, pauseButton),
       el("div", { class: "pop-holder" }, clearButton),
       el("div", { class: "pop-holder" }, deleteButton),
       el("button", { class: "btn btn-ghost btn-small", onclick: clearPicked, title: "Clear the selection (Esc)" }, "Clear"));

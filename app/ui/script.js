@@ -138,3 +138,9 @@ export function descriptionGroups(options, description) {
   }
   return groups;
 }
+
+// A pause typed in seconds ("1.5" or "1,5"), or null unless it is a number from 0 to 10.
+export function parsePause(text) {
+  const value = Number(text.trim().replace(",", "."));
+  return text.trim() && Number.isFinite(value) && value >= 0 && value <= 10 ? value : null;
+}

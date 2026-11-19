@@ -219,6 +219,8 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .menu-title { padding: 4px 8px; color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .menu-note { padding: 4px 8px 6px; }
 .confirm-menu { padding: 8px; gap: 8px; max-width: 300px; white-space: normal; }
+.pause-menu { padding: 8px; gap: 8px; flex-direction: row; align-items: center; min-width: 0; }
+.pause-menu .pause { width: 64px; }
 .picker { background: var(--raised); gap: 8px; }
 .dots { display: flex; gap: 4px; }
 .tabs { display: flex; gap: 4px; margin: 10px 0 12px; }

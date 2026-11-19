@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, pickSelected,
+import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
+  pickSelected,
   pickerLabel, settingsChanges,
   takeNumber } from "../script.js";
 
@@ -129,4 +130,12 @@ test("descriptionGroups maps a description back to its attribute groups", () => 
   assert.deepEqual(descriptionGroups(options, "female, elderly, whisper"), { gender: "female", age: "elderly", style: "whisper" });
   assert.deepEqual(descriptionGroups(options, ""), {});
   assert.deepEqual(descriptionGroups(options, "british accent, purple"), { accent: "british accent" });
+});
+
+test("parsePause reads seconds between 0 and 10, with a comma or a point", () => {
+  assert.equal(parsePause("1.5"), 1.5);
+  assert.equal(parsePause(" 0,8 "), 0.8);
+  assert.equal(parsePause("0"), 0);
+  assert.equal(parsePause("10"), 10);
+  for (const bad of ["", "  ", "-1", "10.5", "abc"]) assert.equal(parsePause(bad), null, bad);
 });
