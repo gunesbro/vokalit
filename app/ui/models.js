@@ -68,7 +68,10 @@ export async function renderModels(root) {
 
   let busyName = null; // an install running on the server (also one started elsewhere): other Installs wait
 
-  function draw({ items, total_gb: total, installing, install_job: job }) {
+  let freeGb = null; // free space on the drive models go to, from the last listing
+
+  function draw({ items, total_gb: total, free_gb: free, installing, install_job: job }) {
+    freeGb = free ?? null;
     // An install started before this screen opened (another tab, or the window was reopened): follow it here.
     if (job && !installs[job.name]) {
       installs[job.name] = { progress: "", log: "", step: 1, steps: 5 };
@@ -153,6 +156,8 @@ export async function renderModels(root) {
 
   function confirmInstall(container, model) {
     container.querySelector(".confirm")?.remove();
+    // Checked before anything is downloaded (the server checks again)
+    const tooFull = freeGb != null && model.needs_gb > freeGb;
     container.append(el("div", { class: "confirm" },
       el("div", {},
         el("strong", {}, `Install ${model.title}?`),
@@ -162,6 +167,11 @@ export async function renderModels(root) {
             : `Disk space: about ${model.disk_gb} GB (PyTorch with CUDA, libraries and the model; PyTorch files are shared with other installed models)`),
           model.vram_gb ? el("li", {}, `GPU memory: about ${model.vram_gb} GB while it is loaded. Vokalit unloads it `
             + "after 5 minutes unused, and unloads other models when it needs room.") : null,
+          freeGb == null ? null : el("li", { class: tooFull ? "warn" : "" }, tooFull
+            ? `Not enough free space: it needs about ${model.needs_gb} GB and ${freeGb} GB is free on this drive. `
+              + "Free some space or remove a model you do not use."
+            : `Free space on this drive: ${freeGb} GB, enough (it needs about ${model.needs_gb} GB with some room to spare`
+              + (model.needs_gb < model.disk_gb ? ", less than its size because PyTorch is already installed)." : ").")),
           el("li", {}, `Location: .local/${model.name}/`),
           el("li", {}, model.license.startsWith("CC-BY-NC")
             ? "License: CC-BY-NC \u2014 the model's weights may not be used commercially."
@@ -169,7 +179,8 @@ export async function renderModels(root) {
           el("li", {}, "Downloads from PyPI and Hugging Face. Nothing else leaves your computer."))),
       el("div", { class: "spacer" }),
       el("button", { class: "btn", onclick: () => refresh() }, "Cancel"),
-      el("button", { class: "btn btn-primary", onclick: () => install(model) }, "Install")));
+      el("button", { class: "btn btn-primary", disabled: tooFull, title: tooFull ? "Not enough free disk space" : null,
+        onclick: () => install(model) }, "Install")));
   }
 
   function confirmRemove(container, model) {

@@ -217,6 +217,23 @@ TOOLS = {
 }
 
 
+PYTORCH_GB = 5.0  # PyTorch with CUDA: stored once in the shared cache and used by every model that installs it
+
+
+def _uses_pytorch(name):
+    return any(args is TORCH_CUDA for _, args in spec(name).get("pip_steps", []))
+
+
+def needs_gb(name):
+    """Disk space installing `name` needs: its size, less PyTorch when an installed model already has it, plus 1 GB of
+    room. An estimate on the safe side (sizes were measured on Windows)."""
+    need = spec(name)["disk_gb"]
+    if _uses_pytorch(name) and any(other != name and _uses_pytorch(other) and is_installed(other)
+                                   for other in [*TOOLS, *MODELS]):
+        need -= PYTORCH_GB
+    return round(need + 1, 1)
+
+
 def spec(name):
     """A voice model's or a tool's entry. KeyError for anything else."""
     return MODELS[name] if name in MODELS else TOOLS[name]

@@ -53,7 +53,8 @@ file. Everything is done by clicking in a desktop window.
 - Fine-tuning (planned later on the Characters screen; the data model leaves room for it), streaming, cloud APIs.
 - Transcript import (maybe later with a local language model), reading numbers aloud, voice design (a voice from a
   description).
-- Disk space pre-check, resuming downloads, automatic updates.
+- Resuming downloads, automatic updates. (Disk space is checked before an install: `models.needs_gb` is the size
+  less PyTorch when it is already installed, plus 1 GB; the install is refused when that is more than is free.)
 
 ## 4. Models
 

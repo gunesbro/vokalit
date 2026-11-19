@@ -947,3 +947,36 @@ def test_remove_waits_while_the_model_generates(api, monkeypatch):
     models._workers.pop("omnivoice", None)
     status, _, _ = api("POST", "/api/models/omnivoice/remove")
     assert status == 200 and removed == ["omnivoice"]
+
+
+def _disk(monkeypatch, free_gb):
+    import shutil
+    usage = shutil.disk_usage("/")
+    monkeypatch.setattr(server.shutil, "disk_usage", lambda path: usage._replace(free=int(free_gb * 1e9)))
+
+
+def test_install_refuses_when_the_disk_is_too_full(api, monkeypatch, tmp_path):
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path / "local"))
+    monkeypatch.setattr(models, "install", lambda name: pytest.fail("installed without room"))
+    _disk(monkeypatch, 3)
+    status, body, _ = api("POST", "/api/models/chatterbox/install")
+    assert status == 400
+    assert "about 13.3 GB" in body["error"] and "3.0 GB is free" in body["error"]
+
+
+def test_install_counts_pytorch_already_shared(api, monkeypatch, tmp_path):
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path / "local"))
+    monkeypatch.setattr(models, "is_installed", lambda name: name == "chatterbox")
+    monkeypatch.setattr(models, "install", lambda name: iter([("status", "done")]))
+    _disk(monkeypatch, 6)  # OmniVoice: 9.0 GB, less the ~5 GB of PyTorch already there, plus 1 GB of room
+    status, body, _ = api("POST", "/api/models/omnivoice/install")
+    assert status == 200 and _wait(api, body["id"])["state"] == "done"
+
+
+def test_components_show_free_disk_space(api, monkeypatch, tmp_path):
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path / "local"))
+    _disk(monkeypatch, 42.04)
+    status, body, _ = api("GET", "/api/components")
+    assert body["free_gb"] == 42.0
+    items = {item["name"]: item for item in body["items"]}
+    assert items["chatterbox"]["needs_gb"] == 13.3 and items["whisper"]["needs_gb"] == 2.7

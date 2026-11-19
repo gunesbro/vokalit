@@ -9,6 +9,7 @@ import queue
 import random
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -125,7 +126,7 @@ def _component_view(name):
         "license": info["license"], "disk_gb": info["disk_gb"], "installed": installed,
         "frees_gb": _frees_gb(name) if installed else None}
     return {**view, "kind": "model" if name in models.MODELS else "tool", "recommended": info.get("recommended", False),
-            "vram_gb": info.get("vram_gb"), "runtime": models.runtime(name)}
+            "vram_gb": info.get("vram_gb"), "needs_gb": models.needs_gb(name), "runtime": models.runtime(name)}
 
 
 def _check_component(name):
@@ -382,14 +383,28 @@ def list_components(req):
     names = list(models.TOOLS) + list(models.MODELS)
     running = next((j for j in _jobs.values() if j["kind"] == "install" and j["state"] == "running"), None)
     return {"items": [_component_view(name) for name in names], "total_gb": _round(models.sizes()["total_gb"]),
+            "free_gb": round(free_gb(), 1),
             "installing": models.installing(),
             # A screen opened during an install (after switching tabs, or a restart of the window) follows it.
             "install_job": {"id": running["id"], "name": running["line"]} if running else None}
 
 
+def free_gb():
+    """Free space on the drive models are installed to (.local/, or the nearest folder that exists)."""
+    folder = Path(models.LOCAL)
+    while not folder.exists() and folder.parent != folder:
+        folder = folder.parent
+    return shutil.disk_usage(folder).free / 1e9
+
+
 @route("POST", "/api/models/(?P<name>[a-z0-9_-]+)/install")
 def install_model(req, name):
     _check_component(name)
+    need, free = models.needs_gb(name), free_gb()
+    if need > free:  # checked before anything is downloaded
+        raise ws.WorkspaceError(f"Not enough disk space for {models.spec(name)['title']}: it needs about {need} GB "
+                                f"and {free:.1f} GB is free on this drive. Free some space or remove a model you "
+                                "do not use, then try again.")
 
     def work(job):
         for kind, text in models.install(name):

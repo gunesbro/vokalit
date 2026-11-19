@@ -85,7 +85,8 @@ version.
 - **Windows 10/11** (tested) or **Linux** (less tested).
 - An internet connection only while installing. Nothing else needs to be installed beforehand: Vokalit downloads its
   own Python and packages into its folder, and the models are installed later from inside the app.
-- Disk space: a few hundred MB for the app and its Python, plus the models you choose to install (see above).
+- Disk space: a few hundred MB for the app and its Python, plus the models you choose to install (see above). The
+  install confirmation shows the free space on the drive, and an install that would not fit does not start.
 
 ## Getting started
 
