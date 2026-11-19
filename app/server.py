@@ -929,8 +929,17 @@ def _dub_view(did, notice=None):
     data = _dub_or_404(did)
     folder = dubs.dub_dir(did) / "exports"
     exports = sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if folder.exists() else []
-    return {**data, "fit": dubs.fit(data), **({"notice": notice} if notice else {}),
+    return {**data, "languages": dubs.languages(data), "fit": {code: dubs.fit(data, code) for code in dubs.languages(data)},
+            **({"notice": notice} if notice else {}),
             "exports": [{"name": p.name, "path": p.relative_to(ws.workspace_root()).as_posix()} for p in exports]}
+
+
+def _dub_language(req, data):
+    """The dub language a request acts on: ?language=<code>, or the first one."""
+    code = req["query"].get("language")
+    if code is not None and code not in dubs.languages(data):
+        raise ws.WorkspaceError("This dub has no such language.")
+    return code or dubs.languages(data)[0]
 
 
 def _dub_jobs(did):
@@ -946,17 +955,20 @@ def _dub_free(did):
         raise ws.WorkspaceError("This dub is already working. Wait for it to finish or cancel it.")
 
 
-def _start_dub_job(did, work, kind, clips=None):
+def _start_dub_job(did, work, kind, clips=None, language=None):
     with _dub_job_lock:  # checked and started together, so two quick clicks cannot both start
         _dub_free(did)
-        return _start_job(work, kind=kind, dub=did, clips=clips)
+        started = _start_job(work, kind=kind, dub=did, clips=clips)
+        _jobs[started["id"]]["language"] = language
+        return started
 
 
 @route("GET", "/api/dubs/(?P<did>[0-9-]+)/jobs")
 def dub_jobs(req, did):
     """The dub's running job, so a screen opened later follows it again."""
     _dub_or_404(did)
-    return [{"id": j["id"], "kind": j["kind"], "progress": j["progress"], "clips": j["clips"] or []} for j in _dub_jobs(did)]
+    return [{"id": j["id"], "kind": j["kind"], "progress": j["progress"], "clips": j["clips"] or [],
+             "language": j.get("language")} for j in _dub_jobs(did)]
 
 
 @route("GET", "/api/dubs")
@@ -986,7 +998,8 @@ def get_dub(req, did):
 
 @route("PATCH", "/api/dubs/(?P<did>[0-9-]+)")
 def update_dub(req, did):
-    _dub_or_404(did)
+    """Name and the original's volume; model and settings are those of ?language (default: the first)."""
+    code = _dub_language(req, _dub_or_404(did))
     body = req["json"]
     if "name" in body:
         dubs.rename_dub(did, str(body["name"]))
@@ -997,9 +1010,25 @@ def update_dub(req, did):
     if settings is not None:
         settings = {name: models.clean_settings(name, values) for name, values in settings.items()
                     if name in models.MODELS}
-    language = _check_language(body["target_language"]) if "target_language" in body else None
     volume = None if body.get("original_volume") is None else float(body["original_volume"])
-    dubs.set_options(did, target_language=language, model=model, settings=settings, original_volume=volume)
+    dubs.set_options(did, original_volume=volume)
+    dubs.set_language_options(did, code, model=model, settings=settings)
+    return _dub_view(did)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/languages")
+def add_dub_language(req, did):
+    _dub_or_404(did)
+    dubs.add_language(did, _check_language(req["json"].get("language")))
+    return _dub_view(did)
+
+
+@route("DELETE", "/api/dubs/(?P<did>[0-9-]+)/languages/(?P<code>[a-z]{2,3}(?:-[A-Za-z0-9]+)?)")
+def remove_dub_language(req, did, code):
+    _dub_or_404(did)
+    if any(j.get("language") == code for j in _dub_jobs(did)):
+        raise ws.WorkspaceError("This language is generating. Wait for it to finish or cancel it.")
+    dubs.remove_language(did, code)
     return _dub_view(did)
 
 
@@ -1057,32 +1086,33 @@ def restore_dub_sentence(req, did):
     """Undo of a deleted sentence: puts it back as it was."""
     _dub_or_404(did)
     body = req["json"]
-    dubs.restore_sentence(did, dict(body["source"]), dict(body["clip"]), int(body.get("index", 0)),
-                          voices=[str(v) for v in body.get("voices", [])])
+    dubs.restore_sentence(did, dict(body["source"]), {str(k): dict(v) for k, v in (body.get("clips") or {}).items()},
+                          int(body.get("index", 0)),
+                          voices={str(k): [str(v) for v in ids] for k, ids in (body.get("voices") or {}).items()})
     return _dub_view(did)
 
 
 @route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/clips/(?P<cid>d[0-9]+)")
 def update_dub_clip(req, did, cid):
-    _dub_or_404(did)
+    code = _dub_language(req, _dub_or_404(did))
     body = req["json"]
     dubs.update_dub_clip(did, cid, start=float(body["start"]) if "start" in body else None,
-                         translation=body.get("translation"), voice_from=body.get("voice_from"))
+                         translation=body.get("translation"), voice_from=body.get("voice_from"), language=code)
     return _dub_view(did)
 
 
 @route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/translations")
 def set_dub_translations(req, did):
-    _dub_or_404(did)
-    dubs.set_translations(did, dict(req["json"].get("translations") or {}))
+    code = _dub_language(req, _dub_or_404(did))
+    dubs.set_translations(did, dict(req["json"].get("translations") or {}), language=code)
     return _dub_view(did)
 
 
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/clips/(?P<cid>d[0-9]+)/select")
 def select_dub_take(req, did, cid):
-    _dub_or_404(did)
+    code = _dub_language(req, _dub_or_404(did))
     file = req["json"].get("file")
-    dubs.select_take(did, cid, None if file is None else str(file))
+    dubs.select_take(did, cid, None if file is None else str(file), language=code)
     return _dub_view(did)
 
 
@@ -1090,7 +1120,9 @@ def select_dub_take(req, did, cid):
 def generate_dub(req, did):
     """Speaks the given sentences' translations in the target language, each cloning its "voice from" sentence."""
     data = _dub_or_404(did)
-    name, language = data["model"], data["target_language"]
+    language = _dub_language(req, data)
+    track = next(t for t in data["tracks"][1:] if t["language"] == language)
+    name = track["model"]
     if name not in models.MODELS:
         raise ws.WorkspaceError("Choose a model for the dub.")
     if not models.is_installed(name):
@@ -1110,7 +1142,10 @@ def generate_dub(req, did):
                 raise Cancelled()
             job["progress"] = f"Sentence {i} of {len(ids)}"
             current = dubs.load_dub(did)
-            clips = current["tracks"][1]["clips"]
+            track_now = next((t for t in current["tracks"][1:] if t["language"] == language), None)
+            if track_now is None:
+                break  # the language was removed meanwhile
+            clips = track_now["clips"]
             number = next((n for n, c in enumerate(clips, 1) if c["id"] == cid), None)
             if number is None:
                 continue  # deleted meanwhile
@@ -1119,10 +1154,10 @@ def generate_dub(req, did):
             if not models.has_words(text):
                 errors.append(f"Sentence {number} has no translation yet.")
                 continue
-            ref, ref_text = dubs.cut_reference(did, cid)
-            settings = models.validate_settings(name, current["settings"].get(name, {}))
+            ref, ref_text = dubs.cut_reference(did, cid, language)
+            settings = models.validate_settings(name, track_now["settings"].get(name, {}))
             take_seed = _random_seed() if seed is None else seed
-            out = dubs.new_take_path(did, cid)
+            out = dubs.new_take_path(did, cid, language)
             job["model"] = name  # what cancelling stops
             try:
                 seconds = models.generate(name, text, str(ref), str(out), take_seed, settings, language,
@@ -1137,17 +1172,18 @@ def generate_dub(req, did):
                 job["model"] = None
             dubs.add_take(did, cid, {"file": str(out), "seed": take_seed, "model": name, "settings": settings,
                                      "language": language, "text": clip["translation"],
-                                     "generation_seconds": seconds, "duration": round(ws.wav_duration(out), 2)})
+                                     "generation_seconds": seconds, "duration": round(ws.wav_duration(out), 2)},
+                          language)
         if errors:
             raise RuntimeError(" ".join(errors))
         return _dub_view(did)
-    return _start_dub_job(did, work, "generate", ids)
+    return _start_dub_job(did, work, "generate", ids, language)
 
 
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/export")
 def export_dub(req, did):
-    _dub_or_404(did)
-    out = dubs.export_dub(did, str(req["json"].get("format", "wav")))
+    code = _dub_language(req, _dub_or_404(did))
+    out = dubs.export_dub(did, str(req["json"].get("format", "wav")), code)
     return {"path": out.relative_to(ws.workspace_root()).as_posix()}
 
 

@@ -37,7 +37,7 @@ def test_import_refuses_unknown_types(api, tmp_workspace):
 def test_dub_import_transcribe_and_edit(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     assert [c["text"] for c in dub["tracks"][0]["clips"]] == ["Merhaba.", "Nas\u0131ls\u0131n?"]
-    assert dub["fit"] == {"d1": {"state": "missing", "over": 0.0}, "d2": {"state": "missing", "over": 0.0}}
+    assert dub["fit"] == {"en": {"d1": {"state": "missing", "over": 0.0}, "d2": {"state": "missing", "over": 0.0}}}
     status, listed, _ = api("GET", "/api/dubs")
     assert status == 200 and listed[0]["id"] == dub["id"] and listed[0]["kind"] == "video" and listed[0]["clips"] == 2
     status, dub, _ = api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello.", "start": 0.75})
@@ -52,13 +52,38 @@ def test_dub_import_transcribe_and_edit(api, tmp_path, monkeypatch):
 
 def test_dub_options_are_checked(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
-    status, body, _ = api("PATCH", f"/api/dubs/{dub['id']}", {"target_language": "xx"})
-    assert status == 400
     status, body, _ = api("PATCH", f"/api/dubs/{dub['id']}", {"model": "nope"})
     assert status == 400
-    status, dub, _ = api("PATCH", f"/api/dubs/{dub['id']}",
-                         {"name": "Talk 2", "target_language": "en", "model": "higgs", "original_volume": 0.3})
-    assert (dub["name"], dub["target_language"], dub["model"], dub["original_volume"]) == ("Talk 2", "en", "higgs", 0.3)
+    status, body, _ = api("PATCH", f"/api/dubs/{dub['id']}?language=xx", {"model": "higgs"})
+    assert status == 400
+    status, dub, _ = api("PATCH", f"/api/dubs/{dub['id']}", {"name": "Talk 2", "model": "higgs", "original_volume": 0.3})
+    assert (dub["name"], dub["tracks"][1]["model"], dub["original_volume"]) == ("Talk 2", "higgs", 0.3)
+
+
+def test_dub_languages_routes(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    calls = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        calls.append((name, text, language))
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    status, dub, _ = api("POST", f"/api/dubs/{dub['id']}/languages", {"language": "de"})
+    assert status == 200 and dub["languages"] == ["en", "de"] and set(dub["fit"]) == {"en", "de"}
+    assert api("POST", f"/api/dubs/{dub['id']}/languages", {"language": "xx"})[0] == 400
+    api("PATCH", f"/api/dubs/{dub['id']}?language=de", {"model": "higgs"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1?language=de", {"translation": "Hallo."})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate?language=de", {"clips": ["d1"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done" and calls == [("higgs", "Hallo.", "de")]
+    assert done["result"]["tracks"][2]["clips"][0]["selected"] == "takes/de/d1-1.wav"
+    assert done["result"]["tracks"][1]["clips"][0]["selected"] is None
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/export?language=de", {"format": "wav"})
+    assert "-de-" in body["path"]
+    status, dub, _ = api("DELETE", f"/api/dubs/{dub['id']}/languages/en")
+    assert dub["languages"] == ["de"]
 
 
 def test_transcribe_without_speech_notices(api, tmp_path, monkeypatch):
@@ -86,7 +111,7 @@ def test_dub_generate_uses_its_own_sentence_as_reference(api, tmp_path, monkeypa
         return 0.5
 
     monkeypatch.setattr(models, "generate", fake_generate)
-    api("PATCH", f"/api/dubs/{dub['id']}", {"target_language": "en", "model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
     api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"], "seed": 7})
     done = _wait(api, job["id"])
@@ -95,13 +120,13 @@ def test_dub_generate_uses_its_own_sentence_as_reference(api, tmp_path, monkeypa
                       "ref_text": "Nas\u0131ls\u0131n?"}]
     assert calls[0]["ref"].endswith("o2.wav")
     clip = done["result"]["tracks"][1]["clips"][1]
-    assert clip["selected"] == "takes/d2-1.wav" and clip["takes"][0]["seed"] == 7
-    assert done["result"]["fit"]["d2"] == {"state": "fits", "over": 0.0}
+    assert clip["selected"] == "takes/en/d2-1.wav" and clip["takes"][0]["seed"] == 7
+    assert done["result"]["fit"]["en"]["d2"] == {"state": "fits", "over": 0.0}
 
 
 def test_dub_generate_refuses_empty_translation(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
-    api("PATCH", f"/api/dubs/{dub['id']}", {"target_language": "en", "model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
     done = _wait(api, job["id"])
     assert done["state"] == "failed" and "Sentence 1 has no translation yet." in done["error"]
@@ -123,7 +148,7 @@ def test_dub_generate_can_be_cancelled(api, tmp_path, monkeypatch):
 
     monkeypatch.setattr(models, "generate", slow_generate)
     monkeypatch.setattr(models, "cancel", lambda name, owner: cancelled.append(name) or release.set() or True)
-    api("PATCH", f"/api/dubs/{dub['id']}", {"target_language": "en", "model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
     api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
     for _ in range(100):
@@ -199,7 +224,7 @@ def test_one_job_at_a_time_per_dub(api, tmp_path, monkeypatch):
         return 0.1
 
     monkeypatch.setattr(models, "generate", slow_generate)
-    api("PATCH", f"/api/dubs/{dub['id']}", {"target_language": "en", "model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
     api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
     _, first, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
     status, body, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
@@ -225,5 +250,26 @@ def test_restore_route(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     source, clip = dub["tracks"][0]["clips"][1], dub["tracks"][1]["clips"][1]
     api("DELETE", f"/api/dubs/{dub['id']}/source/o2")
-    status, dub, _ = api("POST", f"/api/dubs/{dub['id']}/source/restore", {"source": source, "clip": clip, "index": 1})
+    status, dub, _ = api("POST", f"/api/dubs/{dub['id']}/source/restore",
+                         {"source": source, "clips": {"en": clip}, "index": 1})
     assert status == 200 and [c["id"] for c in dub["tracks"][1]["clips"]] == ["d1", "d2"]
+
+
+def test_a_generating_language_cannot_be_removed(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    release = threading.Event()
+
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        release.wait(5)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", slow_generate)
+    api("POST", f"/api/dubs/{dub['id']}/languages", {"language": "de"})
+    api("PATCH", f"/api/dubs/{dub['id']}?language=de", {"model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1?language=de", {"translation": "Hallo."})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate?language=de", {"clips": ["d1"]})
+    status, body, _ = api("DELETE", f"/api/dubs/{dub['id']}/languages/de")
+    assert status == 400 and "generating" in body["error"]
+    release.set()
+    assert _wait(api, job["id"])["state"] == "done"

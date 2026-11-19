@@ -69,6 +69,7 @@ def test_transcript_makes_paired_tracks(tmp_workspace):
     original, dub_track = dubs.load_dub(dub)["tracks"]
     assert [c["id"] for c in original["clips"]] == ["o1", "o2"]
     assert original["clips"][0] == {"id": "o1", "start": 0.5, "end": 3.0, "text": "Merhaba."}
+    assert dub_track["language"] == "en" and dub_track["id"] == "dub-en"
     assert dub_track["clips"][1] == {"id": "d2", "source_clip": "o2", "voice_from": "o2", "start": 4.0,
                                      "translation": "", "takes": [], "selected": None}
     assert dubs.load_dub(dub)["source"]["language"] == "tr"
@@ -121,11 +122,12 @@ def test_dub_clip_start_must_be_inside_the_source(tmp_workspace, tmp_path):
 
 def test_options_are_checked(tmp_workspace):
     dub = dubs.create_dub("I", b"x", "mp3")
-    dubs.set_options(dub, target_language="en", model="higgs", settings={"higgs": {"temperature": 0.5}},
-                     original_volume=0.4)
+    dubs.set_options(dub, original_volume=0.4)
+    dubs.set_language_options(dub, "en", model="higgs", settings={"higgs": {"temperature": 0.5}})
     data = dubs.load_dub(dub)
-    assert (data["target_language"], data["model"], data["original_volume"]) == ("en", "higgs", 0.4)
-    assert data["settings"] == {"higgs": {"temperature": 0.5}}
+    track = data["tracks"][1]
+    assert (track["language"], track["model"], data["original_volume"]) == ("en", "higgs", 0.4)
+    assert track["settings"] == {"higgs": {"temperature": 0.5}}
     with pytest.raises(ws.WorkspaceError):
         dubs.set_options(dub, original_volume=1.5)
 
@@ -149,12 +151,12 @@ def test_takes_are_numbered_and_selected(tmp_workspace):
     dubs.add_take(dub, "d1", {"file": str(second), "seed": 2, "duration": 2.0})
     assert (first.name, second.name) == ("d1-1.wav", "d1-2.wav")
     clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
-    assert clip["selected"] == "takes/d1-2.wav" and [t["file"] for t in clip["takes"]] == ["takes/d1-1.wav",
-                                                                                           "takes/d1-2.wav"]
-    dubs.select_take(dub, "d1", "takes/d1-1.wav")
-    assert dubs.load_dub(dub)["tracks"][1]["clips"][0]["selected"] == "takes/d1-1.wav"
+    assert clip["selected"] == "takes/en/d1-2.wav" and [t["file"] for t in clip["takes"]] == ["takes/en/d1-1.wav",
+                                                                                           "takes/en/d1-2.wav"]
+    dubs.select_take(dub, "d1", "takes/en/d1-1.wav")
+    assert dubs.load_dub(dub)["tracks"][1]["clips"][0]["selected"] == "takes/en/d1-1.wav"
     with pytest.raises(ws.WorkspaceError):
-        dubs.select_take(dub, "d1", "takes/other.wav")
+        dubs.select_take(dub, "d1", "takes/en/other.wav")
 
 
 def _dub_with_audio(tmp_path, seconds):
@@ -255,7 +257,7 @@ def test_concurrent_changes_are_not_lost(tmp_workspace, monkeypatch):
     for thread in threads:
         thread.join()
     clips = dubs.load_dub(dub)["tracks"][1]["clips"]
-    assert clips[0]["selected"] == "takes/d1-1.wav" and clips[1]["translation"] == "How are you?"
+    assert clips[0]["selected"] == "takes/en/d1-1.wav" and clips[1]["translation"] == "How are you?"
 
 
 def test_set_translations_saves_many_at_once(tmp_workspace):
@@ -293,12 +295,12 @@ def test_restore_sentence_puts_it_back_with_its_takes(tmp_workspace):
     before = dubs.load_dub(dub)
     source, clip = before["tracks"][0]["clips"][0], before["tracks"][1]["clips"][0]
     dubs.delete_source_clip(dub, "o1")
-    dubs.restore_sentence(dub, source, clip, 0)
+    dubs.restore_sentence(dub, source, {"en": clip}, 0)
     after = dubs.load_dub(dub)
     assert after["tracks"] == before["tracks"]
     dubs.delete_source_clip(dub, "o1")
     dubs.delete_source_clip(dub, "o2")
-    dubs.restore_sentence(dub, source, clip, 5)  # the place no longer exists: appended
+    dubs.restore_sentence(dub, source, {"en": clip}, 5)  # the place no longer exists: appended
     assert [c["id"] for c in dubs.load_dub(dub)["tracks"][1]["clips"]] == ["d1"]
 
 
@@ -307,7 +309,7 @@ def test_restore_refuses_an_existing_sentence(tmp_workspace):
     dubs.set_transcript(dub, "tr", SEGMENTS)
     data = dubs.load_dub(dub)
     with pytest.raises(ws.WorkspaceError):
-        dubs.restore_sentence(dub, data["tracks"][0]["clips"][0], data["tracks"][1]["clips"][0], 0)
+        dubs.restore_sentence(dub, data["tracks"][0]["clips"][0], {"en": data["tracks"][1]["clips"][0]}, 0)
 
 
 def test_select_take_none_clears_the_choice(tmp_workspace):
@@ -327,5 +329,61 @@ def test_restore_sentence_points_voices_back_at_it(tmp_workspace):
     data = dubs.load_dub(dub)
     source, clip = data["tracks"][0]["clips"][0], data["tracks"][1]["clips"][0]
     dubs.delete_source_clip(dub, "o1")
-    dubs.restore_sentence(dub, source, clip, 0, voices=["d2"])
+    dubs.restore_sentence(dub, source, {"en": clip}, 0, voices={"en": ["d2"]})
     assert dubs.load_dub(dub)["tracks"][1]["clips"][1]["voice_from"] == "o1"
+
+
+def test_old_single_language_dubs_are_migrated(tmp_workspace):
+    dub = dubs.create_dub("Old", b"x", "mp3")
+    data = dubs.load_dub(dub)
+    data.update({"target_language": "de", "model": "higgs", "settings": {"higgs": {"temperature": 0.4}}})
+    data["tracks"][1] = {"id": "dub", "kind": "speech", "voice": {"mode": "original"}, "clips": []}
+    dubs.save_dub(dub, data)
+    track = dubs.load_dub(dub)["tracks"][1]
+    assert (track["id"], track["language"], track["model"]) == ("dub-de", "de", "higgs")
+    assert track["settings"] == {"higgs": {"temperature": 0.4}}
+    assert dubs.languages(dubs.load_dub(dub)) == ["de"]
+
+
+def test_languages_have_their_own_translations_takes_and_timing(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.add_language(dub, "de")
+    assert dubs.languages(dubs.load_dub(dub)) == ["en", "de"]
+    dubs.update_dub_clip(dub, "d1", translation="Hallo.", start=1.0, language="de")
+    take = dubs.new_take_path(dub, "d1", language="de")
+    assert take.parent.name == "de" and take.name == "d1-1.wav"
+    make_wav(take, 1)
+    dubs.add_take(dub, "d1", {"file": str(take), "seed": 1, "duration": 1.0}, language="de")
+    data = dubs.load_dub(dub)
+    en, de = data["tracks"][1]["clips"][0], data["tracks"][2]["clips"][0]
+    assert (en["translation"], en["start"], en["selected"]) == ("", 0.5, None)
+    assert (de["translation"], de["start"], de["selected"]) == ("Hallo.", 1.0, "takes/de/d1-1.wav")
+    assert dubs.fit(data, "de")["d1"]["state"] == "fits" and dubs.fit(data, "en")["d1"]["state"] == "missing"
+    assert "-de-" in dubs.export_dub(dub, language="de").name
+    with pytest.raises(ws.WorkspaceError):
+        dubs.add_language(dub, "de")
+
+
+def test_removing_languages(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.add_language(dub, "fr")
+    dubs.remove_language(dub, "en")
+    assert dubs.languages(dubs.load_dub(dub)) == ["fr"]
+    with pytest.raises(ws.WorkspaceError, match="last"):
+        dubs.remove_language(dub, "fr")
+
+
+def test_sentences_are_shared_by_every_language(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.add_language(dub, "de")
+    assert [c["id"] for c in dubs.load_dub(dub)["tracks"][2]["clips"]] == ["d1", "d2"]
+    data = dubs.load_dub(dub)
+    source = data["tracks"][0]["clips"][0]
+    clips = {"en": data["tracks"][1]["clips"][0], "de": data["tracks"][2]["clips"][0]}
+    dubs.delete_source_clip(dub, "o1")
+    assert [len(t["clips"]) for t in dubs.load_dub(dub)["tracks"]] == [1, 1, 1]
+    dubs.restore_sentence(dub, source, clips, 0)
+    assert dubs.load_dub(dub)["tracks"] == data["tracks"]
+    dubs.set_transcript(dub, "tr", SEGMENTS[:1])
+    assert [len(t["clips"]) for t in dubs.load_dub(dub)["tracks"]] == [1, 1, 1]
