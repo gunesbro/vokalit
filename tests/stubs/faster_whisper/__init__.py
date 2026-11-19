@@ -2,9 +2,15 @@
 import os
 
 
+class _Word:
+    def __init__(self, start, end, word):
+        self.start, self.end, self.word = start, end, word
+
+
 class _Segment:
-    def __init__(self, text):
-        self.text = text
+    def __init__(self, text, start=0.0, end=0.0):
+        self.text, self.start, self.end = text, start, end
+        self.words = [_Word(start, end, text)]
 
 
 class WhisperModel:
@@ -17,7 +23,8 @@ class WhisperModel:
             socket.create_connection(("1.1.1.1", 443), timeout=1)
         # Two segments, as Whisper splits longer speech; their texts start with a space. Without a language it
         # "detects" Turkish.
-        return iter([_Segment(f" heard:{os.path.basename(audio)}"), _Segment(f" :{language}")]), _Info(language or "tr")
+        return iter([_Segment(f" heard:{os.path.basename(audio)}", 0.0, 2.5),
+                     _Segment(f" :{language}", 3.0, 4.0)]), _Info(language or "tr")
 
 
 class _Info:

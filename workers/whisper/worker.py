@@ -50,7 +50,15 @@ def main():
         request = json.loads(line)
         try:
             start = time.perf_counter()
-            segments, info = model.transcribe(request["audio"], language=request.get("language"), beam_size=5)
+            timed = bool(request.get("segments"))  # dubbing: sentences with their times
+            segments, info = model.transcribe(request["audio"], language=request.get("language"), beam_size=5,
+                                              **({"word_timestamps": True} if timed else {}))
+            if timed:
+                found = [{"start": s.start, "end": s.end, "text": s.text.strip(),
+                          "words": [{"start": w.start, "end": w.end, "word": w.word.strip()} for w in s.words or []]}
+                         for s in segments]
+                send(ok=True, segments=found, language=info.language, seconds=round(time.perf_counter() - start, 1))
+                continue
             text = " ".join(segment.text.strip() for segment in segments).strip()
             # The language it heard (detected when none was given).
             send(ok=True, text=text, language=info.language, seconds=round(time.perf_counter() - start, 1))

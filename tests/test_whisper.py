@@ -53,3 +53,10 @@ def test_transcribe_without_whisper_is_refused(tmp_path, monkeypatch):
 def test_whisper_is_not_a_voice_model():
     assert "whisper" not in models.MODELS
     assert models.spec("whisper")["title"] == "Whisper"
+
+
+def test_transcribe_segments_returns_timed_sentences(installed):
+    heard = models.transcribe_segments("/media/source.wav", None)
+    assert heard["language"] == "tr"
+    assert heard["segments"] == [{"start": 0.0, "end": 2.5, "text": "heard:source.wav"},
+                                 {"start": 3.0, "end": 4.0, "text": ":None"}]

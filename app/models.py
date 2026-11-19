@@ -853,6 +853,41 @@ def transcribe(audio, language):
     return {"text": reply["text"], "language": reply.get("language")}
 
 
+def transcribe_segments(audio, language):
+    """What is said in `audio` and when, for dubbing: {"language", "segments": [{"start", "end", "text"}]}. Sentences
+    longer than SEGMENT_SECONDS are split at sentence ends."""
+    if not is_installed("whisper"):
+        raise RuntimeError("Whisper is not installed. Install it in Models.")
+    reply = _request("whisper", {"task": "transcribe", "audio": audio, "language": language, "segments": True})
+    return {"language": reply.get("language"), "segments": split_long_segments(reply["segments"])}
+
+
+SEGMENT_SECONDS = 15.0
+_SENTENCE_END = (".", "!", "?", "\u2026")
+
+
+def split_long_segments(segments, limit=SEGMENT_SECONDS):
+    """Whisper's segments without their words; one longer than `limit` seconds is cut after the last sentence end that
+    keeps a part within `limit` (else after the last word that fits), using the word times."""
+    parts = []
+    for segment in segments:
+        words = segment.get("words") or []
+        if segment["end"] - segment["start"] <= limit or len(words) < 2:
+            parts.append({"start": segment["start"], "end": segment["end"], "text": segment["text"]})
+            continue
+        while words:
+            fitting = [i for i, w in enumerate(words) if w["end"] - words[0]["start"] <= limit] or [0]
+            ends = [i for i in fitting if words[i]["word"].endswith(_SENTENCE_END)]
+            cut = (ends or fitting)[-1] + 1
+            if words[-1]["end"] - words[0]["start"] <= limit:
+                cut = len(words)
+            piece, words = words[:cut], words[cut:]
+            parts.append({"start": piece[0]["start"], "end": piece[-1]["end"],
+                          "text": " ".join(w["word"] for w in piece)})
+        parts[-1]["end"] = max(parts[-1]["end"], segment["end"])
+    return parts
+
+
 def model_language(name, code):
     """The code `name` expects for Vokalit's language `code`."""
     return MODELS[name].get("language_codes", {}).get(code, code)
