@@ -49,18 +49,20 @@ English script. Unmute the player to listen.
 
 ## Screenshots
 
-**Line details** — text, sample, language and pause; generate with one or more models; per-line settings; takes
-to compare, trim and pick; and *Perform this line* to convert your own recording.
+**Line details** — text with emotion and delivery tags, sample, language and pause; generate with one or more
+models; per-line settings; takes to compare, trim and pick; and *Perform this line* to convert your own recording.
 
 ![Line details with takes, line settings and Perform this line](docs/images/line-details.png)
 
-**Characters** — reusable voices with several labelled samples, each tagged with its language.
+**Characters** — reusable voices with several labelled samples, each tagged with its language. Here a voice is
+designed from a description: three candidates to listen to and keep.
 
-![Characters with samples](docs/images/characters.png)
+![Characters with designed samples and the Design a voice panel](docs/images/characters.png)
 
-**Models** — install and remove models; size, GPU memory and license are shown first.
+**Models** — install and remove models; size, GPU memory and license are shown first, and a loaded model shows
+its GPU memory and how it loaded.
 
-![Models](docs/images/models.png)
+![Models, with Higgs TTS 3 loaded in full precision](docs/images/models.png)
 
 <sub>Screenshots use made-up demo data; no real voices were used.</sub>
 
