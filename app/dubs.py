@@ -236,10 +236,11 @@ def add_take(dub_id: str, clip_id: str, take: dict) -> None:
         clip["selected"] = file
 
 
-def select_take(dub_id: str, clip_id: str, file: str) -> None:
+def select_take(dub_id: str, clip_id: str, file: str | None) -> None:
+    """`file` None: no take selected (undo of a sentence's first generation)."""
     with _editing(dub_id) as data:
         clip = _find(_dub_clips(data), clip_id)
-        if not any(t["file"] == file for t in clip["takes"]):
+        if file is not None and not any(t["file"] == file for t in clip["takes"]):
             raise ws.WorkspaceError("This take no longer exists.")
         clip["selected"] = file
 

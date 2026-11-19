@@ -2,8 +2,8 @@
 import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, revealButton, setMessage, waitForJob }
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
-import { clipsToPlay, formatTime, parseTranslations, pasteTranslations, pickSelected, transcriptForTranslation }
-  from "./script.js";
+import { activeClip, clipFilter, clipsToPlay, createHistory, formatTime, parseTranslations, pasteTranslations,
+  pickSelected, transcriptForTranslation } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { timeline } from "./timeline.js";
 import { player } from "./waveform.js";
@@ -14,6 +14,9 @@ const LONG_MINUTES = 20; // longer files are decoded in memory and take Whisper 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const megabytes = (bytes) => `${(bytes / 1e6).toFixed(bytes < 1e7 ? 1 : 0)} MB`;
 const close = () => document.querySelector(".popover")?.dispatchEvent(new Event("close"));
+const histories = new Map(); // dub id -> undo history, kept while the app runs (across screen changes)
+const WAVE_PER_SECOND = 50; // waveform values per second of the original
+const typing = (target) => Boolean(target?.closest?.("input, textarea, select, [contenteditable]"));
 
 export async function renderDub(root) {
   const list = el("div", { class: "list" });
@@ -140,35 +143,50 @@ export async function renderDub(root) {
   show();
 }
 
-// One dub: header, preview with the timeline, and the sentence list. Returns {stop, transcribe}.
+// One dub, laid out like a subtitle editor: a sentence table (left), the video and the selected sentence (right), and
+// the timeline (bottom). Every change the user makes goes through act(), so it can be undone. Returns {stop, transcribe}.
 function openDub(main, initial, { models, whisper, formats, refreshList }) {
   let dub = initial;
   let selected = null;
-  let job = null; // {id, kind, clips: Set}
+  let filter = "all";
+  let job = null; // {id, kind, clips: Set, progress}
+  if (!histories.has(dub.id)) histories.set(dub.id, createHistory(100));
+  const history = histories.get(dub.id);
   const message = el("div", { class: "message" });
   const fail = (error) => setMessage(message, error.message, "error");
   const installed = models.filter((m) => m.installed);
   const model = () => models.find((m) => m.name === dub.model);
-  const sourceOf = (clip) => dub.tracks[0].clips.find((c) => c.id === clip.source_clip);
+  const clips = () => dub.tracks[1].clips;
+  const sources = () => dub.tracks[0].clips;
+  const sourceOf = (clip) => sources().find((c) => c.id === clip.source_clip);
   const takeOf = (clip) => clip.takes.find((t) => t.file === clip.selected);
+  const numberOf = (clipId) => clips().findIndex((c) => c.id === clipId) + 1;
+  const lengthOf = (clip) => takeOf(clip)?.duration ?? ((sourceOf(clip)?.end ?? 0) - (sourceOf(clip)?.start ?? 0) || 1);
   const fileUrl = (file) => `/files/dubs/${dub.id}/${file}`;
   const path = (suffix = "") => `/api/dubs/${dub.id}${suffix}`;
+  const languageName = (code) => models.flatMap((m) => m.languages).find((l) => l.code === code)?.name || code;
 
   const header = el("header", { class: "main-head dub-head" });
+  const tableHead = el("div", { class: "dub-table-head" });
+  const table = el("div", { class: "dub-table", role: "listbox", "aria-label": "Sentences" });
   const stage = el("div", { class: "dub-stage" });
-  const rows = el("div", { class: "dub-rows" });
+  const inspector = el("div", { class: "dub-inspector" });
   const play = previewPlayer();
   const lanes = timeline({ duration: dub.source.duration || 1, onSeek: (t) => play.seek(t),
-    onSelect: (laneId, clipId) => choose(laneId === "dub" ? clipId : dub.tracks[1].clips.find((c) => c.source_clip === clipId)?.id),
-    onMove: (clipId, start) => change(api("PATCH", path(`/clips/${clipId}`), { start })) });
-  main.replaceChildren(header, el("div", { class: "main-body dub-body" }, stage, lanes.element, rows),
+    onSelect: (laneId, clipId) => choose(laneId === "dub" ? clipId : clips().find((c) => c.source_clip === clipId)?.id),
+    onMove: (clipId, start) => {
+      const before = clips().find((c) => c.id === clipId)?.start;
+      act(`move sentence ${numberOf(clipId)}`, () => api("PATCH", path(`/clips/${clipId}`), { start }),
+        () => api("PATCH", path(`/clips/${clipId}`), { start: before }));
+    } });
+  main.replaceChildren(header,
+    el("div", { class: "dub-layout" },
+      el("section", { class: "dub-left" }, tableHead, table),
+      el("aside", { class: "dub-right" }, stage, inspector),
+      el("div", { class: "dub-bottom" }, lanes.element)),
     el("footer", { class: "dub-foot" }, message));
 
-  async function change(request) {
-    try {
-      apply(await request);
-    } catch (error) { fail(error); }
-  }
+  // --- Changes and undo ------------------------------------------------------------------------
 
   function apply(data) {
     dub = data;
@@ -177,75 +195,198 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     play.changed();
   }
 
-  function choose(clipId) {
-    selected = clipId;
-    lanes.select(clipId);
-    for (const row of rows.querySelectorAll(".dub-row")) row.classList.toggle("selected", row.dataset.clip === clipId);
-    rows.querySelector(`.dub-row[data-clip="${clipId}"]`)?.scrollIntoView({ block: "nearest" });
+  async function change(request) {
+    try {
+      apply(await request);
+    } catch (error) { fail(error); }
   }
 
-  // Redraws (a job finishing, a saved change) keep text typed but not saved yet, and the focus and caret in it.
-  function draw() {
-    const active = document.activeElement?.closest?.(".dub-rows") ? document.activeElement : null;
-    const caret = active && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
-    const unsaved = [...rows.querySelectorAll("textarea")].filter((t) => t.value !== t.dataset.saved)
-      .map((t) => [t.getAttribute("aria-label"), t.value]);
+  // Does a change and records how to undo it. `run` and `revert` return the dub view (one request, or the last of several).
+  async function act(label, run, revert) {
+    try {
+      apply(await run());
+      history.push({ label, undo: async () => apply(await revert()), redo: async () => apply(await run()) });
+      drawHeader();
+    } catch (error) { fail(error); }
+  }
+
+  async function step(kind) {
+    try {
+      const label = await history[kind]();
+      if (label) setMessage(message, `${kind === "undo" ? "Undid" : "Redid"} ${label}.`);
+    } catch (error) { fail(error); }
     drawHeader();
+  }
+
+  const sequence = async (requests) => { let last = null; for (const request of requests) last = await request(); return last; };
+
+  function editTranslation(clip, text) {
+    const before = clip.translation;
+    if (text.trim() === before) return;
+    act(`translation of sentence ${numberOf(clip.id)}`, () => api("PATCH", path(`/clips/${clip.id}`), { translation: text }),
+      () => api("PATCH", path(`/clips/${clip.id}`), { translation: before }));
+  }
+
+  function editOriginal(clip, text) {
+    const source = sourceOf(clip);
+    const before = source.text;
+    if (text.trim() === before) return;
+    act(`text of sentence ${numberOf(clip.id)}`, () => api("PATCH", path(`/source/${source.id}`), { text }),
+      () => api("PATCH", path(`/source/${source.id}`), { text: before }));
+  }
+
+  function setOption(label, key, value) {
+    const before = dub[key];
+    if (before === null || before === undefined) return change(api("PATCH", path(), { [key]: value }));
+    act(label, () => api("PATCH", path(), { [key]: value }), () => api("PATCH", path(), { [key]: before }));
+  }
+
+  function pasteMany(translations) {
+    const before = Object.fromEntries(Object.keys(translations).map((id) => [id, clips().find((c) => c.id === id).translation]));
+    act(`pasted ${plural(Object.keys(translations).length, "translation")}`,
+      () => api("PATCH", path("/translations"), { translations }), () => api("PATCH", path("/translations"), { translations: before }));
+  }
+
+  function deleteSentence(clip) {
+    const index = clips().indexOf(clip);
+    const source = sourceOf(clip);
+    const number = index + 1;
+    if (selected === clip.id) selected = clips()[index + 1]?.id || clips()[index - 1]?.id || null;
+    act(`deleting sentence ${number}`, () => api("DELETE", path(`/source/${source.id}`)),
+      () => api("POST", path("/source/restore"), { source, clip, index }));
+  }
+
+  // --- Jobs ------------------------------------------------------------------------------------
+
+  async function follow(started, kind, ids = []) {
+    const before = Object.fromEntries(clips().map((c) => [c.id, c.selected])); // for undoing a generation
+    job = { id: started.id, kind, clips: new Set(ids), progress: started.progress || "" };
+    draw();
+    try {
+      apply(await waitForJob(started.id, (update) => {
+        if (job && update.progress !== job.progress) {
+          job.progress = update.progress;
+          header.querySelector(".job-progress")?.replaceChildren(update.progress || "Working\u2026");
+        }
+      }));
+      if (kind === "transcribe" && !dub.notice) {
+        setMessage(message, `Found ${plural(sources().length, "sentence")}. Use \u201cCopy for translation\u201d, then `
+          + "\u201cPaste translations\u201d, or type them in the table.");
+      }
+      if (kind === "generate") recordGeneration(before);
+    } catch (error) {
+      if (error.cancelled) setMessage(message, "Cancelled.");
+      else fail(error);
+      apply(await api("GET", path()).catch(() => dub));
+      if (kind === "generate") recordGeneration(before);
+    } finally {
+      job = null;
+      draw();
+      refreshList().catch(() => {});
+    }
+  }
+
+  // A generation selects the new takes; undo selects the previous ones again (the new takes stay in the list).
+  function recordGeneration(before) {
+    const changed = clips().filter((c) => c.id in before && c.selected !== before[c.id]).map((c) => [c.id, before[c.id], c.selected]);
+    if (!changed.length) return;
+    const select = (index) => sequence(changed.map((item) => () => api("POST", path(`/clips/${item[0]}/select`), { file: item[index] })));
+    history.push({ label: `generating ${plural(changed.length, "sentence")}`, undo: async () => apply(await select(1)),
+      redo: async () => apply(await select(2)) });
+  }
+
+  async function transcribe() {
+    if (!whisper) return setMessage(message, "Install Whisper on the Models screen to find the sentences.", "warn");
+    try {
+      setMessage(message, "Whisper is listening on the CPU; a long file takes a while.");
+      await follow(await api("POST", path("/transcribe"), {}), "transcribe");
+    } catch (error) { fail(error); }
+  }
+
+  async function generate(ids) {
+    if (!ids.length) return;
+    try {
+      await follow(await api("POST", path("/generate"), { clips: ids }), "generate", ids);
+    } catch (error) { fail(error); }
+  }
+
+  // --- Drawing ---------------------------------------------------------------------------------
+
+  // Redraws keep text typed but not saved yet, and the focus and caret in it.
+  function draw() {
+    const active = typing(document.activeElement) && main.contains(document.activeElement) ? document.activeElement : null;
+    const caret = active && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+    const unsaved = [...main.querySelectorAll("[data-saved]")].filter((box) => box.value !== box.dataset.saved)
+      .map((box) => [box.dataset.key, box.value]);
+    if (selected && !clips().some((c) => c.id === selected)) selected = null;
+    selected ||= clips()[0]?.id || null;
+    drawHeader();
+    drawTable();
+    drawInspector();
     drawLanes();
-    drawRows();
-    for (const [label, value] of unsaved) {
-      const box = rows.querySelector(`[aria-label="${CSS.escape(label)}"]`);
+    for (const [key, value] of unsaved) {
+      const box = main.querySelector(`[data-key="${CSS.escape(key)}"]`);
       if (box) box.value = value;
     }
-    const again = active && rows.querySelector(`[aria-label="${CSS.escape(active.getAttribute("aria-label"))}"]`);
+    const again = active?.dataset.key && main.querySelector(`[data-key="${CSS.escape(active.dataset.key)}"]`);
     if (again) {
       again.focus();
       if (caret) again.setSelectionRange(...caret);
     }
   }
 
-  // --- Header ----------------------------------------------------------------------------------
-
   function drawHeader() {
     const name = el("input", { class: "title-input", value: dub.name, "aria-label": "Dub name", onchange: () => {
       if (!name.value.trim()) { name.value = dub.name; return; }
-      change(api("PATCH", path(), { name: name.value.trim() })).then(refreshList);
+      setOption("renaming the dub", "name", name.value.trim());
+      refreshList();
     } });
     const chosen = model();
     const modelSelect = el("select", { class: "select", "aria-label": "Model", title: "The model that speaks the translations",
-      onchange: () => change(api("PATCH", path(), { model: modelSelect.value })) },
+      onchange: () => setOption("changing the model", "model", modelSelect.value) },
     !chosen && el("option", { value: "" }, installed.length ? "Choose a model" : "No model installed"),
     installed.map((m) => el("option", { value: m.name }, m.title)));
     modelSelect.value = chosen?.name || "";
     const languages = (chosen ? chosen.languages : models.flatMap((m) => m.languages))
       .filter((l, i, all) => all.findIndex((x) => x.code === l.code) === i);
-    const target = searchSelect({ label: "Target language", placeholder: "Search languages", small: false,
-      value: dub.target_language, options: languages.map((l) => ({ value: l.code, label: l.name })),
-      onChange: (code) => change(api("PATCH", path(), { target_language: code })) });
-    const sourceName = models.flatMap((m) => m.languages).find((l) => l.code === dub.source.language)?.name;
-    const settingsButton = el("button", { class: "btn", disabled: !chosen, onclick: () => popover(settingsButton,
-      el("div", { class: "menu settings-pop" }, settingsPanel(chosen))) }, "Settings");
-    const missing = dub.tracks[1].clips.filter((c) => !c.selected && c.translation.trim()).map((c) => c.id);
-    const busy = Boolean(job);
-    const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe again or delete" },
-      "\u22ef");
+    const target = searchSelect({ label: "Target language", placeholder: "Search languages", value: dub.target_language,
+      options: languages.map((l) => ({ value: l.code, label: l.name })),
+      onChange: (code) => setOption("changing the language", "target_language", code) });
+    const settingsButton = el("button", { class: "btn", disabled: !chosen, title: "Generation settings",
+      onclick: () => popover(settingsButton, el("div", { class: "menu settings-pop" }, settingsPanel(chosen))) }, "\u2699");
+    const all = clips();
+    const translated = all.filter((c) => c.translation.trim()).length;
+    const voiced = all.filter((c) => c.selected).length;
+    const long = all.filter((c) => dub.fit[c.id]?.state === "long").length;
+    const missing = all.filter((c) => !c.selected && c.translation.trim()).map((c) => c.id);
+    const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe again or delete" }, "\u22ef");
     more.onclick = () => popover(more, el("div", { class: "menu" },
-      el("button", { class: "menu-item", disabled: busy || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again\u2026"),
+      el("button", { class: "menu-item", disabled: Boolean(job) || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again\u2026"),
       el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub\u2026")), { align: "right" });
     const exportButton = el("button", { class: "btn", disabled: !dub.source.duration, title: "Mix the dub into one audio file",
       onclick: () => popover(exportButton, exportPanel(), { align: "right" }) }, "Export");
+    const undoLabel = history.undoLabel();
+    const redoLabel = history.redoLabel();
     header.replaceChildren(
       editableTitle(name),
-      el("span", { class: "muted small" }, sourceName ? `From ${sourceName}` : "Not transcribed yet"),
-      el("label", { class: "row muted" }, "To", target),
+      el("span", { class: "row small muted dub-langs" }, dub.source.language ? languageName(dub.source.language) : "Not transcribed",
+        " \u2192 ", target),
       modelSelect, settingsButton,
+      all.length ? el("span", { class: "small muted dub-progress", title: "Translated \u00b7 with a take \u00b7 too long" },
+        `${translated}/${all.length} translated \u00b7 ${voiced} voiced`, long ? el("span", { class: "warn" }, ` \u00b7 ${long} too long`) : "")
+        : "",
       el("div", { class: "spacer" }),
+      el("button", { class: "btn btn-ghost icon-btn", disabled: !undoLabel || Boolean(job), "aria-label": "Undo",
+        title: undoLabel ? `Undo: ${undoLabel} (Ctrl+Z)` : "Nothing to undo", onclick: () => step("undo") }, "\u21b6"),
+      el("button", { class: "btn btn-ghost icon-btn", disabled: !redoLabel || Boolean(job), "aria-label": "Redo",
+        title: redoLabel ? `Redo: ${redoLabel} (Ctrl+Shift+Z)` : "Nothing to redo", onclick: () => step("redo") }, "\u21b7"),
       job ? el("span", { class: "row small muted" }, el("span", { class: "job-progress" }, job.progress || "Working\u2026"),
         el("button", { class: "btn btn-small", onclick: () => api("POST", `/api/jobs/${job.id}/cancel`).catch(fail) }, "Cancel"))
         : el("button", { class: "btn btn-primary", disabled: !missing.length || !chosen,
-          title: !chosen ? "Choose a model first" : missing.length ? "Generate every translated sentence without a take"
+          title: !chosen ? "Choose a model first" : missing.length
+            ? `Generate the ${plural(missing.length, "translated sentence")} without a take`
             : "Every translated sentence has a take", onclick: () => generate(missing) },
-        missing.length ? `Generate ${plural(missing.length, "sentence")}` : "Generate missing"),
+        missing.length ? `Generate ${missing.length}` : "Generate missing"),
       exportButton, more);
   }
 
@@ -254,8 +395,206 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const defaults = Object.fromEntries(chosen.settings.map((s) => [s.key, s.default]));
     return sliders(chosen.settings, { ...defaults, ...overrides }, defaults,
       (spec, value, base) => (value === base ? "Default" : `Default: ${base}`),
-      (key, value) => change(api("PATCH", path(), { settings: { ...dub.settings, [chosen.name]: { ...overrides, [key]: value } } })),
+      (key, value) => setOption(`${chosen.title} settings`, "settings",
+        { ...dub.settings, [chosen.name]: { ...overrides, [key]: value } }),
       `dub:${dub.id}`);
+  }
+
+  function drawTable() {
+    const all = clips();
+    const counts = Object.fromEntries(["all", "untranslated", "missing", "long"].map((f) => [f, clipFilter(all, dub.fit, f).length]));
+    const names = { all: "All", untranslated: "Untranslated", missing: "No take", long: "Too long" };
+    tableHead.replaceChildren(
+      el("div", { class: "row dub-filters", role: "tablist" }, Object.entries(names).map(([key, label]) => el("button", {
+        class: `btn btn-small ${filter === key ? "active" : "btn-ghost"}`, role: "tab", "aria-selected": String(filter === key),
+        disabled: !all.length, onclick: () => { filter = key; drawTable(); } }, `${label} ${counts[key]}`))),
+      el("div", { class: "spacer" }),
+      el("button", { class: "btn btn-small", disabled: !all.length, onclick: copyTranscript,
+        title: "Copy every sentence, numbered, with an instruction for a translation tool" }, "Copy for translation"),
+      pasteButton());
+    if (!all.length) {
+      table.replaceChildren(el("div", { class: "empty small" }, dub.source.language
+        ? el("p", { class: "muted" }, "No sentences. Transcribe again, or import another file.")
+        : whisper ? el("button", { class: "btn btn-primary", disabled: Boolean(job), onclick: transcribe }, "Find the sentences")
+          : el("p", { class: "muted" }, "Install Whisper on the ", el("a", { href: "#/models" }, "Models screen"),
+            " to find the sentences and their times.")));
+      return;
+    }
+    const shown = new Set(clipFilter(all, dub.fit, filter));
+    const ids = all.map((c) => c.id);
+    const rows = all.filter((c) => shown.has(c.id)).map((clip) => {
+      const number = numberOf(clip.id);
+      const source = sourceOf(clip);
+      const fit = dub.fit[clip.id] || { state: "missing" };
+      const input = el("input", { class: "input dub-tr", value: clip.translation, "data-saved": clip.translation,
+        "data-key": `tr-${clip.id}`, placeholder: "Translation", "aria-label": `Translation of sentence ${number}`,
+        onblur: () => input.value !== input.dataset.saved && editTranslation(clip, input.value),
+        onkeydown: (e) => {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); input.blur(); generate([clip.id]); }
+          else if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            const next = ids[ids.indexOf(clip.id) + (e.key === "ArrowUp" ? -1 : 1)];
+            input.blur();
+            if (next) { choose(next); table.querySelector(`[data-key="tr-${next}"]`)?.focus(); }
+          } else if (e.key === "Escape") { input.value = input.dataset.saved; input.blur(); }
+        } });
+      input.addEventListener("paste", (e) => {
+        const text = e.clipboardData.getData("text");
+        if (!/\n/.test(text.trim())) return;
+        e.preventDefault();
+        pasteMany(pasteTranslations(ids, ids.indexOf(clip.id), text));
+      });
+      input.addEventListener("focus", () => choose(clip.id, false));
+      const status = fit.state === "long" ? el("span", { class: "dub-status warn", title: "Runs into the next sentence" }, `+${fit.over.toFixed(1)} s`)
+        : fit.state === "fits" ? el("span", { class: "dub-status ok", title: "Fits" }, "\u2713")
+          : el("span", { class: "dub-status faint", title: "No take yet" }, "\u25cb");
+      const generating = job?.kind === "generate" && job.clips.has(clip.id);
+      const row = el("div", { class: `dub-line ${clip.id === selected ? "selected" : ""} ${generating ? "busy" : ""}`,
+        role: "option", "aria-selected": String(clip.id === selected), "data-clip": clip.id, onclick: (e) => {
+          if (!typing(e.target)) choose(clip.id);
+        } },
+      el("span", { class: "num faint small" }, number),
+      el("button", { class: "num small link-btn dub-at", title: "Play from here", onclick: () => { choose(clip.id); play.seek(clip.start, true); } },
+        formatTime(source.start)),
+      el("span", { class: "dub-orig", title: source.text }, source.text),
+      input, generating ? el("span", { class: "dub-status faint" }, "\u2026") : status);
+      return row;
+    });
+    table.replaceChildren(...(rows.length ? rows : [el("p", { class: "muted small pad" }, `No sentences in \u201c${names[filter]}\u201d.`)]));
+  }
+
+  function pasteButton() {
+    const button = el("button", { class: "btn btn-small", disabled: !clips().length,
+      title: "Paste a translation tool's reply: each numbered line goes to its sentence" }, "Paste translations");
+    button.onclick = () => popover(button, pastePanel(), { align: "right" });
+    return button;
+  }
+
+  function drawInspector() {
+    const clip = clips().find((c) => c.id === selected);
+    if (!clip) {
+      inspector.replaceChildren(el("p", { class: "muted small" }, "Select a sentence to see it here."));
+      return;
+    }
+    const number = numberOf(clip.id);
+    const source = sourceOf(clip);
+    const fit = dub.fit[clip.id] || { state: "missing" };
+    const original = el("textarea", { class: "textarea", rows: 2, value: source.text, "data-saved": source.text,
+      "data-key": `orig-${clip.id}`, "aria-label": `Original of sentence ${number}`,
+      title: "What is said. It is also the transcript of the voice sample, so correct it if Whisper misheard.",
+      onblur: () => original.value !== original.dataset.saved && editOriginal(clip, original.value) });
+    const translation = el("textarea", { class: "textarea", rows: 3, value: clip.translation, "data-saved": clip.translation,
+      "data-key": `insp-${clip.id}`, placeholder: "Translation", "aria-label": `Translation of sentence ${number} (details)`,
+      onblur: () => translation.value !== translation.dataset.saved && editTranslation(clip, translation.value),
+      onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); translation.blur(); generate([clip.id]); } } });
+    const voice = el("select", { class: "select select-small", "aria-label": `Voice from, sentence ${number}`,
+      title: "Whose voice and mood the sentence copies. A very short sentence clones weakly: pick a longer one of the same speaker.",
+      onchange: () => {
+        const before = clip.voice_from;
+        act(`voice of sentence ${number}`, () => api("PATCH", path(`/clips/${clip.id}`), { voice_from: voice.value }),
+          () => api("PATCH", path(`/clips/${clip.id}`), { voice_from: before }));
+      } },
+    sources().map((s, n) => el("option", { value: s.id }, s.id === clip.source_clip ? "This sentence"
+      : `${n + 1} \u00b7 ${s.text.slice(0, 32)}${s.text.length > 32 ? "\u2026" : ""}`)));
+    voice.value = clip.voice_from;
+    const generating = job?.kind === "generate" && job.clips.has(clip.id);
+    const takes = clip.takes.map((take, n) => el("div", { class: `row dub-take ${take.file === clip.selected ? "selected" : ""}` },
+      el("button", { class: "btn btn-ghost btn-small", "aria-pressed": String(take.file === clip.selected),
+        title: take.file === clip.selected ? "Used in the dub" : "Use this take", onclick: () => {
+          if (take.file === clip.selected) return;
+          const before = clip.selected;
+          act(`take of sentence ${number}`, () => api("POST", path(`/clips/${clip.id}/select`), { file: take.file }),
+            () => api("POST", path(`/clips/${clip.id}/select`), { file: before }));
+        } }, take.file === clip.selected ? "\u25cf" : "\u25cb"),
+      player(fileUrl(take.file), { buckets: 30, showTime: false, label: `Play take ${n + 1}` }),
+      el("span", { class: "faint small num" }, `${take.duration.toFixed(1)} s \u00b7 seed ${take.seed}`)));
+    const remove = el("button", { class: "btn btn-ghost btn-small danger", title: "Delete this sentence (undo brings it back)",
+      onclick: () => deleteSentence(clip) }, "Delete sentence");
+    inspector.replaceChildren(
+      el("div", { class: "row" }, el("strong", {}, `Sentence ${number}`),
+        el("span", { class: "faint small num" }, `${formatTime(source.start)}\u2013${formatTime(source.end)}`),
+        el("div", { class: "spacer" }),
+        fit.state === "long" ? el("span", { class: "warn small" }, `${fit.over.toFixed(1)} s too long`)
+          : fit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet")),
+      el("label", { class: "field-label" }, "Original"), original,
+      el("label", { class: "field-label" }, "Translation"), translation,
+      el("div", { class: "row" }, el("label", { class: "row small muted" }, "Voice", voice)),
+      takes.length ? el("div", { class: "dub-takes" }, takes) : el("p", { class: "faint small" }, "No takes yet."),
+      el("div", { class: "row" },
+        generating ? el("span", { class: "small muted" }, "Generating\u2026")
+          : el("button", { class: "btn btn-primary btn-small", disabled: Boolean(job) || !clip.translation.trim() || !model(),
+            title: !clip.translation.trim() ? "Write the translation first" : !model() ? "Choose a model first" : "Ctrl+Enter",
+            onclick: () => generate([clip.id]) }, clip.takes.length ? "Generate again" : "Generate"),
+        el("div", { class: "spacer" }), remove));
+  }
+
+  function drawLanes() {
+    lanes.setLanes([
+      { id: "original", label: "Original", draggable: false,
+        clips: sources().map((c) => ({ id: c.id, start: c.start, end: c.end, state: "source", title: c.text })) },
+      { id: "dub", label: "Dub", draggable: true, clips: clips().map((c) => ({ id: c.id, start: c.start,
+        end: c.start + lengthOf(c), state: dub.fit[c.id]?.state || "missing", title: c.translation || "No translation yet" })) },
+    ]);
+    if (selected) lanes.select(selected);
+  }
+
+  // Selects a sentence everywhere: table, inspector and timeline. `reveal` scrolls the table and timeline to it.
+  function choose(clipId, reveal = true) {
+    if (!clipId) return;
+    const changed = clipId !== selected;
+    selected = clipId;
+    for (const row of table.querySelectorAll(".dub-line")) {
+      const on = row.dataset.clip === clipId;
+      row.classList.toggle("selected", on);
+      row.setAttribute("aria-selected", String(on));
+    }
+    if (reveal) table.querySelector(`.dub-line[data-clip="${clipId}"]`)?.scrollIntoView({ block: "nearest" });
+    lanes.select(clipId, reveal);
+    if (changed) drawInspector();
+  }
+
+  // --- Panels ----------------------------------------------------------------------------------
+
+  async function copyTranscript() {
+    const text = transcriptForTranslation(clips().map((c) => sourceOf(c)?.text || ""), languageName(dub.target_language));
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch { // no clipboard permission: copy through a hidden text box
+      const box = el("textarea", { class: "sr-only" });
+      box.value = text;
+      document.body.append(box);
+      box.select();
+      document.execCommand("copy");
+      box.remove();
+    }
+    setMessage(message, `Copied ${plural(clips().length, "sentence")}. Paste them into a translation tool, then use `
+      + "\u201cPaste translations\u201d with its reply.");
+  }
+
+  function pastePanel() {
+    const all = clips();
+    const box = el("textarea", { class: "textarea paste-box", rows: 10, "aria-label": "Translated sentences",
+      placeholder: "1. Hello, today we're trying something new.\n2. Yes.\n3. \u2026" });
+    const summary = el("div", { class: "small muted" }, `Paste the reply for ${plural(all.length, "sentence")}.`);
+    const apply_ = el("button", { class: "btn btn-primary", disabled: true }, "Apply");
+    let parsed = null;
+    box.addEventListener("input", () => {
+      parsed = box.value.trim() ? parseTranslations(box.value, all.length) : null;
+      const found = parsed ? all.length - parsed.missing.length : 0;
+      apply_.disabled = !found;
+      summary.className = parsed?.missing.length ? "small warn" : "small muted";
+      summary.textContent = !parsed ? `Paste the reply for ${plural(all.length, "sentence")}.`
+        : `Translations for ${found} of ${plural(all.length, "sentence")}`
+          + (parsed.missing.length ? `; missing: ${parsed.missing.slice(0, 12).join(", ")}`
+            + `${parsed.missing.length > 12 ? "\u2026" : ""}. Those keep what they have.` : ".");
+    });
+    apply_.onclick = () => {
+      close();
+      pasteMany(Object.fromEntries(all.flatMap((clip, i) => (parsed.texts[i] === null ? [] : [[clip.id, parsed.texts[i]]]))));
+    };
+    setTimeout(() => box.focus(), 0);
+    return el("div", { class: "menu paste-menu" }, el("strong", {}, "Paste translations"), box, summary,
+      el("div", { class: "row" }, apply_, el("button", { class: "btn btn-ghost", onclick: close }, "Cancel")));
   }
 
   function exportPanel() {
@@ -273,8 +612,9 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   function confirmTranscribe(anchor) {
     popover(anchor, el("div", { class: "menu confirm-menu" },
       el("strong", {}, "Transcribe again?"),
-      el("div", { class: "muted small" }, "This replaces every sentence, translation and take."),
-      el("button", { class: "btn btn-danger", onclick: () => { close(); transcribe(); } }, "Transcribe again")), { align: "right" });
+      el("div", { class: "muted small" }, "This replaces every sentence, translation and take, and cannot be undone."),
+      el("button", { class: "btn btn-danger", onclick: () => { close(); histories.set(dub.id, createHistory(100)); transcribe(); } },
+        "Transcribe again")), { align: "right" });
   }
 
   function confirmDelete(anchor) {
@@ -285,6 +625,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         close();
         try {
           await api("DELETE", path());
+          histories.delete(dub.id);
           play.stop();
           location.hash = "#/dub";
           await refreshList();
@@ -293,200 +634,10 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       } }, "Delete")), { align: "right" });
   }
 
-  // --- Jobs ------------------------------------------------------------------------------------
-
-  async function follow(started, kind, clips = []) {
-    job = { id: started.id, kind, clips: new Set(clips), progress: "" };
-    draw();
-    try {
-      apply(await waitForJob(started.id, (update) => {
-        if (job && update.progress !== job.progress) {
-          job.progress = update.progress;
-          const node = header.querySelector(".job-progress");
-          if (node) node.textContent = update.progress;
-        }
-      }));
-      if (kind === "transcribe" && !dub.notice) setMessage(message, `Found ${plural(dub.tracks[0].clips.length, "sentence")}. Write `
-        + "the translations, then generate.");
-    } catch (error) {
-      if (error.cancelled) setMessage(message, "Cancelled.");
-      else fail(error);
-      apply(await api("GET", path()).catch(() => dub));
-    } finally {
-      job = null;
-      draw();
-      refreshList().catch(() => {});
-    }
-  }
-
-  async function transcribe() {
-    if (!whisper) return setMessage(message, "Install Whisper on the Models screen to find the sentences.", "warn");
-    try {
-      setMessage(message, "Whisper is listening on the CPU; a long file takes a while.");
-      await follow(await api("POST", path("/transcribe"), {}), "transcribe");
-    } catch (error) { fail(error); }
-  }
-
-  async function generate(ids) {
-    try {
-      await follow(await api("POST", path("/generate"), { clips: ids }), "generate", ids);
-    } catch (error) { fail(error); }
-  }
-
-  // --- Timeline and rows -----------------------------------------------------------------------
-
-  function drawLanes() {
-    const sources = dub.tracks[0].clips;
-    lanes.setLanes([
-      { id: "original", label: "Original", draggable: false,
-        clips: sources.map((c) => ({ id: c.id, start: c.start, end: c.end, state: "source", title: c.text })) },
-      { id: "dub", label: "Dub", draggable: true, clips: dub.tracks[1].clips.map((c) => {
-        const source = sourceOf(c);
-        const length = takeOf(c)?.duration ?? (source ? source.end - source.start : 1);
-        return { id: c.id, start: c.start, end: c.start + length, state: dub.fit[c.id]?.state || "missing",
-          title: c.translation || "No translation yet" };
-      }) },
-    ]);
-    if (selected) lanes.select(selected);
-  }
-
-  function drawRows() {
-    const sources = dub.tracks[0].clips;
-    const clips = dub.tracks[1].clips;
-    if (!clips.length) {
-      rows.replaceChildren(el("div", { class: "empty small" }, dub.source.language
-        ? el("p", { class: "muted" }, "No sentences. Transcribe again, or import another file.")
-        : whisper ? el("button", { class: "btn btn-primary", disabled: Boolean(job), onclick: transcribe }, "Find the sentences")
-          : el("p", { class: "muted" }, "Install Whisper on the ", el("a", { href: "#/models" }, "Models screen"),
-            " to find the sentences and their times.")));
-      return;
-    }
-    const ids = clips.map((c) => c.id);
-    const copyButton = el("button", { class: "btn btn-small", title: "Copy every sentence, numbered, with an instruction for "
-      + "a translation tool", onclick: copyTranscript }, "Copy for translation");
-    const pasteButton = el("button", { class: "btn btn-small", title: "Paste a translation tool's reply: each numbered line "
-      + "goes to its sentence" }, "Paste translations");
-    pasteButton.onclick = () => popover(pasteButton, pastePanel(), { align: "right", up: true });
-    rows.replaceChildren(el("div", { class: "row dub-rows-head" }, el("strong", {}, plural(clips.length, "sentence")),
-      el("div", { class: "spacer" }), copyButton, pasteButton), ...clips.map((clip, i) => {
-      const source = sourceOf(clip);
-      const fit = dub.fit[clip.id] || { state: "missing" };
-      // Saved when the box loses the focus (not on "change": a redraw that keeps typed text would hide the change).
-      const original = el("textarea", { class: "textarea", rows: 2, value: source.text, "aria-label": `Sentence ${i + 1}`,
-        "data-saved": source.text,
-        title: "What is said. It is also the transcript of the voice sample, so correct it if Whisper misheard.",
-        onblur: () => original.value !== original.dataset.saved
-          && change(api("PATCH", path(`/source/${source.id}`), { text: original.value })) });
-      const translation = el("textarea", { class: "textarea", rows: 2, value: clip.translation, "data-saved": clip.translation,
-        placeholder: "Translation", "aria-label": `Translation of sentence ${i + 1}`,
-        onblur: () => translation.value !== translation.dataset.saved
-          && change(api("PATCH", path(`/clips/${clip.id}`), { translation: translation.value })) });
-      translation.addEventListener("paste", (e) => {
-        const text = e.clipboardData.getData("text");
-        if (!/\n/.test(text.trim())) return;
-        e.preventDefault();
-        pasteAll(pasteTranslations(ids, i, text));
-      });
-      const voice = el("select", { class: "select select-small", "aria-label": `Voice from, sentence ${i + 1}`,
-        title: "Whose voice and mood the sentence copies. A very short sentence clones weakly: pick a longer one of the same speaker.",
-        onchange: () => change(api("PATCH", path(`/clips/${clip.id}`), { voice_from: voice.value })) },
-      sources.map((s, n) => el("option", { value: s.id }, s.id === clip.source_clip ? "This sentence"
-        : `${n + 1} \u00b7 ${s.text.slice(0, 28)}${s.text.length > 28 ? "\u2026" : ""}`)));
-      voice.value = clip.voice_from;
-      const generating = job?.kind === "generate" && job.clips.has(clip.id);
-      const take = takeOf(clip);
-      const status = fit.state === "long" ? el("span", { class: "warn small" }, `${fit.over.toFixed(1)} s too long`)
-        : fit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet");
-      const takes = clip.takes.length > 1 && el("select", { class: "select select-small", "aria-label": `Take, sentence ${i + 1}`,
-        onchange: (e) => change(api("POST", path(`/clips/${clip.id}/select`), { file: e.target.value })) },
-      clip.takes.map((t, n) => el("option", { value: t.file, selected: t.file === clip.selected }, `Take ${n + 1} \u00b7 seed ${t.seed}`)));
-      const remove = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Delete sentence", title: "Delete this sentence" },
-        icon(ICONS.trash));
-      remove.onclick = () => popover(remove, el("div", { class: "menu confirm-menu" },
-        el("strong", {}, `Delete sentence ${i + 1}?`),
-        el("div", { class: "muted small" }, "Its translation and takes are removed too."),
-        el("button", { class: "btn btn-danger", onclick: () => { close(); change(api("DELETE", path(`/source/${source.id}`))); } },
-          "Delete")), { align: "right" });
-      const row = el("div", { class: `dub-row ${clip.id === selected ? "selected" : ""}`, "data-clip": clip.id },
-        el("button", { class: "dub-time num faint small link-btn", title: "Play from here",
-          onclick: () => { choose(clip.id); play.seek(clip.start, true); } },
-        `${i + 1} \u00b7 ${formatTime(source.start)}\u2013${formatTime(source.end)}`),
-        original, translation,
-        el("div", { class: "dub-actions" },
-          el("div", { class: "row" }, voice, status),
-          el("div", { class: "row" },
-            generating ? el("span", { class: "small muted" }, "Generating\u2026")
-              : el("button", { class: "btn btn-small", disabled: Boolean(job) || !clip.translation.trim() || !model(),
-                title: !clip.translation.trim() ? "Write the translation first" : !model() ? "Choose a model first" : "",
-                onclick: () => generate([clip.id]) }, clip.takes.length ? "Again" : "Generate"),
-            take && player(fileUrl(take.file), { buckets: 24, showTime: false, label: "Play the take" }),
-            takes, remove)));
-      row.addEventListener("focusin", () => choose(clip.id));
-      return row;
-    }));
-  }
-
-  const targetName = () => models.flatMap((m) => m.languages).find((l) => l.code === dub.target_language)?.name
-    || dub.target_language;
-  const sentences = () => dub.tracks[1].clips.map((c) => sourceOf(c)?.text || "");
-
-  async function copyTranscript() {
-    const text = transcriptForTranslation(sentences(), targetName());
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch { // no clipboard permission: copy through a hidden text box
-      const box = el("textarea", { class: "sr-only" });
-      box.value = text;
-      document.body.append(box);
-      box.select();
-      document.execCommand("copy");
-      box.remove();
-    }
-    setMessage(message, `Copied ${plural(sentences().length, "sentence")}. Paste them into a translation tool, then use `
-      + "\u201cPaste translations\u201d with its reply.");
-  }
-
-  // A translation tool's whole reply: checked, summarized, then saved in one request.
-  function pastePanel() {
-    const clips = dub.tracks[1].clips;
-    const box = el("textarea", { class: "textarea paste-box", rows: 10, "aria-label": "Translated sentences",
-      placeholder: "1. Hello, today we're trying something new.\n2. Yes.\n3. \u2026" });
-    const summary = el("div", { class: "small muted" }, `Paste the reply for ${plural(clips.length, "sentence")}.`);
-    const apply = el("button", { class: "btn btn-primary", disabled: true }, "Apply");
-    let parsed = null;
-    box.addEventListener("input", () => {
-      parsed = box.value.trim() ? parseTranslations(box.value, clips.length) : null;
-      const found = parsed ? clips.length - parsed.missing.length : 0;
-      apply.disabled = !found;
-      summary.className = parsed?.missing.length ? "small warn" : "small muted";
-      summary.textContent = !parsed ? `Paste the reply for ${plural(clips.length, "sentence")}.`
-        : `Translations for ${found} of ${plural(clips.length, "sentence")}`
-          + (parsed.missing.length ? `; missing: ${parsed.missing.slice(0, 12).join(", ")}`
-            + `${parsed.missing.length > 12 ? "\u2026" : ""}. Those keep what they have.` : ".");
-    });
-    apply.onclick = async () => {
-      const translations = Object.fromEntries(clips.flatMap((clip, i) => (parsed.texts[i] === null ? []
-        : [[clip.id, parsed.texts[i]]])));
-      close();
-      await change(api("PATCH", path("/translations"), { translations }));
-      setMessage(message, `Pasted ${plural(Object.keys(translations).length, "translation")}.`);
-    };
-    setTimeout(() => box.focus(), 0);
-    return el("div", { class: "menu paste-menu" }, el("strong", {}, "Paste translations"), box, summary,
-      el("div", { class: "row" }, apply, el("button", { class: "btn btn-ghost", onclick: close }, "Cancel")));
-  }
-
-  async function pasteAll(values) {
-    try {
-      for (const [id, text] of Object.entries(values)) apply(await api("PATCH", path(`/clips/${id}`), { translation: text }));
-      setMessage(message, `Pasted ${plural(Object.keys(values).length, "translation")}.`);
-    } catch (error) { fail(error); }
-  }
-
   // --- Preview ---------------------------------------------------------------------------------
 
   // The video (muted) or a plain clock, with the original underneath at its volume and the selected takes at their
-  // starts, through Web Audio. Changes (a dragged clip, a new take, the volume) restart from the current time.
+  // starts through Web Audio (the audio clock leads; the video follows). Changes restart from the current time.
   function previewPlayer() {
     const video = dub.source.kind === "video" ? el("video", { class: "dub-video", muted: true, playsinline: true,
       preload: "auto", src: fileUrl(dub.source.file) }) : null;
@@ -502,40 +653,61 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     if (video) video.addEventListener("error", () => stage.querySelector(".dub-video")?.replaceWith(
       el("div", { class: "dub-audio-only warn small" }, "This window cannot show this video; the dub plays without the picture.")));
 
+    const context = new AudioContext(); // suspended until Play; decodes the original for the waveform now
     const buffers = new Map(); // url -> Promise<AudioBuffer>
-    let context = null;
+    const original = fileUrl("audio.wav");
     let gain = null;
     let sources = [];
     let playing = false;
-    let origin = 0; // media time at contextStart
+    let stopped = false;
+    let origin = 0;
     let contextStart = 0;
     let time = 0;
     let frame = 0;
+    let current = null; // the sentence under the playhead
     const load = (url) => {
       if (!buffers.has(url)) buffers.set(url, fetch(url).then((r) => r.arrayBuffer()).then((b) => context.decodeAudioData(b)));
       return buffers.get(url);
     };
     const now = () => (playing ? origin + context.currentTime - contextStart : time);
 
+    if (dub.source.duration) {
+      load(original).then((buffer) => {
+        const data = buffer.getChannelData(0);
+        const step = Math.max(1, Math.floor(buffer.sampleRate / WAVE_PER_SECOND));
+        const values = new Float32Array(Math.ceil(data.length / step));
+        let top = 0;
+        for (let i = 0; i < values.length; i++) {
+          let peak = 0;
+          for (let j = i * step, end = Math.min(data.length, j + step); j < end; j++) peak = Math.max(peak, Math.abs(data[j]));
+          values[i] = peak;
+          top = Math.max(top, peak);
+        }
+        if (top) for (let i = 0; i < values.length; i++) values[i] /= top;
+        if (!stopped) lanes.setWave(values, buffer.sampleRate / step);
+      }).catch(() => {});
+    }
+
     async function start(at) {
-      context ||= new AudioContext();
-      const clips = dub.tracks[1].clips.filter((c) => takeOf(c)).map((c) => ({ id: c.id, start: c.start,
-        duration: takeOf(c).duration, url: fileUrl(c.selected) }));
-      const [original, ...takes] = await Promise.all([load(fileUrl("audio.wav")), ...clips.map((c) => load(c.url))]);
+      const items = clips().filter((c) => takeOf(c)).map((c) => ({ id: c.id, start: c.start, duration: takeOf(c).duration,
+        url: fileUrl(c.selected) }));
+      const [base, ...takes] = await Promise.all([load(original), ...items.map((c) => load(c.url))]);
+      if (stopped) return;
+      await context.resume();
       stopSources();
       gain = context.createGain();
       gain.gain.value = Number(volume.value);
       gain.connect(context.destination);
       contextStart = context.currentTime + 0.05;
       origin = at;
-      const base = context.createBufferSource();
-      base.buffer = original;
-      base.connect(gain);
-      base.start(contextStart, at);
-      sources = [base];
-      for (const item of clipsToPlay(clips, at)) {
+      const node = context.createBufferSource();
+      node.buffer = base;
+      node.connect(gain);
+      node.start(contextStart, at);
+      sources = [node];
+      for (const item of clipsToPlay(items, at)) {
         const source = context.createBufferSource();
-        source.buffer = takes[clips.findIndex((c) => c.id === item.id)];
+        source.buffer = takes[items.findIndex((c) => c.id === item.id)];
         source.connect(context.destination);
         source.start(contextStart + item.delay, item.offset);
         sources.push(source);
@@ -543,6 +715,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       playing = true;
       if (video) { video.currentTime = at; video.play().catch(() => {}); }
       button.replaceChildren(icon(ICONS.pause));
+      cancelAnimationFrame(frame);
       tick();
     }
 
@@ -563,23 +736,25 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     function tick() {
       const t = Math.min(now(), dub.source.duration || 0);
       clock.textContent = formatTime(t);
-      lanes.setTime(t);
+      lanes.setTime(t, playing);
       if (video && Math.abs(video.currentTime - t) > 0.25) video.currentTime = t;
+      // The sentence being played is shown, unless the user is typing.
+      const under = activeClip(clips().map((c) => ({ id: c.id, start: c.start, length: lengthOf(c) })), t);
+      if (playing && under && under !== current) {
+        current = under;
+        for (const row of table.querySelectorAll(".dub-line")) row.classList.toggle("playing", row.dataset.clip === under);
+        if (!typing(document.activeElement)) choose(under);
+      }
       if (playing && t >= (dub.source.duration || 0)) { pause(); time = 0; return; }
       if (playing) frame = requestAnimationFrame(tick);
     }
 
     button.onclick = () => (playing ? pause() : start(time).catch(fail));
     volume.oninput = () => { volumeLabel.textContent = `${Math.round(volume.value * 100)} %`; if (gain) gain.gain.value = Number(volume.value); };
-    volume.onchange = () => api("PATCH", path(), { original_volume: Number(volume.value) }).then((d) => { dub = d; }, fail);
-    const onKey = (e) => {
-      if (e.code !== "Space" || e.target.closest("input, textarea, select, button") || !stage.isConnected) return;
-      e.preventDefault();
-      button.click();
-    };
-    document.addEventListener("keydown", onKey);
+    volume.onchange = () => setOption("changing the original's volume", "original_volume", Number(volume.value));
 
     return {
+      toggle: () => button.click(),
       seek(t, andPlay = false) {
         time = t;
         if (playing || andPlay) start(t).catch(fail);
@@ -587,12 +762,35 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       },
       changed() {
         // Take names repeat after transcribing again (takes/d1-1.wav): decode takes afresh, keep the original.
-        for (const url of [...buffers.keys()]) if (url !== fileUrl("audio.wav")) buffers.delete(url);
+        for (const url of [...buffers.keys()]) if (url !== original) buffers.delete(url);
+        volume.value = dub.original_volume;
+        volumeLabel.textContent = `${Math.round(dub.original_volume * 100)} %`;
         if (playing) start(now()).catch(fail);
       },
-      stop() { pause(); document.removeEventListener("keydown", onKey); context?.close(); },
+      stop() { stopped = true; pause(); context.close(); },
     };
   }
+
+  // --- Keys ------------------------------------------------------------------------------------
+
+  const onKey = (e) => {
+    if (!main.isConnected) return document.removeEventListener("keydown", onKey);
+    if (document.querySelector(".popover")) return;
+    const inText = typing(e.target);
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !inText && e.key.toLowerCase() === "z") { e.preventDefault(); step(e.shiftKey ? "redo" : "undo"); return; }
+    if (mod && !inText && e.key.toLowerCase() === "y") { e.preventDefault(); step("redo"); return; }
+    if (inText) return;
+    const visible = clipFilter(clips(), dub.fit, filter);
+    if (e.code === "Space") { e.preventDefault(); play.toggle(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const index = visible.indexOf(selected);
+      choose(visible[Math.max(0, Math.min(visible.length - 1, index + (e.key === "ArrowUp" ? -1 : 1)))] || visible[0]);
+    } else if (e.key === "Enter" && mod) { e.preventDefault(); if (selected) generate([selected]); }
+    else if (e.key === "Enter") { e.preventDefault(); table.querySelector(`[data-key="tr-${selected}"]`)?.focus(); }
+  };
+  document.addEventListener("keydown", onKey);
 
   draw();
   if (dub.notice) setMessage(message, dub.notice, "warn");
@@ -600,5 +798,5 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   api("GET", path("/jobs")).then(([running]) => {
     if (running && !job && main.isConnected) follow(running, running.kind, running.clips);
   }).catch(() => {});
-  return { stop: () => play.stop(), transcribe };
+  return { stop: () => { play.stop(); document.removeEventListener("keydown", onKey); }, transcribe };
 }

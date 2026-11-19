@@ -1080,7 +1080,8 @@ def set_dub_translations(req, did):
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/clips/(?P<cid>d[0-9]+)/select")
 def select_dub_take(req, did, cid):
     _dub_or_404(did)
-    dubs.select_take(did, cid, str(req["json"].get("file", "")))
+    file = req["json"].get("file")
+    dubs.select_take(did, cid, None if file is None else str(file))
     return _dub_view(did)
 
 

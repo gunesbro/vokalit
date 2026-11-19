@@ -43,10 +43,12 @@ English script. Unmute the player to listen.
 - **Perform this line** — record a line with your own delivery and convert it to a character's voice.
 - **Dub** — drop in a video (MP4, WebM) or an audio file; Whisper finds the sentences and their times, you write the
   translations, and each sentence is spoken in the new language **in its own original voice** (cloned from that
-  sentence, so every speaker keeps their voice and mood). A two-lane timeline shows where a translation runs long;
-  drag a clip to move it. The video plays muted with the dub in sync and the original quietly underneath, and the
-  mix is exported as one audio file. Made for clips up to about 20 minutes. *Copy for translation* copies every
-  sentence, numbered, for the translation tool you like; *Paste translations* puts its reply back, each line in its place.
+  sentence, so every speaker keeps their voice and mood). Laid out like a subtitle editor: a compact sentence table
+  with filters (untranslated, no take, too long), the video and the selected sentence beside it, and a zoomable
+  timeline with the original's waveform where a translation that runs long shows red and clips can be dragged.
+  *Copy for translation* copies every sentence, numbered, for the translation tool you like; *Paste translations*
+  puts its reply back. Every change can be undone (Ctrl+Z). The mix is exported as one audio file. Made for clips up
+  to about 20 minutes.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.
 - **Tags** — sounds (laughter, sighs, …), emotions, styles and delivery (speed, pitch, pauses) as chips inside a

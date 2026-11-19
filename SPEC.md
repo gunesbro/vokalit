@@ -260,16 +260,20 @@ All interface text is English. The visual design is the design canvas; behaviour
 - **Dub:** list of dubs (new from a file or by dropping one, rename, delete); import reads the file's sound in the
   window (MP4, WebM, WAV, MP3, M4A, OGG, FLAC; size and length shown, a warning past 20 minutes; a video whose sound
   the window cannot read asks for its audio as a separate file) and copies the file into `workspace/dubs/<id>/`;
-  Whisper (timed segments, long ones split at sentence ends) fills the Original lane; each sentence row has its
-  editable original text (it is the voice sample's transcript), the translation (pasting several lines fills the
-  following sentences; "Copy for translation" copies all sentences numbered under an instruction naming the target
-  language, and "Paste translations" places a tool's reply by number — or in order without numbers — after a summary
-  of found and missing ones, saved in one request), "Voice from" (default: this sentence; never neighbours, which may be another speaker),
-  Generate/Again, the selected take, its status (fits / "0.8 s too long" / no take) and Delete. Header: target
-  language, model, settings, Generate missing (Cancel), Export (one audio file: the takes at their starts over the
-  original at its volume), Transcribe again (confirmed: it replaces everything). Preview: the video muted (or a clock
-  for audio) with the original and the takes through Web Audio; a two-lane timeline (`timeline.js`: lanes and clips in
-  seconds, one scale) shows overlaps in red, seeks on click and moves Dub clips by dragging.
+  Whisper (timed segments, long ones split at sentence ends) makes the sentences. Layout: top bar (name, from -> to,
+  model, settings, progress "translated / voiced / too long", Undo/Redo, Generate missing, Export, Transcribe again);
+  a compact table (#, time, original, translation edited in place, status), filters with counts (All, Untranslated,
+  No take, Too long), "Copy for translation" (numbered, with an instruction naming the target language) and "Paste
+  translations" (placed by number, or in order; summary of found and missing; one request); on the right the video
+  (muted; or a clock for audio) with the original under the takes through Web Audio, and the selected sentence:
+  original text (the voice sample's transcript), translation, Voice from (default this sentence; never neighbours,
+  which may be another speaker), takes to pick and play, Generate, Delete; below, the timeline (`timeline.js`: lanes and
+  clips in seconds, a ~30 s window that follows the playhead, zoom, the original's waveform, overlaps in red, Dub
+  clips dragged). Playback marks the sentence being played and selects it unless you are typing. Keys: Up/Down,
+  Enter (edit), Ctrl+Enter (generate), Space. Undo/Redo (Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y outside text boxes), per dub
+  while the app runs, last 100 steps: text and translation edits, pasted translations, moves, Voice from, take
+  choice, deleted sentences (their take files stay until the dub is deleted), generations (the previous takes are
+  selected again), model, language, settings, volume, name. Transcribing again is confirmed and not undoable.
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not

@@ -308,3 +308,13 @@ def test_restore_refuses_an_existing_sentence(tmp_workspace):
     data = dubs.load_dub(dub)
     with pytest.raises(ws.WorkspaceError):
         dubs.restore_sentence(dub, data["tracks"][0]["clips"][0], data["tracks"][1]["clips"][0], 0)
+
+
+def test_select_take_none_clears_the_choice(tmp_workspace):
+    # Undo of a first generation: the sentence had no take selected before.
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    _with_take(dub, "d1")
+    dubs.select_take(dub, "d1", None)
+    clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
+    assert clip["selected"] is None and len(clip["takes"]) == 1
