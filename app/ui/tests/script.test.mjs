@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { activeClip, clipFilter, createHistory, followWindow } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -183,4 +184,61 @@ test("parseTranslations places numbered lines by number and reports the missing 
 
 test("parseTranslations without numbers takes the lines in order", () => {
   assert.deepEqual(parseTranslations("Hello.\n\nYes.\n", 3), { texts: ["Hello.", "Yes.", null], missing: [3] });
+});
+
+test("createHistory undoes and redoes in order, and a new step clears redo", async () => {
+  const log = [];
+  const step = (name) => ({ label: name, undo: async () => log.push(`undo ${name}`), redo: async () => log.push(`redo ${name}`) });
+  const h = createHistory();
+  h.push(step("a"));
+  h.push(step("b"));
+  assert.equal(h.undoLabel(), "b");
+  assert.equal(await h.undo(), "b");
+  assert.equal(h.redoLabel(), "b");
+  assert.equal(await h.redo(), "b");
+  await h.undo();
+  h.push(step("c"));
+  assert.equal(h.redoLabel(), null);
+  assert.equal(await h.undo(), "c");
+  assert.equal(await h.undo(), "a");
+  assert.equal(await h.undo(), null);
+  assert.deepEqual(log, ["undo b", "redo b", "undo b", "undo c", "undo a"]);
+});
+
+test("createHistory keeps the last steps up to its limit", async () => {
+  const h = createHistory(2);
+  for (const name of ["a", "b", "c"]) h.push({ label: name, undo: async () => {}, redo: async () => {} });
+  assert.equal(await h.undo(), "c");
+  assert.equal(await h.undo(), "b");
+  assert.equal(await h.undo(), null);
+});
+
+test("createHistory keeps a step whose undo failed", async () => {
+  const h = createHistory();
+  h.push({ label: "a", undo: async () => { throw new Error("offline"); }, redo: async () => {} });
+  await assert.rejects(h.undo(), /offline/);
+  assert.equal(h.undoLabel(), "a");
+});
+
+test("clipFilter picks untranslated, missing and long sentences", () => {
+  const clips = [{ id: "d1", translation: "Hi." }, { id: "d2", translation: " " }, { id: "d3", translation: "Yes." }];
+  const fit = { d1: { state: "fits" }, d2: { state: "missing" }, d3: { state: "long" } };
+  assert.deepEqual(clipFilter(clips, fit, "all"), ["d1", "d2", "d3"]);
+  assert.deepEqual(clipFilter(clips, fit, "untranslated"), ["d2"]);
+  assert.deepEqual(clipFilter(clips, fit, "missing"), ["d2"]);
+  assert.deepEqual(clipFilter(clips, fit, "long"), ["d3"]);
+});
+
+test("activeClip finds the sentence under the playhead", () => {
+  const clips = [{ id: "a", start: 0, length: 2 }, { id: "b", start: 3, length: 2 }];
+  assert.equal(activeClip(clips, 1.5), "a");
+  assert.equal(activeClip(clips, 2.5), null);
+  assert.equal(activeClip(clips, 4.99), "b");
+});
+
+test("followWindow keeps the playhead visible, a page at a time", () => {
+  assert.equal(followWindow(0, 30, 10, 100), 0);
+  assert.equal(followWindow(0, 30, 31, 100), 31);
+  assert.equal(followWindow(40, 30, 10, 100), 10);
+  assert.equal(followWindow(0, 30, 95, 100), 70);
 });

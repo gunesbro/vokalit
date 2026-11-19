@@ -193,3 +193,54 @@ export function parseTranslations(reply, count) {
   }
   return { texts, missing: texts.flatMap((text, i) => (text === null ? [i + 1] : [])) };
 }
+
+// Undo/redo of steps {label, undo, redo} (async). A new step clears redo; past `limit` the oldest step is dropped. A step
+// whose undo or redo fails stays where it was.
+export function createHistory(limit = 100) {
+  const done = [];
+  const undone = [];
+  return {
+    push(step) {
+      done.push(step);
+      if (done.length > limit) done.shift();
+      undone.length = 0;
+    },
+    async undo() {
+      const step = done.at(-1);
+      if (!step) return null;
+      await step.undo();
+      undone.push(done.pop());
+      return step.label;
+    },
+    async redo() {
+      const step = undone.at(-1);
+      if (!step) return null;
+      await step.redo();
+      done.push(undone.pop());
+      return step.label;
+    },
+    undoLabel: () => done.at(-1)?.label ?? null,
+    redoLabel: () => undone.at(-1)?.label ?? null,
+  };
+}
+
+// Dub sentences shown by a filter: "all", "untranslated", "missing" (no take) or "long" (runs into the next).
+export function clipFilter(clips, fit, name) {
+  const keep = {
+    all: () => true,
+    untranslated: (c) => !c.translation.trim(),
+    missing: (c) => fit[c.id]?.state === "missing",
+    long: (c) => fit[c.id]?.state === "long",
+  }[name] || (() => true);
+  return clips.filter(keep).map((c) => c.id);
+}
+
+// The clip ({id, start, length}) under the playhead `t`, or null.
+export const activeClip = (clips, t) => clips.find((c) => t >= c.start && t < c.start + c.length)?.id ?? null;
+
+// A timeline window's start (seconds) that keeps `t` visible: unchanged while t is inside, else a page starting at t
+// (kept within the duration).
+export function followWindow(start, width, t, duration) {
+  if (t >= start && t < start + width) return start;
+  return Math.max(0, Math.min(t, duration - width));
+}
