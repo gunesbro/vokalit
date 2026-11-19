@@ -144,3 +144,27 @@ export function parsePause(text) {
   const value = Number(text.trim().replace(",", "."));
   return text.trim() && Number.isFinite(value) && value >= 0 && value <= 10 ? value : null;
 }
+
+// --- Timeline (Dub): seconds <-> pixels with one scale (px per second), so zoom is a change of scale. ---
+
+export const timeToX = (t, scale) => t * scale;
+export const xToTime = (x, scale) => x / scale;
+
+// A clip's start kept inside the source: 0 <= start <= duration - length (0 when the clip is longer than the source).
+export const clampStart = (start, length, duration) => Math.min(Math.max(0, start), Math.max(0, duration - length));
+
+// Clips ({id, start, duration}) to start at playhead `t`: playing now (offset into the clip) or later (delay).
+export const clipsToPlay = (clips, t) => clips
+  .filter((c) => c.start + c.duration > t)
+  .map((c) => (c.start <= t ? { id: c.id, offset: t - c.start, delay: 0 } : { id: c.id, offset: 0, delay: c.start - t }));
+
+// Where a clip ({start, end}) runs into the next one by start time.
+export function overlapRanges(clips) {
+  const sorted = [...clips].sort((a, b) => a.start - b.start);
+  const ranges = [];
+  for (let i = 0; i + 1 < sorted.length; i++) {
+    const [clip, next] = [sorted[i], sorted[i + 1]];
+    if (clip.end > next.start) ranges.push({ start: next.start, end: Math.min(clip.end, next.end) });
+  }
+  return ranges;
+}

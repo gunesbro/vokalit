@@ -528,3 +528,21 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .runtime .btn { padding-left: 0; }
 .runtime-reason { flex-basis: 100%; max-width: 640px; }
 .runtime .loaded { color: var(--accent); }
+
+/* Timeline (Dub): lanes of clips; positions in px come from timeline.js */
+.timeline { position: relative; user-select: none; }
+.tl-body { position: relative; }
+.tl-row { display: flex; align-items: center; height: 30px; }
+.tl-label { width: var(--tl-label); flex: none; }
+.tl-lane { position: relative; flex: 1 1 auto; height: 22px; border-radius: 4px; background: var(--surface);
+  cursor: pointer; }
+.tl-clip { position: absolute; top: 3px; height: 16px; padding: 0; border: 1px solid var(--line); border-radius: 3px;
+  background: var(--accent-line); cursor: pointer; }
+.tl-lane[data-lane="dub"] .tl-clip { cursor: grab; }
+.tl-clip.fits { background: var(--accent); }
+.tl-clip.missing { background: transparent; border-style: dashed; }
+.tl-clip.long { background: var(--warn); }
+.tl-clip.selected { outline: 2px solid var(--text); outline-offset: 1px; }
+.tl-overlap { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--danger) 45%, transparent);
+  pointer-events: none; z-index: 1; }
+.tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); pointer-events: none; }

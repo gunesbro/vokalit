@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { clampStart, clipsToPlay, overlapRanges, timeToX, xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
   pickSelected,
   pickerLabel, settingsChanges,
@@ -138,4 +139,28 @@ test("parsePause reads seconds between 0 and 10, with a comma or a point", () =>
   assert.equal(parsePause("0"), 0);
   assert.equal(parsePause("10"), 10);
   for (const bad of ["", "  ", "-1", "10.5", "abc"]) assert.equal(parsePause(bad), null, bad);
+});
+
+test("timeToX and xToTime convert with one scale", () => {
+  assert.equal(timeToX(2.5, 40), 100);
+  assert.equal(xToTime(100, 40), 2.5);
+});
+
+test("clampStart keeps a clip inside the source", () => {
+  assert.equal(clampStart(-2, 3, 10), 0);
+  assert.equal(clampStart(9, 3, 10), 7);
+  assert.equal(clampStart(4, 3, 10), 4);
+  assert.equal(clampStart(1, 12, 10), 0);
+});
+
+test("clipsToPlay schedules from the playhead", () => {
+  const clips = [{ id: "a", start: 0, duration: 2 }, { id: "b", start: 3, duration: 2 }, { id: "c", start: 1, duration: 3 },
+    { id: "d", start: 0, duration: 1 }];
+  assert.deepEqual(clipsToPlay(clips, 1.5), [{ id: "a", offset: 1.5, delay: 0 }, { id: "b", offset: 0, delay: 1.5 },
+    { id: "c", offset: 0.5, delay: 0 }]);
+});
+
+test("overlapRanges finds where a clip runs into the next", () => {
+  assert.deepEqual(overlapRanges([{ start: 4, end: 9 }, { start: 0, end: 4.3 }, { start: 9.5, end: 10 }]), [{ start: 4, end: 4.3 }]);
+  assert.deepEqual(overlapRanges([]), []);
 });
