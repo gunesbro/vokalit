@@ -45,11 +45,11 @@ class Cancelled(Exception):
     """The user cancelled the job (POST /api/jobs/<id>/cancel)."""
 
 
-def _start_job(work, session=None, kind=None, line=None):
+def _start_job(work, session=None, kind=None, line=None, dub=None, clips=None):
     """Runs work(job) in a thread; the UI polls GET /api/jobs/<id>. Jobs tagged with a session are listed by
     GET /api/sessions/<sid>/jobs, so a screen opened later (or after switching tabs) shows them again."""
     job = {"id": uuid.uuid4().hex, "state": "running", "progress": "", "log": "", "result": None, "error": "",
-           "session": session, "kind": kind, "line": line, "started": time.time()}
+           "session": session, "kind": kind, "line": line, "started": time.time(), "dub": dub, "clips": clips}
     _jobs[job["id"]] = job
 
     def run():
@@ -933,6 +933,32 @@ def _dub_view(did, notice=None):
             "exports": [{"name": p.name, "path": p.relative_to(ws.workspace_root()).as_posix()} for p in exports]}
 
 
+def _dub_jobs(did):
+    return [job for job in list(_jobs.values()) if job.get("dub") == did and job["state"] == "running"]
+
+
+_dub_job_lock = threading.Lock()
+
+
+def _dub_free(did):
+    """One job at a time per dub: two would write the same take files, and transcribing deletes them."""
+    if _dub_jobs(did):
+        raise ws.WorkspaceError("This dub is already working. Wait for it to finish or cancel it.")
+
+
+def _start_dub_job(did, work, kind, clips=None):
+    with _dub_job_lock:  # checked and started together, so two quick clicks cannot both start
+        _dub_free(did)
+        return _start_job(work, kind=kind, dub=did, clips=clips)
+
+
+@route("GET", "/api/dubs/(?P<did>[0-9-]+)/jobs")
+def dub_jobs(req, did):
+    """The dub's running job, so a screen opened later follows it again."""
+    _dub_or_404(did)
+    return [{"id": j["id"], "kind": j["kind"], "progress": j["progress"], "clips": j["clips"] or []} for j in _dub_jobs(did)]
+
+
 @route("GET", "/api/dubs")
 def list_dubs(req):
     return [{"id": did, "name": d["name"], "created": d["created"], "kind": d["source"]["kind"],
@@ -992,15 +1018,24 @@ def transcribe_dub(req, did):
         raise ws.WorkspaceError("Whisper is not installed. Install it in Models.")
     if not dubs.audio_path(did).exists():
         raise ws.WorkspaceError("The dub has no sound yet. Import the file again.")
+    _dub_free(did)
 
     def work(job):
         job["progress"] = "Listening\u2026"
-        heard = models.transcribe_segments(str(dubs.audio_path(did)), None)
+        job["model"] = "whisper"  # what cancelling stops
+        try:
+            heard = models.transcribe_segments(str(dubs.audio_path(did)), None)
+        except Exception:
+            if job.get("cancelled"):
+                raise Cancelled() from None
+            raise
+        finally:
+            job["model"] = None
         if job.get("cancelled"):
             raise Cancelled()
         dubs.set_transcript(did, heard["language"], heard["segments"])
         return _dub_view(did, None if heard["segments"] else "No speech was found in this file.")
-    return _start_job(work, kind="transcribe")
+    return _start_dub_job(did, work, "transcribe")
 
 
 @route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)")
@@ -1046,6 +1081,7 @@ def generate_dub(req, did):
         raise ws.WorkspaceError(f"{models.MODELS[name]['title']} does not support "
                                 f"{models.LANGUAGE_NAMES.get(language, language)}.")
     ids = [str(c) for c in req["json"].get("clips", [])]
+    _dub_free(did)
     seed = req["json"].get("seed")
     seed = None if seed in (None, "") else int(seed)
 
@@ -1087,7 +1123,7 @@ def generate_dub(req, did):
         if errors:
             raise RuntimeError(" ".join(errors))
         return _dub_view(did)
-    return _start_job(work, kind="generate")
+    return _start_dub_job(did, work, "generate", ids)
 
 
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/export")

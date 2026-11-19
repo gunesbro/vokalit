@@ -4,8 +4,10 @@ their own voices. Stored as tracks of clips (seconds, never pixels), so the time
 dub.json, source.<ext> (the imported file), audio.wav (its sound, decoded by the window), refs/, takes/, exports/.
 """
 import shutil
+import threading
 import time
 import wave
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -61,13 +63,30 @@ def _empty_tracks() -> list[dict]:
 
 def set_source_audio(dub_id: str, wav_bytes: bytes) -> None:
     audio_path(dub_id).write_bytes(wav_bytes)
-    data = load_dub(dub_id)
-    data["source"]["duration"] = round(ws.wav_duration(audio_path(dub_id)), 3)
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        data["source"]["duration"] = round(ws.wav_duration(audio_path(dub_id)), 3)
 
 
 def load_dub(dub_id: str) -> dict | None:
     return ws._read_json(_file(dub_id))
+
+
+_locks = {}
+_locks_guard = threading.Lock()
+
+
+@contextmanager
+def _editing(dub_id: str):
+    """Load, change and save one dub under its lock, so a take added by a job while the user saves a translation does
+    not overwrite either change."""
+    with _locks_guard:
+        lock = _locks.setdefault(dub_id, threading.RLock())
+    with lock:
+        data = load_dub(dub_id)
+        if data is None:
+            raise ws.WorkspaceError("This dub no longer exists.")
+        yield data
+        save_dub(dub_id, data)
 
 
 def save_dub(dub_id: str, data: dict) -> None:
@@ -85,9 +104,8 @@ def list_dubs() -> list[tuple[str, dict]]:
 def rename_dub(dub_id: str, name: str) -> None:
     if not name.strip():
         raise ws.WorkspaceError("Give the dub a name.")
-    data = load_dub(dub_id)
-    data["name"] = name.strip()
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        data["name"] = name.strip()
 
 
 def delete_dub(dub_id: str) -> None:
@@ -114,72 +132,67 @@ def _find(clips: list[dict], clip_id: str) -> dict:
 
 def set_transcript(dub_id: str, language: str, segments: list[dict]) -> None:
     """Replaces every sentence, translation and take with Whisper's sentences."""
-    data = load_dub(dub_id)
-    shutil.rmtree(dub_dir(dub_id) / "takes", ignore_errors=True)
-    data["source"]["language"] = language
-    data["tracks"] = _empty_tracks()
-    for n, segment in enumerate(segments, 1):
-        _source_clips(data).append({"id": f"o{n}", "start": segment["start"], "end": segment["end"],
-                                    "text": segment["text"].strip()})
-        _dub_clips(data).append({"id": f"d{n}", "source_clip": f"o{n}", "voice_from": f"o{n}",
-                                 "start": segment["start"], "translation": "", "takes": [], "selected": None})
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        shutil.rmtree(dub_dir(dub_id) / "takes", ignore_errors=True)
+        data["source"]["language"] = language
+        data["tracks"] = _empty_tracks()
+        for n, segment in enumerate(segments, 1):
+            _source_clips(data).append({"id": f"o{n}", "start": segment["start"], "end": segment["end"],
+                                        "text": segment["text"].strip()})
+            _dub_clips(data).append({"id": f"d{n}", "source_clip": f"o{n}", "voice_from": f"o{n}",
+                                     "start": segment["start"], "translation": "", "takes": [], "selected": None})
 
 
 def update_source_clip(dub_id: str, clip_id: str, text: str) -> None:
-    data = load_dub(dub_id)
-    _find(_source_clips(data), clip_id)["text"] = text.strip()
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        _find(_source_clips(data), clip_id)["text"] = text.strip()
 
 
 def delete_source_clip(dub_id: str, clip_id: str) -> None:
     """Deletes a sentence with its translation and takes; clips that took their voice from it use their own."""
-    data = load_dub(dub_id)
-    _find(_source_clips(data), clip_id)
-    data["tracks"][0]["clips"] = [c for c in _source_clips(data) if c["id"] != clip_id]
-    for clip in _dub_clips(data):
-        if clip["source_clip"] == clip_id:
-            for take in clip["takes"]:
-                (dub_dir(dub_id) / take["file"]).unlink(missing_ok=True)
-    data["tracks"][1]["clips"] = [c for c in _dub_clips(data) if c["source_clip"] != clip_id]
-    for clip in _dub_clips(data):
-        if clip["voice_from"] == clip_id:
-            clip["voice_from"] = clip["source_clip"]
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        _find(_source_clips(data), clip_id)
+        data["tracks"][0]["clips"] = [c for c in _source_clips(data) if c["id"] != clip_id]
+        for clip in _dub_clips(data):
+            if clip["source_clip"] == clip_id:
+                for take in clip["takes"]:
+                    (dub_dir(dub_id) / take["file"]).unlink(missing_ok=True)
+        data["tracks"][1]["clips"] = [c for c in _dub_clips(data) if c["source_clip"] != clip_id]
+        for clip in _dub_clips(data):
+            if clip["voice_from"] == clip_id:
+                clip["voice_from"] = clip["source_clip"]
 
 
 def update_dub_clip(dub_id: str, clip_id: str, *, start: float | None = None, translation: str | None = None,
                     voice_from: str | None = None) -> None:
-    data = load_dub(dub_id)
-    clip = _find(_dub_clips(data), clip_id)
-    if start is not None:
-        duration = data["source"]["duration"]
-        if start < 0 or (duration is not None and start > duration):
-            raise ws.WorkspaceError("A sentence must start inside the file.")
-        clip["start"] = round(float(start), 3)
-    if translation is not None:
-        clip["translation"] = translation.strip()
-    if voice_from is not None:
-        _find(_source_clips(data), voice_from)
-        clip["voice_from"] = voice_from
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        clip = _find(_dub_clips(data), clip_id)
+        if start is not None:
+            duration = data["source"]["duration"]
+            if start < 0 or (duration is not None and start > duration):
+                raise ws.WorkspaceError("A sentence must start inside the file.")
+            clip["start"] = round(float(start), 3)
+        if translation is not None:
+            clip["translation"] = translation.strip()
+        if voice_from is not None:
+            _find(_source_clips(data), voice_from)
+            clip["voice_from"] = voice_from
 
 
 def set_options(dub_id: str, *, target_language: str | None = None, model: str | None = None,
                 settings: dict | None = None, original_volume: float | None = None) -> None:
     """Checked values only: languages and settings are checked by the caller against the models."""
-    data = load_dub(dub_id)
-    if target_language is not None:
-        data["target_language"] = target_language
-    if model is not None:
-        data["model"] = model
-    if settings is not None:
-        data["settings"] = settings
-    if original_volume is not None:
-        if not 0 <= original_volume <= 1:
-            raise ws.WorkspaceError("The original's volume must be between 0 and 100 %.")
-        data["original_volume"] = round(float(original_volume), 3)
-    save_dub(dub_id, data)
+    if original_volume is not None and not 0 <= original_volume <= 1:
+        raise ws.WorkspaceError("The original's volume must be between 0 and 100 %.")
+    with _editing(dub_id) as data:
+        if target_language is not None:
+            data["target_language"] = target_language
+        if model is not None:
+            data["model"] = model
+        if settings is not None:
+            data["settings"] = settings
+        if original_volume is not None:
+            data["original_volume"] = round(float(original_volume), 3)
 
 
 # --- Takes --------------------------------------------------------------------------------------
@@ -196,21 +209,19 @@ def new_take_path(dub_id: str, clip_id: str) -> Path:
 
 def add_take(dub_id: str, clip_id: str, take: dict) -> None:
     """Adds a generated take (its file relative to the dub) and selects it."""
-    data = load_dub(dub_id)
-    clip = _find(_dub_clips(data), clip_id)
     file = Path(take["file"]).resolve().relative_to(dub_dir(dub_id).resolve()).as_posix()
-    clip["takes"].append({**take, "file": file})
-    clip["selected"] = file
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        clip = _find(_dub_clips(data), clip_id)
+        clip["takes"].append({**take, "file": file})
+        clip["selected"] = file
 
 
 def select_take(dub_id: str, clip_id: str, file: str) -> None:
-    data = load_dub(dub_id)
-    clip = _find(_dub_clips(data), clip_id)
-    if not any(t["file"] == file for t in clip["takes"]):
-        raise ws.WorkspaceError("This take no longer exists.")
-    clip["selected"] = file
-    save_dub(dub_id, data)
+    with _editing(dub_id) as data:
+        clip = _find(_dub_clips(data), clip_id)
+        if not any(t["file"] == file for t in clip["takes"]):
+            raise ws.WorkspaceError("This take no longer exists.")
+        clip["selected"] = file
 
 
 # --- References, fit, export --------------------------------------------------------------------

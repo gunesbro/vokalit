@@ -10,7 +10,7 @@ import workspace as ws  # noqa: E402
 from conftest import make_wav  # noqa: E402
 from test_server import _wait, api  # noqa: E402,F401  (the api fixture)
 
-SEGMENTS = [{"start": 0.5, "end": 3.0, "text": "Merhaba."}, {"start": 4.0, "end": 9.0, "text": "Nasılsın?"}]
+SEGMENTS = [{"start": 0.5, "end": 3.0, "text": "Merhaba."}, {"start": 4.0, "end": 9.0, "text": "Nas\u0131ls\u0131n?"}]
 
 
 def _transcribed(api, tmp_path, monkeypatch, segments=SEGMENTS):
@@ -36,7 +36,7 @@ def test_import_refuses_unknown_types(api, tmp_workspace):
 
 def test_dub_import_transcribe_and_edit(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
-    assert [c["text"] for c in dub["tracks"][0]["clips"]] == ["Merhaba.", "Nasılsın?"]
+    assert [c["text"] for c in dub["tracks"][0]["clips"]] == ["Merhaba.", "Nas\u0131ls\u0131n?"]
     assert dub["fit"] == {"d1": {"state": "missing", "over": 0.0}, "d2": {"state": "missing", "over": 0.0}}
     status, listed, _ = api("GET", "/api/dubs")
     assert status == 200 and listed[0]["id"] == dub["id"] and listed[0]["kind"] == "video" and listed[0]["clips"] == 2
@@ -92,7 +92,7 @@ def test_dub_generate_uses_its_own_sentence_as_reference(api, tmp_path, monkeypa
     done = _wait(api, job["id"])
     assert done["state"] == "done", done
     assert calls == [{"name": "omnivoice", "text": "How are you?", "ref": calls[0]["ref"], "language": "en",
-                      "ref_text": "Nasılsın?"}]
+                      "ref_text": "Nas\u0131ls\u0131n?"}]
     assert calls[0]["ref"].endswith("o2.wav")
     clip = done["result"]["tracks"][1]["clips"][1]
     assert clip["selected"] == "takes/d2-1.wav" and clip["takes"][0]["seed"] == 7
@@ -166,3 +166,49 @@ def test_files_send_open_ended_ranges_a_part_at_a_time(api, tmp_workspace):
     dub = dubs.create_dub("V", b"\0" * (server.RANGE_CHUNK + 10), "mp4")
     status, _, headers = api("GET", f"/files/dubs/{dub}/source.mp4", extra_headers={"Range": "bytes=0-"})
     assert status == 206 and headers["Content-Range"] == f"bytes 0-{server.RANGE_CHUNK - 1}/{server.RANGE_CHUNK + 10}"
+
+
+def test_cancelling_a_transcription_stops_whisper(api, tmp_path, monkeypatch):
+    release, cancelled = threading.Event(), []
+
+    def slow_segments(audio, language):
+        release.wait(5)
+        raise RuntimeError("The model process stopped unexpectedly.")
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "transcribe_segments", slow_segments)
+    monkeypatch.setattr(models, "cancel", lambda name, owner: cancelled.append(name) or release.set() or True)
+    _, dub, _ = api("POST", "/api/dubs?name=T&ext=wav", raw=b"x", content_type="audio/wav")
+    api("POST", f"/api/dubs/{dub['id']}/audio", raw=make_wav(tmp_path / "a.wav", 2).read_bytes(), content_type="audio/wav")
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/transcribe", {})
+    for _ in range(100):
+        if server_job(job["id"]).get("model"):
+            break
+        time.sleep(0.02)
+    api("POST", f"/api/jobs/{job['id']}/cancel", {})
+    assert _wait(api, job["id"])["state"] == "cancelled" and cancelled == ["whisper"]
+
+
+def test_one_job_at_a_time_per_dub(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    release = threading.Event()
+
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        release.wait(5)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", slow_generate)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"target_language": "en", "model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
+    _, first, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    assert status == 400 and "already working" in body["error"]
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/transcribe", {})
+    assert status == 400 and "already working" in body["error"]
+    status, running, _ = api("GET", f"/api/dubs/{dub['id']}/jobs")
+    assert status == 200 and [j["id"] for j in running] == [first["id"]] and running[0]["kind"] == "generate"
+    assert running[0]["clips"] == ["d1"]
+    release.set()
+    assert _wait(api, first["id"])["state"] == "done"
+    assert api("GET", f"/api/dubs/{dub['id']}/jobs")[1] == []

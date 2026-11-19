@@ -178,7 +178,7 @@ def test_cut_reference_uses_only_the_chosen_sentence(tmp_workspace, tmp_path):
     assert text == "Merhaba." and round(ws.wav_duration(path), 2) == 2.8  # 0.5-3.0 plus 0.15 s each side
     dubs.update_dub_clip(dub, "d1", voice_from="o2")
     path, text = dubs.cut_reference(dub, "d1")
-    assert text == "Nasılsın?" and round(ws.wav_duration(path), 2) == 5.3
+    assert text == "Nas\u0131ls\u0131n?" and round(ws.wav_duration(path), 2) == 5.3
 
 
 def test_cut_reference_stays_inside_the_file(tmp_workspace, tmp_path):
@@ -231,3 +231,28 @@ def test_export_names_a_missing_take(tmp_workspace, tmp_path):
     take.unlink()
     with pytest.raises(ws.WorkspaceError, match="Sentence 1"):
         dubs.export_dub(dub)
+
+
+def test_concurrent_changes_are_not_lost(tmp_workspace, monkeypatch):
+    # A take added by a generate job while the user saves a translation: both must stay.
+    import threading
+    import time
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    take = dubs.new_take_path(dub, "d1")
+    make_wav(take, 1)
+    real_write = ws._write_json
+
+    def slow_write(path, data):
+        time.sleep(0.05)
+        real_write(path, data)
+
+    monkeypatch.setattr(ws, "_write_json", slow_write)
+    threads = [threading.Thread(target=dubs.add_take, args=(dub, "d1", {"file": str(take), "seed": 1, "duration": 1.0})),
+               threading.Thread(target=dubs.update_dub_clip, args=(dub, "d2"), kwargs={"translation": "How are you?"})]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    clips = dubs.load_dub(dub)["tracks"][1]["clips"]
+    assert clips[0]["selected"] == "takes/d1-1.wav" and clips[1]["translation"] == "How are you?"

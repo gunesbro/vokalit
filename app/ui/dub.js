@@ -44,8 +44,8 @@ export async function renderDub(root) {
     list.replaceChildren(...items.map((d) => el("a", { class: "list-item", href: `#/dub/${d.id}`,
       "aria-current": d.id === current ? "true" : "false" },
     el("div", { class: "name" }, d.name),
-    el("div", { class: "sub" }, `${d.kind === "video" ? "Video" : "Audio"}${d.duration ? ` · ${formatTime(d.duration)}` : ""}`
-      + ` · ${plural(d.clips, "sentence")}`))));
+    el("div", { class: "sub" }, `${d.kind === "video" ? "Video" : "Audio"}${d.duration ? ` \u00b7 ${formatTime(d.duration)}` : ""}`
+      + ` \u00b7 ${plural(d.clips, "sentence")}`))));
     if (!items.length) list.append(el("p", { class: "muted small pad" }, "No dubs yet."));
   }
 
@@ -84,7 +84,7 @@ export async function renderDub(root) {
       return setMessage(message, "Vokalit cannot open this file. Use a video (MP4, WebM) or an audio file (WAV, MP3, "
         + "M4A, OGG, FLAC).", "error");
     }
-    setMessage(message, "Reading the sound…");
+    setMessage(message, "Reading the sound\u2026");
     let audio;
     try {
       audio = await decode(file);
@@ -97,13 +97,13 @@ export async function renderDub(root) {
     const long = seconds > LONG_MINUTES * 60;
     setMessage(message, "");
     card.append(...[
-      el("p", {}, `${megabytes(file.size)} · ${formatTime(seconds)}. The file is copied into Vokalit's folder.`),
+      el("p", {}, `${megabytes(file.size)} \u00b7 ${formatTime(seconds)}. The file is copied into Vokalit's folder.`),
       long && el("p", { class: "warn" }, `This file is ${Math.round(seconds / 60)} minutes long. Dubbing is made for clips `
         + `up to about ${LONG_MINUTES} minutes: a long file uses a lot of memory, and Whisper takes a long time.`),
       el("div", { class: "row" },
         el("button", { class: "btn btn-primary", onclick: async (e) => {
           e.target.disabled = true;
-          setMessage(message, "Importing…");
+          setMessage(message, "Importing\u2026");
           try {
             const name = file.name.replace(/\.[^.]+$/, "");
             const dub = await api("POST", `/api/dubs?name=${encodeURIComponent(name)}&ext=${ext}`, file);
@@ -183,13 +183,24 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     rows.querySelector(`.dub-row[data-clip="${clipId}"]`)?.scrollIntoView({ block: "nearest" });
   }
 
-  // Redraws keep the focus in the box being edited (Tab from one translation to the next saves and redraws).
+  // Redraws (a job finishing, a saved change) keep text typed but not saved yet, and the focus and caret in it.
   function draw() {
-    const focused = document.activeElement?.closest?.(".dub-rows") && document.activeElement.getAttribute("aria-label");
+    const active = document.activeElement?.closest?.(".dub-rows") ? document.activeElement : null;
+    const caret = active && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+    const unsaved = [...rows.querySelectorAll("textarea")].filter((t) => t.value !== t.dataset.saved)
+      .map((t) => [t.getAttribute("aria-label"), t.value]);
     drawHeader();
     drawLanes();
     drawRows();
-    if (focused) rows.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
+    for (const [label, value] of unsaved) {
+      const box = rows.querySelector(`[aria-label="${CSS.escape(label)}"]`);
+      if (box) box.value = value;
+    }
+    const again = active && rows.querySelector(`[aria-label="${CSS.escape(active.getAttribute("aria-label"))}"]`);
+    if (again) {
+      again.focus();
+      if (caret) again.setSelectionRange(...caret);
+    }
   }
 
   // --- Header ----------------------------------------------------------------------------------
@@ -216,10 +227,10 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const missing = dub.tracks[1].clips.filter((c) => !c.selected && c.translation.trim()).map((c) => c.id);
     const busy = Boolean(job);
     const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe again or delete" },
-      "⋯");
+      "\u22ef");
     more.onclick = () => popover(more, el("div", { class: "menu" },
-      el("button", { class: "menu-item", disabled: busy || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again…"),
-      el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub…")), { align: "right" });
+      el("button", { class: "menu-item", disabled: busy || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again\u2026"),
+      el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub\u2026")), { align: "right" });
     const exportButton = el("button", { class: "btn", disabled: !dub.source.duration, title: "Mix the dub into one audio file",
       onclick: () => popover(exportButton, exportPanel(), { align: "right" }) }, "Export");
     header.replaceChildren(
@@ -228,7 +239,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       el("label", { class: "row muted" }, "To", target),
       modelSelect, settingsButton,
       el("div", { class: "spacer" }),
-      job ? el("span", { class: "row small muted" }, el("span", { class: "job-progress" }, job.progress || "Working…"),
+      job ? el("span", { class: "row small muted" }, el("span", { class: "job-progress" }, job.progress || "Working\u2026"),
         el("button", { class: "btn btn-small", onclick: () => api("POST", `/api/jobs/${job.id}/cancel`).catch(fail) }, "Cancel"))
         : el("button", { class: "btn btn-primary", disabled: !missing.length || !chosen,
           title: !chosen ? "Choose a model first" : missing.length ? "Generate every translated sentence without a take"
@@ -249,7 +260,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   function exportPanel() {
     return el("div", { class: "menu" }, formats.map((f) => el("button", { class: "menu-item", onclick: async () => {
       close();
-      setMessage(message, "Exporting…");
+      setMessage(message, "Exporting\u2026");
       try {
         const { path: file } = await api("POST", path("/export"), { format: f.id });
         message.replaceChildren(`Exported ${file.split("/").pop()}. `, revealButton(file, { text: true }));
@@ -267,7 +278,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
 
   function confirmDelete(anchor) {
     popover(anchor, el("div", { class: "menu confirm-menu" },
-      el("strong", {}, `Delete “${dub.name}”?`),
+      el("strong", {}, `Delete \u201c${dub.name}\u201d?`),
       el("div", { class: "muted small" }, "Its copy of the file, the takes and the exports are removed permanently."),
       el("button", { class: "btn btn-danger", onclick: async () => {
         close();
@@ -353,31 +364,35 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     rows.replaceChildren(...clips.map((clip, i) => {
       const source = sourceOf(clip);
       const fit = dub.fit[clip.id] || { state: "missing" };
+      // Saved when the box loses the focus (not on "change": a redraw that keeps typed text would hide the change).
       const original = el("textarea", { class: "textarea", rows: 2, value: source.text, "aria-label": `Sentence ${i + 1}`,
+        "data-saved": source.text,
         title: "What is said. It is also the transcript of the voice sample, so correct it if Whisper misheard.",
-        onchange: () => change(api("PATCH", path(`/source/${source.id}`), { text: original.value })) });
-      const translation = el("textarea", { class: "textarea", rows: 2, value: clip.translation,
+        onblur: () => original.value !== original.dataset.saved
+          && change(api("PATCH", path(`/source/${source.id}`), { text: original.value })) });
+      const translation = el("textarea", { class: "textarea", rows: 2, value: clip.translation, "data-saved": clip.translation,
         placeholder: "Translation", "aria-label": `Translation of sentence ${i + 1}`,
-        onchange: () => change(api("PATCH", path(`/clips/${clip.id}`), { translation: translation.value })) });
+        onblur: () => translation.value !== translation.dataset.saved
+          && change(api("PATCH", path(`/clips/${clip.id}`), { translation: translation.value })) });
       translation.addEventListener("paste", (e) => {
         const text = e.clipboardData.getData("text");
         if (!/\n/.test(text.trim())) return;
         e.preventDefault();
         pasteAll(pasteTranslations(ids, i, text));
       });
-      const voice = el("select", { class: "select select-small", "aria-label": "Voice from",
+      const voice = el("select", { class: "select select-small", "aria-label": `Voice from, sentence ${i + 1}`,
         title: "Whose voice and mood the sentence copies. A very short sentence clones weakly: pick a longer one of the same speaker.",
         onchange: () => change(api("PATCH", path(`/clips/${clip.id}`), { voice_from: voice.value })) },
       sources.map((s, n) => el("option", { value: s.id }, s.id === clip.source_clip ? "This sentence"
-        : `${n + 1} · ${s.text.slice(0, 28)}${s.text.length > 28 ? "…" : ""}`)));
+        : `${n + 1} \u00b7 ${s.text.slice(0, 28)}${s.text.length > 28 ? "\u2026" : ""}`)));
       voice.value = clip.voice_from;
       const generating = job?.kind === "generate" && job.clips.has(clip.id);
       const take = takeOf(clip);
       const status = fit.state === "long" ? el("span", { class: "warn small" }, `${fit.over.toFixed(1)} s too long`)
         : fit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet");
-      const takes = clip.takes.length > 1 && el("select", { class: "select select-small", "aria-label": "Take",
+      const takes = clip.takes.length > 1 && el("select", { class: "select select-small", "aria-label": `Take, sentence ${i + 1}`,
         onchange: (e) => change(api("POST", path(`/clips/${clip.id}/select`), { file: e.target.value })) },
-      clip.takes.map((t, n) => el("option", { value: t.file, selected: t.file === clip.selected }, `Take ${n + 1} · seed ${t.seed}`)));
+      clip.takes.map((t, n) => el("option", { value: t.file, selected: t.file === clip.selected }, `Take ${n + 1} \u00b7 seed ${t.seed}`)));
       const remove = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "Delete sentence", title: "Delete this sentence" },
         icon(ICONS.trash));
       remove.onclick = () => popover(remove, el("div", { class: "menu confirm-menu" },
@@ -388,12 +403,12 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       const row = el("div", { class: `dub-row ${clip.id === selected ? "selected" : ""}`, "data-clip": clip.id },
         el("button", { class: "dub-time num faint small link-btn", title: "Play from here",
           onclick: () => { choose(clip.id); play.seek(clip.start, true); } },
-        `${i + 1} · ${formatTime(source.start)}–${formatTime(source.end)}`),
+        `${i + 1} \u00b7 ${formatTime(source.start)}\u2013${formatTime(source.end)}`),
         original, translation,
         el("div", { class: "dub-actions" },
           el("div", { class: "row" }, voice, status),
           el("div", { class: "row" },
-            generating ? el("span", { class: "small muted" }, "Generating…")
+            generating ? el("span", { class: "small muted" }, "Generating\u2026")
               : el("button", { class: "btn btn-small", disabled: Boolean(job) || !clip.translation.trim() || !model(),
                 title: !clip.translation.trim() ? "Write the translation first" : !model() ? "Choose a model first" : "",
                 onclick: () => generate([clip.id]) }, clip.takes.length ? "Again" : "Generate"),
@@ -424,7 +439,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const volume = el("input", { type: "range", min: 0, max: 1, step: 0.05, value: dub.original_volume,
       "aria-label": "Original volume", title: "The original under the dub (music, effects). 0 = the dub alone." });
     const volumeLabel = el("span", { class: "num small muted" }, `${Math.round(dub.original_volume * 100)} %`);
-    stage.replaceChildren(video || el("div", { class: "dub-audio-only faint small" }, "Audio file — no picture"),
+    stage.replaceChildren(video || el("div", { class: "dub-audio-only faint small" }, "Audio file \u2014 no picture"),
       el("div", { class: "row dub-transport" }, button, clock, el("div", { class: "spacer" }),
         el("label", { class: "row small muted" }, "Original", volume, volumeLabel)));
     if (video) video.addEventListener("error", () => stage.querySelector(".dub-video")?.replaceWith(
@@ -513,12 +528,20 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         if (playing || andPlay) start(t).catch(fail);
         else { clock.textContent = formatTime(t); lanes.setTime(t); if (video) video.currentTime = t; }
       },
-      changed() { if (playing) start(now()).catch(fail); },
+      changed() {
+        // Take names repeat after transcribing again (takes/d1-1.wav): decode takes afresh, keep the original.
+        for (const url of [...buffers.keys()]) if (url !== fileUrl("audio.wav")) buffers.delete(url);
+        if (playing) start(now()).catch(fail);
+      },
       stop() { pause(); document.removeEventListener("keydown", onKey); context?.close(); },
     };
   }
 
   draw();
   if (dub.notice) setMessage(message, dub.notice, "warn");
+  // A job started before the screen was left keeps running on the server: follow it again.
+  api("GET", path("/jobs")).then(([running]) => {
+    if (running && !job && main.isConnected) follow(running, running.kind, running.clips);
+  }).catch(() => {});
   return { stop: () => play.stop(), transcribe };
 }
