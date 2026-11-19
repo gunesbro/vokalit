@@ -60,11 +60,15 @@ def new_id(parent: Path) -> str:
     return candidate
 
 
-def _write_json(path: Path, data: dict) -> None:
+def _write_json(path: Path, data: dict, compact: bool = False) -> None:
+    """`compact`: no indentation or spaces, for large files written often (a dub with tens of thousands of sentences)."""
     tmp = path.with_name(path.name + ".tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            if compact:  # dumps, not dump: one string by the C encoder is many times faster on large files
+                f.write(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+            else:
+                json.dump(data, f, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)

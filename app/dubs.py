@@ -122,7 +122,7 @@ def _editing(dub_id: str):
 
 
 def save_dub(dub_id: str, data: dict) -> None:
-    ws._write_json(_file(dub_id), data)
+    ws._write_json(_file(dub_id), data, compact=True)
 
 
 def list_dubs() -> list[tuple[str, dict]]:

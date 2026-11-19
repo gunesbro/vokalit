@@ -245,9 +245,9 @@ def test_concurrent_changes_are_not_lost(tmp_workspace, monkeypatch):
     make_wav(take, 1)
     real_write = ws._write_json
 
-    def slow_write(path, data):
+    def slow_write(path, data, **options):
         time.sleep(0.05)
-        real_write(path, data)
+        real_write(path, data, **options)
 
     monkeypatch.setattr(ws, "_write_json", slow_write)
     threads = [threading.Thread(target=dubs.add_take, args=(dub, "d1", {"file": str(take), "seed": 1, "duration": 1.0})),
@@ -430,3 +430,12 @@ def test_export_plays_kept_sentences_at_full_volume(tmp_workspace, tmp_path):
     rate, samples = _read_wav(dubs.export_dub(dub))
     loud, quiet = abs(samples[int(5 * rate): int(8 * rate)]).max(), abs(samples[int(10 * rate): int(11 * rate)]).max()
     assert loud > 0.1 * 32767 * 0.9 and quiet < 0.1 * 32767 * 0.2
+
+
+def test_dub_json_is_written_compact(tmp_workspace):
+    did = dubs.create_dub("Compact", b"video-bytes", "mp4")
+    data = dubs.load_dub(did)
+    dubs.save_dub(did, data)
+    text = (dubs.dub_dir(did) / "dub.json").read_text(encoding="utf-8")
+    assert "\n  " not in text
+    assert dubs.load_dub(did) == data
