@@ -335,3 +335,21 @@ def test_fit_route_lengthens_and_counts_the_ones_needing_longer(api, tmp_path, m
     done = _wait(api, job["id"])
     assert done["result"]["notice"] == "Fitted 1 sentence. 1 needs a longer translation."
     assert done["result"]["fit"]["en"]["d1"]["speed"] == 0.85
+
+
+def test_a_take_without_sound_is_not_kept(api, tmp_path, monkeypatch):
+    """A take with no samples cannot be played (the window cannot decode it): it is refused, not added."""
+    dub = _transcribed(api, tmp_path, monkeypatch)
+
+    def silent(name, text, ref, out, seed, settings, language, ref_text=None):
+        make_wav(out, 0)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", silent)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Sentence 1: the model returned no sound" in done["error"]
+    assert dubs.load_dub(dub["id"])["tracks"][1]["clips"][0]["takes"] == []
+    assert not (dubs.dub_dir(dub["id"]) / "takes" / "en" / "d1-1.wav").exists()

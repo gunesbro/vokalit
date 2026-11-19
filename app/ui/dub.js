@@ -1063,8 +1063,18 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     let time = 0;
     let frame = 0;
     let current = null; // the sentence under the playhead
+    // A failed load names its file and is not kept: the next Play tries again.
     const load = (url) => {
-      if (!buffers.has(url)) buffers.set(url, fetch(url).then((r) => r.arrayBuffer()).then((b) => context.decodeAudioData(b)));
+      if (!buffers.has(url)) {
+        const loading = fetch(url).then((r) => {
+          if (!r.ok) throw new Error(`the server answered ${r.status}`);
+          return r.arrayBuffer();
+        }).then((b) => context.decodeAudioData(b)).catch((error) => {
+          if (buffers.get(url) === loading) buffers.delete(url);
+          throw new Error(`Could not load ${url.slice(fileUrl("").length)} (${error.message}). Press Play to try again.`);
+        });
+        buffers.set(url, loading);
+      }
       return buffers.get(url);
     };
     const now = () => (playing ? origin + context.currentTime - contextStart : time);
@@ -1089,8 +1099,15 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     async function start(at) {
       const items = clips().filter((c) => takeOf(c) && !isKept(c)).map((c) => ({ id: c.id, start: c.start, duration: takeOf(c).duration,
         url: fileUrl(c.selected) }));
-      const [base, ...takes] = await Promise.all([load(original), ...items.map((c) => load(c.url))]);
+      // A take that cannot be played is skipped (and named), so one bad file does not stop the whole preview.
+      const [base, ...loaded] = await Promise.all([load(original), ...items.map((c) => load(c.url).catch((error) => error))]);
       if (stopped) return;
+      const decoded = new Map(items.map((c, i) => [c.id, loaded[i]]).filter(([, b]) => !(b instanceof Error)));
+      const failed = items.filter((c) => !decoded.has(c.id));
+      if (failed.length) {
+        setMessage(message, `${failed.length === 1 ? `Sentence ${numberOf(failed[0].id)} is` : `${plural(failed.length, "sentence")} are`} `
+          + `skipped: ${loaded[items.indexOf(failed[0])].message}`, "warn");
+      }
       await context.resume();
       stopSources();
       gain = context.createGain();
@@ -1119,9 +1136,9 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       node.connect(gain);
       node.start(contextStart, at);
       sources = [node];
-      for (const item of clipsToPlay(items, at)) {
+      for (const item of clipsToPlay(items.filter((c) => decoded.has(c.id)), at)) {
         const source = context.createBufferSource();
-        source.buffer = takes[items.findIndex((c) => c.id === item.id)];
+        source.buffer = decoded.get(item.id);
         source.connect(output);
         source.start(contextStart + item.delay, item.offset);
         sources.push(source);
