@@ -13,9 +13,17 @@ from test_server import _wait, api  # noqa: E402,F401  (the api fixture)
 SEGMENTS = [{"start": 0.5, "end": 3.0, "text": "Merhaba."}, {"start": 4.0, "end": 9.0, "text": "Nas\u0131ls\u0131n?"}]
 
 
-def _transcribed(api, tmp_path, monkeypatch, segments=SEGMENTS):
-    monkeypatch.setattr(models, "is_installed", lambda name: True)
-    monkeypatch.setattr(models, "transcribe_segments", lambda audio, language: {"language": "tr", "segments": segments})
+HEARD = []  # what the fake Whisper listened to
+
+
+def _transcribed(api, tmp_path, monkeypatch, segments=SEGMENTS, separate=None):
+    """A dub with sound and sentences. Voice separation is not installed unless `separate` (a fake) is given."""
+    HEARD.clear()
+    monkeypatch.setattr(models, "is_installed", lambda name: separate is not None or name != "demucs")
+    if separate is not None:
+        monkeypatch.setattr(models, "separate", separate)
+    monkeypatch.setattr(models, "transcribe_segments",
+                        lambda audio, language: HEARD.append(audio) or {"language": "tr", "segments": segments})
     status, dub, _ = api("POST", "/api/dubs?name=Talk&ext=mp4", raw=b"video-bytes", content_type="video/mp4")
     assert status == 200, dub
     status, dub, _ = api("POST", f"/api/dubs/{dub['id']}/audio", raw=make_wav(tmp_path / "a.wav", 12).read_bytes(),
@@ -200,7 +208,7 @@ def test_cancelling_a_transcription_stops_whisper(api, tmp_path, monkeypatch):
         release.wait(5)
         raise RuntimeError("The model process stopped unexpectedly.")
 
-    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "is_installed", lambda name: name != "demucs")
     monkeypatch.setattr(models, "transcribe_segments", slow_segments)
     monkeypatch.setattr(models, "cancel", lambda name, owner: cancelled.append(name) or release.set() or True)
     _, dub, _ = api("POST", "/api/dubs?name=T&ext=wav", raw=b"x", content_type="audio/wav")
@@ -353,3 +361,85 @@ def test_a_take_without_sound_is_not_kept(api, tmp_path, monkeypatch):
     assert done["state"] == "failed" and "Sentence 1: the model returned no sound" in done["error"]
     assert dubs.load_dub(dub["id"])["tracks"][1]["clips"][0]["takes"] == []
     assert not (dubs.dub_dir(dub["id"]) / "takes" / "en" / "d1-1.wav").exists()
+
+
+def _separator(calls):
+    """A fake Demucs: writes stems the length of the sound."""
+    def separate(audio, voices, background):
+        calls.append((audio, voices, background))
+        make_wav(voices, 12)
+        make_wav(background, 12)
+    return separate
+
+
+def test_transcribe_separates_first_when_it_can(api, tmp_path, monkeypatch):
+    calls = []
+    dub = _transcribed(api, tmp_path, monkeypatch, separate=_separator(calls))
+    assert dub["stems"] is True and dubs.has_stems(dub["id"])
+    assert calls[0][0].endswith("audio.wav") and HEARD == [str(dubs.voices_path(dub["id"]))]
+
+
+def test_transcribe_without_the_tool_is_unchanged(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    assert dub["stems"] is False and HEARD == [str(dubs.audio_path(dub["id"]))]
+
+
+def test_transcribe_again_does_not_separate_again(api, tmp_path, monkeypatch):
+    calls = []
+    dub = _transcribed(api, tmp_path, monkeypatch, separate=_separator(calls))
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/transcribe", {})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert len(calls) == 1 and HEARD[-1] == str(dubs.voices_path(dub["id"]))
+
+
+def test_a_failed_separation_uses_the_full_mix(api, tmp_path, monkeypatch):
+    def broken(audio, voices, background):
+        make_wav(voices, 1)  # half written
+        raise RuntimeError("out of GPU memory")
+    dub = _transcribed(api, tmp_path, monkeypatch, separate=broken)
+    assert dub["notice"] == "The voices could not be separated (out of GPU memory); the full mix was used."
+    assert HEARD == [str(dubs.audio_path(dub["id"]))] and not dubs.has_stems(dub["id"])
+    assert not any(path.exists() for path in dubs.stems_temp(dub["id"]))
+
+
+def test_cancelling_separation_leaves_no_stems(api, tmp_path, monkeypatch):
+    release, cancelled = threading.Event(), []
+
+    def slow(audio, voices, background):
+        make_wav(voices, 1)
+        release.wait(5)
+        raise RuntimeError("The model process stopped unexpectedly.")
+
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "separate", slow)
+    monkeypatch.setattr(models, "cancel", lambda name, owner: cancelled.append(name) or release.set() or True)
+    _, dub, _ = api("POST", "/api/dubs?name=T&ext=wav", raw=b"x", content_type="audio/wav")
+    api("POST", f"/api/dubs/{dub['id']}/audio", raw=make_wav(tmp_path / "a.wav", 2).read_bytes(), content_type="audio/wav")
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/transcribe", {})
+    for _ in range(100):
+        if server_job(job["id"]).get("model"):
+            break
+        time.sleep(0.02)
+    api("POST", f"/api/jobs/{job['id']}/cancel", {})
+    assert _wait(api, job["id"])["state"] == "cancelled" and cancelled == ["demucs"]
+    assert not dubs.has_stems(dub["id"]) and not any(path.exists() for path in dubs.stems_temp(dub["id"]))
+
+
+def test_separate_route_and_full_mix_route(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/separate", {})
+    assert status == 400 and "Voice separation is not installed" in body["error"]
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "separate", _separator([]))
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/separate", {})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done" and done["result"]["stems"] is True
+    assert done["result"]["tracks"][0]["clips"] == dub["tracks"][0]["clips"]  # the sentences stay
+    status, body, _ = api("DELETE", f"/api/dubs/{dub['id']}/separate")
+    assert status == 200 and body["stems"] is False and not dubs.voices_path(dub["id"]).exists()
+
+
+def test_voices_volume_option(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    status, body, _ = api("PATCH", f"/api/dubs/{dub['id']}", {"voices_volume": 0.3})
+    assert status == 200 and body["voices_volume"] == 0.3

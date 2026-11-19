@@ -956,7 +956,7 @@ def _dub_view(did, notice=None):
     data = _dub_or_404(did)
     folder = dubs.dub_dir(did) / "exports"
     exports = sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if folder.exists() else []
-    return {**data, "languages": dubs.languages(data), "fit": {code: dubs.fit(data, code) for code in dubs.languages(data)},
+    return {**data, "stems": dubs.has_stems(did), "languages": dubs.languages(data), "fit": {code: dubs.fit(data, code) for code in dubs.languages(data)},
             **({"notice": notice} if notice else {}),
             "exports": [{"name": p.name, "path": p.relative_to(ws.workspace_root()).as_posix()} for p in exports]}
 
@@ -1038,7 +1038,8 @@ def update_dub(req, did):
         settings = {name: models.clean_settings(name, values) for name, values in settings.items()
                     if name in models.MODELS}
     volume = None if body.get("original_volume") is None else float(body["original_volume"])
-    dubs.set_options(did, original_volume=volume)
+    voices = None if body.get("voices_volume") is None else float(body["voices_volume"])
+    dubs.set_options(did, original_volume=volume, voices_volume=voices)
     dubs.set_language_options(did, code, model=model, settings=settings)
     return _dub_view(did)
 
@@ -1078,10 +1079,20 @@ def transcribe_dub(req, did):
     _dub_free(did)
 
     def work(job):
-        job["progress"] = "Listening\u2026"
+        # With Voice separation installed, the voices are separated first: Whisper hears them without the music.
+        notice = None
+        if models.is_installed("demucs") and not dubs.has_stems(did):
+            try:
+                _separate(job, did)
+            except Cancelled:
+                raise
+            except Exception as error:  # e.g. out of GPU memory: the sentences can still be found in the full mix
+                notice = f"The voices could not be separated ({error}); the full mix was used."
+        audio = dubs.voices_path(did) if dubs.has_stems(did) else dubs.audio_path(did)
+        job["progress"] = "Finding the sentences\u2026"
         job["model"] = "whisper"  # what cancelling stops
         try:
-            heard = models.transcribe_segments(str(dubs.audio_path(did)), None)
+            heard = models.transcribe_segments(str(audio), None)
         except Exception:
             if job.get("cancelled"):
                 raise Cancelled() from None
@@ -1091,8 +1102,55 @@ def transcribe_dub(req, did):
         if job.get("cancelled"):
             raise Cancelled()
         dubs.set_transcript(did, heard["language"], heard["segments"])
-        return _dub_view(did, None if heard["segments"] else "No speech was found in this file.")
+        notices = [notice, None if heard["segments"] else "No speech was found in this file."]
+        return _dub_view(did, " ".join(n for n in notices if n) or None)
     return _start_dub_job(did, work, "transcribe")
+
+
+def _separate(job, did):
+    """Separates the dub's voices from its music and effects (Demucs). Written to temporary files and kept only when
+    both are done, so a failure or a cancel leaves the stems as they were."""
+    voices, background = dubs.stems_temp(did)
+    job["progress"] = "Separating voices\u2026"
+    job["model"] = "demucs"  # what cancelling stops
+    try:
+        models.separate(str(dubs.audio_path(did)), str(voices), str(background))
+        if job.get("cancelled"):
+            raise Cancelled()
+    except Exception:
+        for path in (voices, background):
+            path.unlink(missing_ok=True)
+        if job.get("cancelled"):
+            raise Cancelled() from None
+        raise
+    finally:
+        job["model"] = None
+    dubs.keep_stems(did)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/separate")
+def separate_dub(req, did):
+    """Separates the voices of a dub that already has its sentences (they stay)."""
+    _dub_or_404(did)
+    if not models.is_installed("demucs"):
+        raise ws.WorkspaceError("Voice separation is not installed. Install it in Models.")
+    if not dubs.audio_path(did).exists():
+        raise ws.WorkspaceError("The dub has no sound yet. Import the file again.")
+
+    def work(job):
+        _separate(job, did)
+        return _dub_view(did)
+    return _start_dub_job(did, work, "separate")
+
+
+@route("DELETE", "/api/dubs/(?P<did>[0-9-]+)/separate")
+def use_full_mix(req, did):
+    """Deletes the separated voices and background: the original sound is used again."""
+    _dub_or_404(did)
+    with _dub_job_lock:
+        _dub_free(did)
+        dubs.remove_stems(did)
+    return _dub_view(did)
 
 
 @route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)")
