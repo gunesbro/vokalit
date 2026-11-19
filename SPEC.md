@@ -38,7 +38,8 @@ file. Everything is done by clicking in a desktop window.
     `suggestions` as buttons that fill it). `models.clean_settings` checks them; text loses parentheses and extra
     whitespace. A line override equal to the session's value is not stored.
   - **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
-    before saving). Session-only characters can be saved to the library.
+    before saving), or designed from a description by OmniVoice (its attributes) or VoxCPM2 (free text).
+    Session-only characters can be saved to the library.
   - **Models:** install / remove with size, GPU memory (`vram_gb`), location and license shown first; progress and a
     collapsible log.
 - Hardware: **NVIDIA GPU (CUDA)**. Operating systems: Windows 10/11 and Linux.
@@ -258,7 +259,11 @@ All interface text is English. The visual design is the design canvas; behaviour
   and Delete; the session menu has "Delete empty lines".
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
-  level, 10 s hint) or upload, then trim and "Add sample". Note: "Only use your own voice or voices you have
+  level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not
+  installed are listed but disabled), language, a default ~12 s text, the description (OmniVoice: gender, age, pitch,
+  English accent selects and Whisper; VoxCPM2: a text box), "Generate 3 voices" (Cancel while running) and "Keep this
+  one", which opens the same review with the text, language and description (as the label) filled in; the source is
+  "designed". Note: "Only use your own voice or voices you have
   permission to use."
 - **Models:** as in §6.1.
 - Messages appear on the page (a message line per screen), not as pop-up toasts.

@@ -105,7 +105,7 @@ def _model_view(name):
             "settings": info["settings"], "supports_convert": info.get("supports_convert", False),
             "languages": [{"code": c, "name": models.LANGUAGE_NAMES[c]} for c in info.get("languages", [])],
             "accent_setting": info.get("accent_setting"),
-            "tags": list(info.get("sounds") or {})}
+            "tags": list(info.get("sounds") or {}), "design": info.get("design")}
 
 
 def _round(gb):
@@ -561,6 +561,8 @@ def add_sample(req, cid):
         upload.unlink(missing_ok=True)
     if language:
         ws.set_sample_language(cid, sample_id, language, _session_arg(req))
+    if req["query"].get("label", "").strip():
+        ws.set_sample_label(cid, sample_id, req["query"]["label"].strip(), _session_arg(req))
     return get_character(req, cid)
 
 

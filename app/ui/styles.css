@@ -182,6 +182,13 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .review-box { display: flex; flex-direction: column; gap: 10px; }
 .field-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 4px; }
 .transcript-input { width: 100%; resize: vertical; }
+.designer { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.designer[hidden] { display: none; }
+.designer h4 { margin: 0; }
+.designer .textarea { width: 100%; resize: vertical; }
+.design-text { flex: 1 1 320px; }
+.design-results { display: flex; flex-direction: column; gap: 8px; }
+.design-candidate .player { flex: 1 1 auto; min-width: 0; }
 .sample-transcript { grid-column: 3 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
 .sample-transcript .transcript-input { flex: 1 1 100%; }
 .transcript-text { overflow-wrap: anywhere; }

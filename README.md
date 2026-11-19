@@ -13,7 +13,9 @@ Your voice, your text and the generated audio never leave your machine.
   by different models are joined at the highest sample rate among them. A single line can be exported too: the export
   button at the top of an open line, or *Export this line* in a line's menu.
 - **Characters** — a library of reusable voices. Each character can have several samples (e.g. *calm*, *excited*, or
-  one per language), recorded in the app or uploaded, and trimmed before saving.
+  one per language), recorded in the app or uploaded, and trimmed before saving. With OmniVoice or VoxCPM2
+  installed, a voice can also be **designed** from a description (e.g. *female, elderly*): the model speaks a text in
+  three voices and you keep the one you like as a sample.
 - **Models** — install and remove open models with one click. Size, GPU memory, location and license are shown
   before anything is downloaded, and *Remove* frees all of it. The screen also shows which models are loaded on the
   GPU right now, with an *Unload* button.

@@ -127,6 +127,16 @@ def test_sample_upload_wav(api, tmp_path):
     assert [s["id"] for s in data["samples"]] == ["s1"]
 
 
+def test_designed_sample_keeps_its_label(api, tmp_path):
+    _, character, _ = api("POST", "/api/characters", {"name": "Burak"})
+    cid = character["id"]
+    wav = make_wav(tmp_path / "d.wav", 11).read_bytes()
+    status, data, _ = api("POST", f"/api/characters/{cid}/samples?source=design&transcript=Hi&label=female%2C%20elderly",
+                          raw=wav, content_type="audio/wav")
+    assert status == 200
+    assert data["samples"][0]["label"] == "female, elderly" and data["samples"][0]["source"] == "design"
+
+
 def test_generate_job_with_fake_model(api, monkeypatch, tmp_path):
     calls = []
 
@@ -176,6 +186,15 @@ def test_models_list_their_languages(api):
     codes = [l["code"] for l in chatterbox["languages"]]
     assert len(codes) == 23 and "tr" in codes and "en" in codes
     assert {"code": "tr", "name": "Turkish"} in chatterbox["languages"]
+
+
+def test_models_say_how_they_design_a_voice(api):
+    _, body, _ = api("GET", "/api/models")
+    views = {m["name"]: m for m in body}
+    assert views["omnivoice"]["design"]["kind"] == "attributes"
+    assert "elderly" in views["omnivoice"]["design"]["options"]["age"]
+    assert views["voxcpm"]["design"] == {"kind": "text", "max_length": 200}
+    assert views["chatterbox"]["design"] is None
 
 
 def test_language_endpoints_validate_codes(api, tmp_path):

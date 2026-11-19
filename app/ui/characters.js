@@ -1,5 +1,5 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
-import { api, editableTitle, el, icon, ICONS, rememberMicrophone, revealButton, setMessage } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, rememberMicrophone, revealButton, setMessage, waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
 import { searchSelect } from "./settings.js";
 import { player, rangeEditor, stopAudio } from "./waveform.js";
@@ -29,6 +29,15 @@ function languages() {
   }).catch(() => []);
   return allLanguages;
 }
+
+// What designed voices read: about 12 seconds of speech, so a candidate is long enough to keep as a sample.
+const DESIGN_TEXT = {
+  en: "The morning was quiet, and the city was just waking up. I poured a cup of coffee, opened the window, "
+    + "and listened to the rain for a while before the long day began.",
+  tr: "Sabah sessizdi ve \u015fehir yeni uyan\u0131yordu. Bir fincan kahve koydum, pencereyi a\u00e7t\u0131m ve uzun "
+    + "g\u00fcn ba\u015flamadan \u00f6nce bir s\u00fcre ya\u011fmuru dinledim. Hava serindi ve sokaklar bombo\u015ftu.",
+};
+const designText = (language) => DESIGN_TEXT[language] || DESIGN_TEXT.en;
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const query = (sessionId) => (sessionId ? `?session=${encodeURIComponent(sessionId)}` : "");
@@ -229,7 +238,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
         onclick: () => isDefault || api("PATCH", path(`/samples/${sample.id}`), { default: true }).then(refresh, fail) },
       icon(["M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"], 16)),
       play, label, language, wave,
-      el("div", { class: "muted num" }, `${sample.duration.toFixed(1)} s · ${sample.source === "recording" ? "recorded" : "uploaded"}`),
+      el("div", { class: "muted num" }, `${sample.duration.toFixed(1)} s · ${{ recording: "recorded", design: "designed" }[sample.source] || "uploaded"}`),
       el("div", { class: "row end" }, revealButton(url.slice("/files/".length)),
         el("button", { class: "btn btn-ghost icon-btn", title: "Delete sample", "aria-label": "Delete sample",
         onclick: () => confirmDeleteSample(row, sample) }, icon(ICONS.trash))),
@@ -294,14 +303,16 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     const meter = el("div", { class: "meter" }, el("div"));
     const hint = el("div", { class: "muted small" }, `Samples need at least ${MIN_SECONDS} seconds of clear speech.`);
     const review = el("div", { class: "review" });
+    const designer = el("div", { class: "designer", hidden: true });
     const box = el("div", { class: "add-sample" },
       el("h3", {}, "Add a sample"),
       el("div", { class: "row wrap" },
         el("label", { class: "row muted mic-field" }, "Microphone", mic),
         recordButton, timer, meter,
         el("div", { class: "spacer" }),
-        el("button", { class: "btn", onclick: () => fileInput.click() }, "Upload file"), fileInput),
-      hint, review,
+        el("button", { class: "btn", onclick: () => fileInput.click() }, "Upload file"), fileInput,
+        el("button", { class: "btn", onclick: () => toggleDesigner() }, "Design voice")),
+      designer, hint, review,
       el("div", { class: "faint small" }, "Only use your own voice or voices you have permission to use."));
 
     let recorder = null;
@@ -373,7 +384,138 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       }
     }
 
-    function showReview(samples, sampleRate, source) {
+    // Design: a model speaks a text in voices made from a description; one of them is kept as a sample.
+    async function toggleDesigner() {
+      if (!designer.hidden) return closeDesigner();
+      designer.hidden = false;
+      designer.replaceChildren(el("div", { class: "muted small" }, "Loading models\u2026"));
+      let list;
+      try {
+        list = (await api("GET", "/api/models")).filter((m) => m.design);
+      } catch (error) {
+        designer.hidden = true;
+        return fail(error);
+      }
+      drawDesigner(list);
+    }
+
+    let designJob = null; // the running job, cancelled when the panel closes
+    function closeDesigner() {
+      if (designJob) api("POST", `/api/jobs/${designJob}/cancel`).catch(() => {});
+      designJob = null;
+      designer.hidden = true;
+      designer.replaceChildren();
+    }
+
+    function drawDesigner(list) {
+      const usable = list.filter((m) => m.installed);
+      const head = el("div", { class: "row" }, el("h4", {}, "Design a voice"), el("div", { class: "spacer" }),
+        el("button", { class: "btn btn-ghost btn-small", onclick: closeDesigner }, "Close"));
+      if (!usable.length) {
+        designer.replaceChildren(head, el("p", { class: "muted small" },
+          `${list.map((m) => m.title).join(" and ")} can make a voice from a description. Install one on the `,
+          el("a", { href: "#/models" }, "Models screen"), "."));
+        return;
+      }
+      let model = usable[0];
+      let language = "en";
+      let typedText = false;
+      const modelSelect = el("select", { class: "select", "aria-label": "Model", onchange: () => {
+        model = usable.find((m) => m.name === modelSelect.value);
+        drawOptions();
+      } }, ...list.map((m) => el("option", { value: m.name, disabled: !m.installed },
+        m.installed ? m.title : `${m.title} (install it in Models)`)));
+      modelSelect.value = model.name;
+      const text = el("textarea", { class: "textarea", rows: 3, "aria-label": "Text the voices read",
+        oninput: () => { typedText = true; } });
+      const languageHolder = el("span");
+      const description = el("div", { class: "row wrap" });
+      const generate = el("button", { class: "btn btn-primary", onclick: () => run() }, "Generate 3 voices");
+      const status = el("span", { class: "small muted" });
+      const results = el("div", { class: "design-results" });
+      let describe = () => "";
+
+      function setLanguage(code) {
+        if (!typedText) text.value = designText(code);
+        language = code;
+        drawDescription(); // OmniVoice accents are for English only
+      }
+
+      function drawOptions() {
+        const codes = model.languages.map((l) => l.code);
+        languageHolder.replaceChildren(searchSelect({ label: "Language", small: true, value: language,
+          options: model.languages.map((l) => ({ value: l.code, label: l.name })), onChange: setLanguage }));
+        setLanguage(codes.includes(language) ? language : codes.includes("en") ? "en" : codes[0]);
+      }
+
+      function drawDescription() {
+        if (model.design.kind === "text") {
+          const box = el("input", { class: "input design-text", maxlength: model.design.max_length,
+            "aria-label": "Voice description", placeholder: "e.g. a warm, deep male voice, speaking slowly" });
+          describe = () => box.value;
+          return description.replaceChildren(box);
+        }
+        const options = model.design.options;
+        const pick = (group, name) => el("select", { class: "select select-small", "aria-label": name, "data-group": group },
+          el("option", { value: "" }, `Any ${name.toLowerCase()}`), ...options[group].map((o) => el("option", { value: o }, o)));
+        const selects = [pick("gender", "Gender"), pick("age", "Age"), pick("pitch", "Pitch")];
+        if (language === "en") selects.push(pick("accent", "Accent"));
+        const whisper = el("input", { type: "checkbox" });
+        describe = () => [...selects.map((s) => s.value), whisper.checked ? "whisper" : ""].filter(Boolean).join(", ");
+        description.replaceChildren(...selects, el("label", { class: "row small" }, whisper, "Whisper"));
+      }
+
+      async function run() {
+        generate.disabled = true;
+        results.replaceChildren();
+        status.className = "small muted";
+        status.replaceChildren("Generating\u2026");
+        try {
+          const job = await api("POST", `/api/characters/${charId}/design${query(sessionId)}`,
+            { model: model.name, language, text: text.value, description: describe() });
+          designJob = job.id;
+          status.append(" ", el("button", { class: "btn btn-ghost btn-small", onclick: () => {
+            api("POST", `/api/jobs/${job.id}/cancel`).catch(() => {});
+          } }, "Cancel"));
+          const result = await waitForJob(job.id);
+          if (designJob !== job.id) return; // the panel was closed
+          status.textContent = "Listen and keep the one you like.";
+          drawCandidates(result);
+        } catch (error) {
+          status.className = error.cancelled ? "small muted" : "small warn";
+          status.textContent = error.cancelled ? "Cancelled." : error.message;
+        } finally {
+          designJob = null;
+          generate.disabled = false;
+        }
+      }
+
+      function drawCandidates(result) {
+        const label = (result.description || "designed voice").slice(0, 40);
+        results.replaceChildren(...result.candidates.map((candidate, i) => el("div", { class: "row design-candidate" },
+          player(`/files/${candidate.file}`, { label: `Play voice ${i + 1}` }),
+          el("button", { class: "btn btn-small", onclick: async () => {
+            try {
+              const { samples, sampleRate } = await decode(`/files/${candidate.file}`);
+              showReview(samples, sampleRate, "design", { text: result.text, language: result.language, label });
+            } catch (error) {
+              fail(error);
+            }
+          } }, "Keep this one"))));
+      }
+
+      designer.replaceChildren(head,
+        el("div", { class: "row wrap" }, el("label", { class: "row muted" }, "Model", modelSelect),
+          el("label", { class: "row muted" }, "Language", languageHolder)),
+        el("label", { class: "field-label" }, "Text the voices read"), text,
+        el("label", { class: "field-label" }, "Voice"), description,
+        el("div", { class: "faint small" }, `Keep the text long enough for ${MIN_SECONDS} seconds of speech.`),
+        el("div", { class: "row" }, generate, status), results);
+      drawOptions();
+    }
+
+    // known: what a designed sample says, its language and label, so Whisper is not asked.
+    function showReview(samples, sampleRate, source, known = null) {
       const status = el("span", { class: "small" });
       const save = el("button", { class: "btn btn-primary", disabled: true }, "Add sample");
       // What the sample says: Whisper writes it (and hears the language) when installed, otherwise it is typed.
@@ -382,8 +524,12 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       const fieldNote = el("div", { class: "muted small" });
       const againButton = el("button", { class: "btn btn-ghost btn-small", hidden: true, title: "Let Whisper write it again",
         onclick: () => transcribe() }, "Transcribe again");
-      let typed = false; // the user's own text is not replaced by a later automatic transcription
-      let language = null; // what Whisper heard
+      let typed = Boolean(known); // the user's own text is not replaced by a later automatic transcription
+      let language = known?.language || null; // what Whisper heard
+      if (known) {
+        field.value = known.text;
+        fieldNote.textContent = "The text the voice read.";
+      }
       let lengthOk = false;
       let request = 0;
       let pending = null; // the automatic transcription after the trim settles
@@ -427,7 +573,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       });
       whisper.then((ok) => {
         againButton.hidden = !ok;
-        if (ok) return;
+        if (ok || known) return;
         fieldNote.className = "muted small";
         fieldNote.replaceChildren("Type exactly what is said in the sample. Some models use it to copy the voice. Install Whisper on the ",
           el("a", { href: "#/models" }, "Models screen"), " to have it written for you.");
@@ -437,7 +583,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
         save.disabled = true;
         try {
           const extra = `source=${source}&transcript=${encodeURIComponent(field.value.trim())}`
-            + (language ? `&language=${language}` : "");
+            + (language ? `&language=${language}` : "") + (known ? `&label=${encodeURIComponent(known.label)}` : "");
           const data = await api("POST", `${path("/samples")}${sessionId ? "&" : "?"}${extra}`,
             encodeWav(trim(samples, sampleRate, start, end), sampleRate));
           review.replaceChildren();
