@@ -289,7 +289,8 @@ All interface text is English. The visual design is the design canvas; behaviour
   with 50 ms fades, and skip its takes. Undo/Redo (Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y outside text boxes), per dub
   while the app runs, last 100 steps: text and translation edits, pasted translations, moves, Voice from, take
   choice, deleted sentences (their take files stay until the dub is deleted), generations (the previous takes are
-  selected again, in one request), fits (likewise), model, language, settings, volume, name. Transcribing again is confirmed and not undoable.
+  selected again, in one request), fits (likewise), model, language, settings, volume, name. Transcribing again is confirmed and not undoable; so is "Delete all takes of <language>" (in the menu: every take of
+  the language shown, files included; sentences and translations stay; that language's take steps leave the undo list).
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not

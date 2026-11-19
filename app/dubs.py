@@ -335,6 +335,19 @@ def select_take(dub_id: str, clip_id: str, file: str | None, language: str | Non
         clip["selected"] = file
 
 
+def clear_takes(dub_id: str, language: str) -> int:
+    """Deletes every take of one language, files included (also those kept for undoing deleted sentences); the
+    sentences and translations stay. Returns how many takes the sentences had. Not undoable."""
+    with _editing(dub_id) as data:
+        clips = _track(data, language)["clips"]
+        removed = sum(len(c["takes"]) for c in clips)
+        for clip in clips:
+            clip["takes"] = []
+            clip["selected"] = None
+    shutil.rmtree(dub_dir(dub_id) / "takes" / language, ignore_errors=True)  # after the save: nothing points at them
+    return removed
+
+
 def select_takes(dub_id: str, selections: dict, language: str | None = None) -> None:
     """Several clips' takes at once ({clip id: file or None}), in one save: undoing a generation or a fit of thousands
     of sentences. All or nothing."""

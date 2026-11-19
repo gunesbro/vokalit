@@ -551,3 +551,18 @@ def test_fit_limit_is_on_the_speed_as_shown(tmp_workspace, tmp_path):
     dub = _long_take(tmp_path, 4.3294)  # 1.2549x: shown as 1.25x, so it is fitted, not refused as "1.25x faster"
     assert dubs.fit(dubs.load_dub(dub))["d1"]["need"] == 1.25
     assert round(dubs.fit_take(dub, "d1"), 2) == 1.25
+
+
+def test_clear_takes_removes_one_language_s_takes(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 4.0)
+    dubs.update_dub_clip(dub, "d1", translation="Hello.")
+    dubs.add_language(dub, "de")
+    other = dubs.new_take_path(dub, "d1", "de")
+    make_wav(other, 1.0)
+    dubs.add_take(dub, "d1", {"file": str(other), "seed": 1, "duration": 1.0}, language="de")
+    assert dubs.clear_takes(dub, "en") == 1
+    data = dubs.load_dub(dub)
+    en = dubs._track(data, "en")["clips"][0]
+    assert en["takes"] == [] and en["selected"] is None and en["translation"] == "Hello."
+    assert not (dubs.dub_dir(dub) / "takes" / "en").exists()
+    assert dubs._track(data, "de")["clips"][0]["takes"] and other.exists()

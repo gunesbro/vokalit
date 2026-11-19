@@ -1121,6 +1121,16 @@ def select_dub_take(req, did, cid):
     return _dub_view(did)
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/takes/clear")
+def clear_dub_takes(req, did):
+    """Deletes every take of the language (?language), files included. Not while the dub is working."""
+    code = _dub_language(req, _dub_or_404(did))
+    with _dub_job_lock:
+        _dub_free(did)
+        removed = dubs.clear_takes(did, code)
+    return {**_dub_view(did), "removed": removed}
+
+
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/select")
 def select_dub_takes(req, did):
     """Several sentences' takes in one request: {selections: {clip id: file or null}}."""

@@ -324,10 +324,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
 
   // Does a change and records how to undo it. `run` and `revert` return the dub view (one request, or the last of several).
   // `language`: the language the step belongs to (none for shared ones), so removing a language forgets its steps.
-  async function act(label, run, revert, language = null) {
+  // `takes`: the step picks takes, so deleting the language's takes forgets it.
+  async function act(label, run, revert, language = null, takes = false) {
     try {
       apply(await run());
-      history().push({ label, undo: revert, redo: run, language });
+      history().push({ label, undo: revert, redo: run, language, takes });
       drawHeader();
     } catch (error) { fail(error); }
   }
@@ -465,7 +466,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const next = Object.fromEntries(changed.map((c) => [c.id, c.selected]));
     const label = `${kind === "fit" ? "fitting" : "generating"} ${plural(changed.length, "sentence")}`;
     history().push({ label: tracks().length > 1 ? `${label} (${languageName(language)})` : label, undo: () => select(previous),
-      redo: () => select(next), language });
+      redo: () => select(next), language, takes: true });
   }
 
   async function transcribe() {
@@ -553,6 +554,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe again or delete" }, "\u22ef");
     more.onclick = () => popover(more, el("div", { class: "menu" },
       el("button", { class: "menu-item", disabled: Boolean(job) || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again\u2026"),
+      el("button", { class: "menu-item danger", disabled: Boolean(job) || !takeCount(),
+        onclick: () => confirmClearTakes(more) }, `Delete all takes of ${languageName(track().language)}\u2026`),
       el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub\u2026")), { align: "right" });
     const exportButton = el("button", { class: "btn", disabled: !dub.source.duration, title: "Mix the dub into one audio file",
       onclick: () => popover(exportButton, exportPanel(), { align: "right" }) }, "Export");
@@ -708,7 +711,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const at = q();
     const select = (index) => api("POST", path(`/select${at}`), { selections: Object.fromEntries(changed.map((c) => [c[0], c[index]])) });
     act(inLanguage(changed.length === 1 ? `original take of sentence ${numberOf(changed[0][0])}`
-      : `original takes of ${plural(changed.length, "sentence")}`), () => select(2), () => select(1), track().language);
+      : `original takes of ${plural(changed.length, "sentence")}`), () => select(2), () => select(1), track().language, true);
   }
 
   // The rows in view, plus the one being typed in (scrolled away, it keeps its text and focus). Rows already drawn stay.
@@ -822,7 +825,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
           const before = clip.selected;
           const at = q();
           act(inLanguage(`take of sentence ${number}`), () => api("POST", path(`/clips/${clip.id}/select${at}`), { file: take.file }),
-            () => api("POST", path(`/clips/${clip.id}/select${at}`), { file: before }), track().language);
+            () => api("POST", path(`/clips/${clip.id}/select${at}`), { file: before }), track().language, true);
         } }, take.file === clip.selected ? "\u25cf" : "\u25cb"),
       player(fileUrl(take.file), { buckets: 30, showTime: false, label: `Play take ${n + 1}` }),
       el("span", { class: "faint small num" }, `${take.duration.toFixed(1)} s \u00b7 seed ${take.seed}`
@@ -964,6 +967,26 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       el("div", { class: "muted small" }, "This replaces every sentence, translation and take, and cannot be undone."),
       el("button", { class: "btn btn-danger", onclick: () => { close(); histories.set(dub.id, createHistory(100)); transcribe(); } },
         "Transcribe again")), { align: "right" });
+  }
+
+  const takeCount = () => clips().reduce((n, c) => n + c.takes.length, 0);
+
+  // Every take of the language shown, files included; the sentences and translations stay. Not undoable.
+  function confirmClearTakes(anchor) {
+    const code = track().language;
+    popover(anchor, el("div", { class: "menu confirm-menu" },
+      el("strong", {}, `Delete ${plural(takeCount(), "take")} of ${languageName(code)}?`),
+      el("div", { class: "muted small" }, "The sentences and translations stay; the take files are removed permanently. "
+        + "This cannot be undone."),
+      el("button", { class: "btn btn-danger", onclick: async () => {
+        close();
+        try {
+          const result = await api("POST", path(`/takes/clear${q(code)}`), {});
+          history().drop((step) => step.language === code && step.takes); // their takes are gone
+          apply(result);
+          setMessage(message, `Deleted ${plural(result.removed, "take")} of ${languageName(code)}.`);
+        } catch (error) { fail(error); }
+      } }, `Delete ${plural(takeCount(), "take")}`)), { align: "right" });
   }
 
   function confirmDelete(anchor) {
