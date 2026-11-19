@@ -2,9 +2,10 @@
 // playhead, zoom, a waveform under the first lane, and dragging clips in time (Dub). Generic, so trimming or more
 // lanes can be added later: every position goes through timeToX/xToTime with one scale.
 import { el } from "./app.js";
-import { clampStart, followWindow, overlapRanges, timeToX, xToTime } from "./script.js";
+import { clampStart, followWindow, inWindow, overlapRanges, timeToX, xToTime } from "./script.js";
 
 const MIN_WINDOW = 5; // seconds visible at the closest zoom
+const MAX_WIDTH = 10_000_000; // px: the scroll width stays under the browser's limit (~16M) on very long files
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 // lanes: [{id, label, draggable, clips: [{id, start, end, state, title}]}]; state "fits" | "long" | "missing" | "source".
@@ -12,7 +13,8 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
   onMove = () => {} }) {
   const total = Math.max(duration, 0.001);
   let width = Math.min(shown, total); // seconds visible
-  let current = lanes;
+  let current = [];
+  let drawn = [0, 0]; // the time range whose clips are elements now: one window either side of the view
   let selected = null;
   let time = 0;
   let wave = null; // {values, perSecond}
@@ -35,6 +37,18 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
   const visibleStart = () => scroller.scrollLeft / scale;
   const reveal = (t) => { scroller.scrollLeft = timeToX(followWindow(visibleStart(), width, t, total), scale); };
 
+  // The closest zoom: 5 s, or wider on very long files.
+  const minWindow = () => Math.max(MIN_WINDOW, (total * Math.max(1, scroller.clientWidth)) / MAX_WIDTH);
+
+  // Lanes keep their clips sorted by start, with the longest and the overlaps, so drawing a window is a search.
+  function prepare(lanes) {
+    return lanes.map((lane) => {
+      const sorted = lane.clips.map((c) => ({ ...c, length: c.end - c.start })).sort((a, b) => a.start - b.start);
+      return { ...lane, sorted, longest: sorted.reduce((most, c) => Math.max(most, c.length), 0),
+        overlaps: overlapRanges(lane.clips) };
+    });
+  }
+
   function measure() {
     scale = Math.max(1, scroller.clientWidth) / width;
     content.style.width = `${timeToX(total, scale)}px`;
@@ -42,6 +56,7 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
 
   function draw() {
     const keep = visibleStart();
+    width = Math.min(total, Math.max(width, minWindow()));
     measure();
     labels.replaceChildren(...current.map((lane) => el("div", { class: "tl-label faint small" }, lane.label)));
     content.replaceChildren(...current.map((lane) => {
@@ -50,16 +65,31 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
         if (e.target !== row) return;
         onSeek(Math.min(total, Math.max(0, xToTime(e.offsetX, scale))));
       });
-      for (const overlap of overlapRanges(lane.clips)) {
-        row.append(el("div", { class: "tl-overlap", style: { left: `${timeToX(overlap.start, scale)}px`,
-          width: `${Math.max(2, timeToX(overlap.end - overlap.start, scale))}px` } }));
-      }
-      for (const clip of lane.clips) row.append(clipNode(lane, clip));
       return row;
     }), playhead);
     scroller.scrollLeft = timeToX(keep, scale);
+    fill();
     paint();
   }
+
+  // Only the clips around the view are elements: a long dub has tens of thousands.
+  function fill() {
+    const from = visibleStart() - width;
+    const to = visibleStart() + 2 * width;
+    drawn = [from, to];
+    const rows = content.querySelectorAll(".tl-lane");
+    current.forEach((lane, i) => {
+      const nodes = lane.overlaps.filter((o) => o.end > from && o.start < to).map((overlap) => el("div", {
+        class: "tl-overlap", style: { left: `${timeToX(overlap.start, scale)}px`,
+          width: `${Math.max(2, timeToX(overlap.end - overlap.start, scale))}px` } }));
+      rows[i].replaceChildren(...nodes, ...inWindow(lane.sorted, from, to, lane.longest).map((clip) => clipNode(lane, clip)));
+    });
+  }
+
+  // Scrolled near the edge of what is drawn: draw around the view again.
+  const refill = () => {
+    if (visibleStart() < drawn[0] + width / 2 || visibleStart() + width > drawn[1] - width / 2) fill();
+  };
 
   function clipNode(lane, clip) {
     const node = el("button", { type: "button", class: `tl-clip ${clip.state || ""} ${clip.id === selected ? "selected" : ""}`,
@@ -116,25 +146,27 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
 
   function zoom(factor) {
     const centre = visibleStart() + width / 2;
-    width = Math.min(total, Math.max(MIN_WINDOW, width * factor));
+    width = Math.min(total, Math.max(minWindow(), width * factor));
     draw();
     scroller.scrollLeft = timeToX(Math.max(0, centre - width / 2), scale);
+    fill();
     paint();
-    zoomIn.disabled = width <= MIN_WINDOW;
+    zoomIn.disabled = width <= minWindow();
     zoomOut.disabled = width >= total;
   }
 
-  scroller.addEventListener("scroll", paint);
+  scroller.addEventListener("scroll", () => { refill(); paint(); });
   const resize = new ResizeObserver(() => {
     if (!element.isConnected) return resize.disconnect();
     draw();
   });
   resize.observe(scroller);
   zoomOut.disabled = width >= total;
+  current = prepare(lanes);
   draw();
   return {
     element,
-    setLanes(next) { current = next; draw(); },
+    setLanes(next) { current = prepare(next); draw(); },
     setWave(values, perSecond) { wave = { values, perSecond }; paint(); },
     // `follow` keeps the playhead in view (while playing, or after a seek).
     setTime(t, follow = true) {
@@ -144,9 +176,9 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
     },
     select(clipId, show = false) {
       selected = clipId;
+      const clip = show && current.flatMap((lane) => lane.sorted).find((c) => c.id === clipId); // may not be drawn yet
+      if (clip) { reveal(clip.start); refill(); }
       for (const node of content.querySelectorAll(".tl-clip")) node.classList.toggle("selected", node.dataset.clip === clipId);
-      const node = content.querySelector(`.tl-clip[data-clip="${clipId}"]`);
-      if (show && node) reveal(parseFloat(node.style.left) / scale);
     },
   };
 }
