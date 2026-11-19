@@ -599,3 +599,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .dub-tab { display: inline-flex; align-items: center; border-radius: 6px; }
 .dub-tab.active { background: var(--hover); }
 .dub-tab .tab-x { border: none; background: none; color: var(--faint, var(--muted)); cursor: pointer; padding: 0 6px 0 0; }
+.dub-line.kept .dub-orig { font-style: italic; }
+.dub-line.kept .dub-tr { opacity: .45; }
+.dub-keep { gap: 6px; }
+.tl-clip.kept { background: repeating-linear-gradient(135deg, var(--accent-line) 0 4px, transparent 4px 8px); }

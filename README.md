@@ -48,7 +48,9 @@ English script. Unmute the player to listen.
   timeline with the original's waveform where a translation that runs long shows red and clips can be dragged.
   *Copy for translation* copies every sentence, numbered, for the translation tool you like; *Paste translations*
   puts its reply back. One dub can have several target languages (tabs), each with its own translations, takes,
-  timing and model. Every change can be undone (Ctrl+Z). The mix is exported as one audio file. Made for clips up
+  timing and model. Music or singing that Whisper wrote down can be marked *Keep the original here* (K): the original
+  plays there at full volume in every language, and nothing is translated or generated. Every change can be undone
+  (Ctrl+Z). The mix is exported as one audio file. Made for clips up
   to about 20 minutes.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.

@@ -236,9 +236,10 @@ export function createHistory(limit = 100) {
 export function clipFilter(clips, fit, name) {
   const keep = {
     all: () => true,
-    untranslated: (c) => !c.translation.trim(),
+    untranslated: (c) => !c.translation.trim() && fit[c.id]?.state !== "kept", // kept ones need no translation
     missing: (c) => fit[c.id]?.state === "missing",
     long: (c) => fit[c.id]?.state === "long",
+    kept: (c) => fit[c.id]?.state === "kept",
   }[name] || (() => true);
   return clips.filter(keep).map((c) => c.id);
 }
@@ -251,4 +252,12 @@ export const activeClip = (clips, t) => clips.find((c) => t >= c.start && t < c.
 export function followWindow(start, width, t, duration) {
   if (t >= start && t < start + width) return start;
   return Math.max(0, Math.min(t, duration - width));
+}
+
+// Volume points [time, value] for the original: `base` under the dub, full volume over kept stretches ({start, end},
+// sorted), with `fade` seconds up and down around each.
+export function volumeRamps(kept, base, fade) {
+  const points = [[0, base]];
+  for (const { start, end } of kept) points.push([Math.max(0, start - fade), base], [start, 1], [end, 1], [end + fade, base]);
+  return points;
 }

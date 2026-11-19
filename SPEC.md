@@ -272,7 +272,10 @@ All interface text is English. The visual design is the design canvas; behaviour
   which may be another speaker), takes to pick and play, Generate, Delete; below, the timeline (`timeline.js`: lanes and
   clips in seconds, a ~30 s window that follows the playhead, zoom, the original's waveform, overlaps in red, Dub
   clips dragged). Playback marks the sentence being played and selects it unless you are typing. Keys: Up/Down,
-  Enter (edit), Ctrl+Enter (generate), Space. Undo/Redo (Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y outside text boxes), per dub
+  Enter (edit), Ctrl+Enter (generate), Space, K (keep the original). "Keep the original here" marks a sentence (on
+  the source clip, so in every language): it is left out of translating, Generate and the "Untranslated"/"No take"
+  filters (an "Original" filter lists them); the preview and the export play the original at full volume there,
+  with 50 ms fades, and skip its takes. Undo/Redo (Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y outside text boxes), per dub
   while the app runs, last 100 steps: text and translation edits, pasted translations, moves, Voice from, take
   choice, deleted sentences (their take files stay until the dub is deleted), generations (the previous takes are
   selected again), model, language, settings, volume, name. Transcribing again is confirmed and not undoable.

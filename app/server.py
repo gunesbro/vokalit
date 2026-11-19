@@ -1071,7 +1071,11 @@ def transcribe_dub(req, did):
 @route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)")
 def update_dub_source(req, did, oid):
     _dub_or_404(did)
-    dubs.update_source_clip(did, oid, str(req["json"].get("text", "")))
+    body = req["json"]
+    if "text" in body:
+        dubs.update_source_clip(did, oid, str(body["text"]))
+    if "keep_original" in body:
+        dubs.set_keep_original(did, oid, bool(body["keep_original"]))
     return _dub_view(did)
 
 
@@ -1151,6 +1155,9 @@ def generate_dub(req, did):
             if number is None:
                 continue  # deleted meanwhile
             clip = clips[number - 1]
+            if any(s["id"] == clip["source_clip"] and s.get("keep_original") for s in current["tracks"][0]["clips"]):
+                errors.append(f"Sentence {number} keeps the original.")
+                continue
             text = models.text_for(name, clip["translation"])
             if not models.has_words(text):
                 errors.append(f"Sentence {number} has no translation yet.")

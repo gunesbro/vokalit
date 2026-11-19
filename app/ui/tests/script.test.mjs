@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeClip, clipFilter, createHistory, followWindow } from "../script.js";
+import { activeClip, clipFilter, createHistory, followWindow, volumeRamps } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -276,4 +276,17 @@ test("createHistory drops the steps of something that no longer exists", async (
   h.drop((s) => s.language === "de");
   assert.equal(h.undoLabel(), "a");
   assert.equal(h.redoLabel(), null);
+});
+
+test("clipFilter leaves kept sentences out of the work to do", () => {
+  const clips = [{ id: "d1", translation: "" }, { id: "d2", translation: "" }];
+  const fit = { d1: { state: "kept" }, d2: { state: "missing" } };
+  assert.deepEqual(clipFilter(clips, fit, "untranslated"), ["d2"]);
+  assert.deepEqual(clipFilter(clips, fit, "missing"), ["d2"]);
+  assert.deepEqual(clipFilter(clips, fit, "kept"), ["d1"]);
+});
+
+test("volumeRamps raises the original to full volume over kept stretches", () => {
+  assert.deepEqual(volumeRamps([{ start: 2, end: 4 }], 0.15, 0.05),
+    [[0, 0.15], [1.95, 0.15], [2, 1], [4, 1], [4.05, 0.15]]);
 });

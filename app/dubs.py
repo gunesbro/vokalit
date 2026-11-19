@@ -19,6 +19,7 @@ SOURCE_TYPES = {"wav", "mp3", "m4a", "ogg", "flac"}
 VIDEO_TYPES = {"mp4", "webm"}
 DEFAULT_ORIGINAL_VOLUME = 0.15
 REFERENCE_PADDING = 0.15  # seconds kept around a sentence cut out as a voice reference
+KEPT_FADE = 0.05  # seconds to fade the original up and down around a sentence that keeps it
 
 
 def _root() -> Path:
@@ -204,6 +205,21 @@ def update_source_clip(dub_id: str, clip_id: str, text: str) -> None:
         _find(_source_clips(data), clip_id)["text"] = text.strip()
 
 
+def set_keep_original(dub_id: str, clip_id: str, keep: bool) -> None:
+    """Marks a sentence (music, singing) to keep the original there, at full volume, in every language: it is not
+    translated or generated."""
+    with _editing(dub_id) as data:
+        source = _find(_source_clips(data), clip_id)
+        if keep:
+            source["keep_original"] = True
+        else:
+            source.pop("keep_original", None)
+
+
+def _kept(data: dict) -> list[dict]:
+    return [s for s in _source_clips(data) if s.get("keep_original")]
+
+
 def delete_source_clip(dub_id: str, clip_id: str) -> None:
     """Deletes a sentence with its translation and takes; clips that took their voice from it use their own. The take
     files stay (they go with the dub), so undo can bring the sentence back."""
@@ -353,8 +369,12 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
     or past the end of the file."""
     clips = sorted(_dub_clips(data, language), key=lambda c: c["start"])
     end_of_file = data["source"]["duration"]
+    kept = {s["id"] for s in _kept(data)}
     result = {}
     for i, clip in enumerate(clips):
+        if clip.get("source_clip") in kept:
+            result[clip["id"]] = {"state": "kept", "over": 0.0}
+            continue
         duration = _selected_duration(clip)
         if duration is None:
             result[clip["id"]] = {"state": "missing", "over": 0.0}
@@ -376,8 +396,9 @@ def export_dub(dub_id: str, fmt: str = "wav", language: str | None = None) -> Pa
     source_rate, source = _read(audio_path(dub_id))
     takes = []
     track = _track(data, language)
+    kept = _kept(data)
     for n, clip in enumerate(track["clips"], 1):
-        if not clip["selected"]:
+        if not clip["selected"] or clip["source_clip"] in {s["id"] for s in kept}:
             continue
         path = dub_dir(dub_id) / clip["selected"]
         if not path.exists():
@@ -387,7 +408,18 @@ def export_dub(dub_id: str, fmt: str = "wav", language: str | None = None) -> Pa
     # Models write different sample rates (VoxCPM2 48 kHz, others 24 kHz): mix at the highest, so nothing is lost.
     rate = max([source_rate] + [take_rate for _, take_rate, _ in takes])
     original = source if source_rate == rate else ws._resample(source, source_rate, rate)
-    mix = original.astype(np.float64) * data["original_volume"]
+    # The original under the dub at its volume, and at full volume where a sentence keeps it (short fades, no clicks).
+    gain = np.full(len(original), float(data["original_volume"]))
+    fade = max(1, round(KEPT_FADE * rate))
+    for source in kept:
+        first, last = max(0, round(source["start"] * rate)), min(len(gain), round(source["end"] * rate))
+        gain[first:last] = 1.0
+        for i in range(fade):
+            level = data["original_volume"] + (1 - data["original_volume"]) * (1 - (i + 1) / (fade + 1))
+            for at in (first - 1 - i, last + i):
+                if 0 <= at < len(gain):
+                    gain[at] = max(gain[at], level)
+    mix = original.astype(np.float64) * gain
     for start, take_rate, samples in takes:
         samples = samples if take_rate == rate else ws._resample(samples, take_rate, rate)
         first = round(start * rate)

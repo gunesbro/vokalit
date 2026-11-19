@@ -273,3 +273,15 @@ def test_a_generating_language_cannot_be_removed(api, tmp_path, monkeypatch):
     assert status == 400 and "generating" in body["error"]
     release.set()
     assert _wait(api, job["id"])["state"] == "done"
+
+
+def test_kept_sentences_are_not_generated(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    monkeypatch.setattr(models, "generate", lambda *a, **k: (_ for _ in ()).throw(AssertionError("generated")))
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
+    status, dub, _ = api("PATCH", f"/api/dubs/{dub['id']}/source/o1", {"keep_original": True})
+    assert status == 200 and dub["fit"]["en"]["d1"]["state"] == "kept"
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Sentence 1 keeps the original" in done["error"]

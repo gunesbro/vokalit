@@ -411,3 +411,22 @@ def _with_take_in(dub, clip_id, language):
     make_wav(take, 1)
     dubs.add_take(dub, clip_id, {"file": str(take), "seed": 1, "duration": 1.0}, language=language)
     return take
+
+
+def test_keep_original_marks_a_sentence_in_every_language(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.add_language(dub, "de")
+    dubs.set_keep_original(dub, "o2", True)
+    data = dubs.load_dub(dub)
+    assert data["tracks"][0]["clips"][1]["keep_original"] is True
+    assert dubs.fit(data, "en")["d2"] == {"state": "kept", "over": 0.0} == dubs.fit(data, "de")["d2"]
+    dubs.set_keep_original(dub, "o2", False)
+    assert "keep_original" not in dubs.load_dub(dub)["tracks"][0]["clips"][1]
+
+
+def test_export_plays_kept_sentences_at_full_volume(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)  # sentence 2 is 4.0-9.0 s
+    dubs.set_keep_original(dub, "o2", True)
+    rate, samples = _read_wav(dubs.export_dub(dub))
+    loud, quiet = abs(samples[int(5 * rate): int(8 * rate)]).max(), abs(samples[int(10 * rate): int(11 * rate)]).max()
+    assert loud > 0.1 * 32767 * 0.9 and quiet < 0.1 * 32767 * 0.2

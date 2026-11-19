@@ -3,7 +3,7 @@ import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, reveal
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
 import { activeClip, clipFilter, clipsToPlay, createHistory, formatTime, parseTranslations, pasteTranslations,
-  pickSelected, transcriptForTranslation } from "./script.js";
+  pickSelected, transcriptForTranslation, volumeRamps } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { timeline } from "./timeline.js";
 import { player } from "./waveform.js";
@@ -171,7 +171,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   const sourceOf = (clip) => sources().find((c) => c.id === clip.source_clip);
   const takeOf = (clip) => clip.takes.find((t) => t.file === clip.selected);
   const numberOf = (clipId) => clips().findIndex((c) => c.id === clipId) + 1;
-  const lengthOf = (clip) => takeOf(clip)?.duration ?? ((sourceOf(clip)?.end ?? 0) - (sourceOf(clip)?.start ?? 0) || 1);
+  const isKept = (clip) => Boolean(sourceOf(clip)?.keep_original);
+  const keptRanges = () => sources().filter((s) => s.keep_original).map((s) => ({ start: s.start, end: s.end }));
+  const sourceLength = (clip) => ((sourceOf(clip)?.end ?? 0) - (sourceOf(clip)?.start ?? 0)) || 1;
+  // On the timeline a clip is as long as its take, or as its sentence when it has none or keeps the original.
+  const lengthOf = (clip) => (isKept(clip) ? sourceLength(clip) : takeOf(clip)?.duration ?? sourceLength(clip));
   const fileUrl = (file) => `/files/dubs/${dub.id}/${file}`;
   const path = (suffix = "") => `/api/dubs/${dub.id}${suffix}`;
   const languageName = (code) => models.flatMap((m) => m.languages).find((l) => l.code === code)?.name || code;
@@ -280,6 +284,15 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     act(inLanguage(`pasted ${plural(Object.keys(translations).length, "translation")}`),
       () => api("PATCH", path(`/translations${at}`), { translations }),
       () => api("PATCH", path(`/translations${at}`), { translations: before }), track().language);
+  }
+
+  // Shared by every language: the sentence's original plays at full volume instead of a dub.
+  function toggleKeep(clip) {
+    const source = sourceOf(clip);
+    const keep = !source.keep_original;
+    act(`${keep ? "keeping the original in" : "dubbing"} sentence ${numberOf(clip.id)}`,
+      () => api("PATCH", path(`/source/${source.id}`), { keep_original: keep }),
+      () => api("PATCH", path(`/source/${source.id}`), { keep_original: !keep }));
   }
 
   function deleteSentence(clip) {
@@ -402,10 +415,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const settingsButton = el("button", { class: "btn", disabled: !chosen, title: "Generation settings",
       onclick: () => popover(settingsButton, el("div", { class: "menu settings-pop" }, settingsPanel(chosen))) }, "\u2699");
     const all = clips();
-    const translated = all.filter((c) => c.translation.trim()).length;
+    const keptCount = all.filter(isKept).length;
+    const translated = all.filter((c) => c.translation.trim() && !isKept(c)).length;
     const voiced = all.filter((c) => c.selected).length;
     const long = all.filter((c) => fit()[c.id]?.state === "long").length;
-    const missing = all.filter((c) => !c.selected && c.translation.trim()).map((c) => c.id);
+    const missing = all.filter((c) => !c.selected && c.translation.trim() && !isKept(c)).map((c) => c.id);
     const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe again or delete" }, "\u22ef");
     more.onclick = () => popover(more, el("div", { class: "menu" },
       el("button", { class: "menu-item", disabled: Boolean(job) || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again\u2026"),
@@ -420,7 +434,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         " \u2192 ", target),
       modelSelect, settingsButton,
       all.length ? el("span", { class: "small muted dub-progress", title: "Translated \u00b7 with a take \u00b7 too long" },
-        `${translated}/${all.length} translated \u00b7 ${voiced} voiced`, long ? el("span", { class: "warn" }, ` \u00b7 ${long} too long`) : "")
+        `${translated}/${all.length - keptCount} translated \u00b7 ${voiced} voiced`
+        + (keptCount ? ` \u00b7 ${keptCount} original` : ""), long ? el("span", { class: "warn" }, ` \u00b7 ${long} too long`) : "")
         : "",
       el("div", { class: "spacer" }),
       el("button", { class: "btn btn-ghost icon-btn", disabled: !undoLabel || Boolean(job), "aria-label": "Undo",
@@ -493,8 +508,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
 
   function drawTable() {
     const all = clips();
-    const counts = Object.fromEntries(["all", "untranslated", "missing", "long"].map((f) => [f, clipFilter(all, fit(), f).length]));
-    const names = { all: "All", untranslated: "Untranslated", missing: "No take", long: "Too long" };
+    const counts = Object.fromEntries(["all", "untranslated", "missing", "long", "kept"].map((f) => [f, clipFilter(all, fit(), f).length]));
+    const names = { all: "All", untranslated: "Untranslated", missing: "No take", long: "Too long", kept: "Original" };
     tableHead.replaceChildren(
       el("div", { class: "row dub-filters", role: "tablist" }, Object.entries(names).map(([key, label]) => el("button", {
         class: `btn btn-small ${filter === key ? "active" : "btn-ghost"}`, role: "tab", "aria-selected": String(filter === key),
@@ -519,6 +534,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       const source = sourceOf(clip);
       const clipFit = fit()[clip.id] || { state: "missing" };
       const input = el("input", { class: "input dub-tr", value: clip.translation, "data-saved": clip.translation,
+        disabled: isKept(clip),
         "data-key": `tr-${clip.id}`, placeholder: "Translation", "aria-label": `Translation of sentence ${number}`,
         onblur: () => input.value !== input.dataset.saved && editTranslation(clip, input.value),
         onkeydown: async (e) => {
@@ -540,11 +556,12 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         pasteMany(pasteTranslations(ids, ids.indexOf(clip.id), text));
       });
       input.addEventListener("focus", () => choose(clip.id, false));
-      const status = clipFit.state === "long" ? el("span", { class: "dub-status warn", title: "Runs into the next sentence" }, `+${clipFit.over.toFixed(1)} s`)
+      const status = clipFit.state === "kept" ? el("span", { class: "dub-status faint", title: "The original plays here" }, "\u266a")
+        : clipFit.state === "long" ? el("span", { class: "dub-status warn", title: "Runs into the next sentence" }, `+${clipFit.over.toFixed(1)} s`)
         : clipFit.state === "fits" ? el("span", { class: "dub-status ok", title: "Fits" }, "\u2713")
           : el("span", { class: "dub-status faint", title: "No take yet" }, "\u25cb");
       const generating = job?.kind === "generate" && job.clips.has(clip.id);
-      const row = el("div", { class: `dub-line ${clip.id === selected ? "selected" : ""} ${generating ? "busy" : ""}`,
+      const row = el("div", { class: `dub-line ${clip.id === selected ? "selected" : ""} ${generating ? "busy" : ""} ${isKept(clip) ? "kept" : ""}`,
         role: "option", "aria-selected": String(clip.id === selected), "data-clip": clip.id, onclick: (e) => {
           if (!typing(e.target)) choose(clip.id);
         } },
@@ -609,13 +626,27 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       el("span", { class: "faint small num" }, `${take.duration.toFixed(1)} s \u00b7 seed ${take.seed}`)));
     const remove = el("button", { class: "btn btn-ghost btn-small danger", title: "Delete this sentence (undo brings it back)",
       onclick: () => deleteSentence(clip) }, "Delete sentence");
+    const kept = isKept(clip);
+    const keep = el("label", { class: "row small dub-keep", title: "For music or singing: the original plays here at full "
+      + "volume in every language, and nothing is translated or generated (K)" },
+    el("input", { type: "checkbox", checked: kept, onchange: () => toggleKeep(clip) }), "Keep the original here (music, singing)");
+    if (kept) {
+      inspector.replaceChildren(
+        el("div", { class: "row" }, el("strong", {}, `Sentence ${number}`),
+          el("span", { class: "faint small num" }, `${formatTime(source.start)}\u2013${formatTime(source.end)}`),
+          el("div", { class: "spacer" }), el("span", { class: "faint small" }, "\u266a Original")),
+        el("label", { class: "field-label" }, "Original"), original, keep,
+        el("p", { class: "faint small" }, "The original plays here at full volume, in every language."),
+        el("div", { class: "row" }, el("div", { class: "spacer" }), remove));
+      return;
+    }
     inspector.replaceChildren(
       el("div", { class: "row" }, el("strong", {}, `Sentence ${number}`),
         el("span", { class: "faint small num" }, `${formatTime(source.start)}\u2013${formatTime(source.end)}`),
         el("div", { class: "spacer" }),
         clipFit.state === "long" ? el("span", { class: "warn small" }, `${clipFit.over.toFixed(1)} s too long`)
           : clipFit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet")),
-      el("label", { class: "field-label" }, "Original"), original,
+      el("label", { class: "field-label" }, "Original"), original, keep,
       el("label", { class: "field-label" }, "Translation"), translation,
       el("div", { class: "row" }, el("label", { class: "row small muted" }, "Voice", voice)),
       takes.length ? el("div", { class: "dub-takes" }, takes) : el("p", { class: "faint small" }, "No takes yet."),
@@ -788,17 +819,33 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     }
 
     async function start(at) {
-      const items = clips().filter((c) => takeOf(c)).map((c) => ({ id: c.id, start: c.start, duration: takeOf(c).duration,
+      const items = clips().filter((c) => takeOf(c) && !isKept(c)).map((c) => ({ id: c.id, start: c.start, duration: takeOf(c).duration,
         url: fileUrl(c.selected) }));
       const [base, ...takes] = await Promise.all([load(original), ...items.map((c) => load(c.url))]);
       if (stopped) return;
       await context.resume();
       stopSources();
       gain = context.createGain();
-      gain.gain.value = Number(volume.value);
+      // The original at its volume, up to full volume over kept stretches.
+      const points = volumeRamps(keptRanges(), Number(volume.value), 0.05);
+      const valueAt = (t) => {
+        let value = points[0][1];
+        for (let i = 0; i < points.length; i++) {
+          const [time, level] = points[i];
+          if (time <= t) value = level;
+          else {
+            const [pt, pv] = points[i - 1];
+            value = pv + ((level - pv) * (t - pt)) / Math.max(time - pt, 1e-6);
+            break;
+          }
+        }
+        return value;
+      };
       gain.connect(context.destination);
       contextStart = context.currentTime + 0.05;
       origin = at;
+      gain.gain.setValueAtTime(valueAt(at), contextStart);
+      for (const [time, level] of points) if (time > at) gain.gain.linearRampToValueAtTime(level, contextStart + time - at);
       const node = context.createBufferSource();
       node.buffer = base;
       node.connect(gain);
@@ -849,7 +896,10 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     }
 
     button.onclick = () => (playing ? pause() : start(time).catch(fail));
-    volume.oninput = () => { volumeLabel.textContent = `${Math.round(volume.value * 100)} %`; if (gain) gain.gain.value = Number(volume.value); };
+    volume.oninput = () => {
+      volumeLabel.textContent = `${Math.round(volume.value * 100)} %`;
+      if (gain && !keptRanges().length) gain.gain.value = Number(volume.value); // with kept stretches: applied on release
+    };
     volume.onchange = () => setOption("changing the original's volume", "original_volume", Number(volume.value));
 
     return {
@@ -889,6 +939,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       choose(visible[Math.max(0, Math.min(visible.length - 1, index + (e.key === "ArrowUp" ? -1 : 1)))] || visible[0]);
     } else if (e.key === "Enter" && mod) { e.preventDefault(); if (selected) generate([selected]); }
     else if (e.key === "Enter") { e.preventDefault(); table.querySelector(`[data-key="tr-${selected}"]`)?.focus(); }
+    else if (e.key.toLowerCase() === "k" && !mod && selected) {
+      e.preventDefault();
+      const clip = clips().find((c) => c.id === selected);
+      if (clip) toggleKeep(clip);
+    }
   };
   document.addEventListener("keydown", onKey);
 
