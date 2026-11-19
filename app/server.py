@@ -869,6 +869,33 @@ def remember_microphone(req):
     return {}
 
 
+PREFERENCES = {"volume", "dubSizes"}  # what the page keeps here: the playback volume, the Dub panes' sizes
+_preferences_lock = threading.Lock()
+
+
+def _preferences_file():
+    return Path(models.LOCAL) / "webview" / "preferences.json"
+
+
+@route("GET", "/api/preferences")
+def get_preferences(req):
+    """The page's preferences. Kept here, not in the page's storage: that belongs to the page's address, and the
+    server's port (part of it) changes every launch."""
+    return ws._read_json(_preferences_file()) or {}
+
+
+@route("PATCH", "/api/preferences")
+def set_preferences(req):
+    unknown = set(req["json"]) - PREFERENCES
+    if unknown:
+        raise ws.WorkspaceError(f"Unknown preference: {', '.join(sorted(unknown))}.")
+    with _preferences_lock:
+        path = _preferences_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ws._write_json(path, {**(ws._read_json(path) or {}), **req["json"]})
+    return {}
+
+
 @route("POST", "/api/sessions/(?P<sid>[0-9-]+)/export")
 def export_session(req, sid):
     fmt, line = req["json"].get("format", "wav"), req["json"].get("line")  # line: export only that line

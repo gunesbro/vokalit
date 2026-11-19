@@ -1,14 +1,9 @@
 // The app's playback volume: one level for every sound the app plays (players, Studio playback, the Dub preview), so
 // listening does not need the system volume turned down. Exports and generated files are not touched.
+import { preference, savePreference } from "./preferences.js";
 import { volumeGain } from "./script.js";
 
-const KEY = "vokalit.volume";
-let percent = (() => {
-  try {
-    const saved = localStorage.getItem(KEY);
-    return saved === null ? 100 : Math.min(100, Math.max(0, Number(saved) || 0));
-  } catch { return 100; }
-})();
+let percent = 100; // until the preferences are loaded (loadMasterVolume)
 const followers = new Set(); // WeakRefs to <audio> elements and gain nodes that play at the volume
 
 export const masterVolume = () => percent;
@@ -26,10 +21,22 @@ const level = (target, gain) => {
   else target.volume = gain;
 };
 
-export function setMasterVolume(value) {
-  percent = Math.min(100, Math.max(0, Math.round(value)));
-  try { localStorage.setItem(KEY, String(percent)); } catch { /* storage may be unavailable */ }
+const clamp = (value) => Math.min(100, Math.max(0, Math.round(value)));
+
+function apply(value) {
+  percent = clamp(value);
   each((target) => level(target, volumeGain(percent)));
+}
+
+// The volume kept from the last run; anything that is not a number is full volume.
+export function loadMasterVolume() {
+  const kept = Number(preference("volume", 100));
+  apply(Number.isFinite(kept) ? kept : 100);
+}
+
+export function setMasterVolume(value) {
+  apply(value);
+  savePreference("volume", percent);
 }
 
 // An <audio> plays at the volume, and follows it when it changes.

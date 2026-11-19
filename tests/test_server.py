@@ -1073,3 +1073,14 @@ def test_design_can_be_cancelled(api, tmp_workspace, monkeypatch):
     time.sleep(0.2)
     api("POST", f"/api/jobs/{job['id']}/cancel", {})
     assert _wait(api, job["id"])["state"] == "cancelled" and cancelled == ["voxcpm"]
+
+
+def test_ui_preferences_are_kept_on_this_computer(api, tmp_path, monkeypatch):
+    """The page's own storage is per address, and the port changes every launch: the server keeps them."""
+    monkeypatch.setattr(models, "LOCAL", str(tmp_path / "local"))
+    assert api("GET", "/api/preferences")[1] == {}
+    assert api("PATCH", "/api/preferences", {"volume": 30})[0] == 200
+    assert api("PATCH", "/api/preferences", {"dubSizes": {"right": 500, "lane": 40}})[0] == 200
+    assert api("GET", "/api/preferences")[1] == {"volume": 30, "dubSizes": {"right": 500, "lane": 40}}
+    status, body, _ = api("PATCH", "/api/preferences", {"something": 1})
+    assert status == 400 and "something" in body["error"]

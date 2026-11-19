@@ -19,6 +19,12 @@ export async function urlPeaks(url, buckets) {
   return peakCache.get(key);
 }
 
+// Files under `prefix` were deleted and their names will be used again (a dub's takes start again at d1-1.wav): their
+// waveforms are decoded afresh next time.
+export function forgetWaveforms(prefix) {
+  for (const cache of [peakCache, peakValues]) for (const key of [...cache.keys()]) if (key.startsWith(prefix)) cache.delete(key);
+}
+
 export function bars(values, className = "") {
   return el("div", { class: `wave ${className}`, "aria-hidden": "true" },
     values.map((v) => el("span", { style: { height: `${Math.max(12, Math.round(v * 100))}%` } })));

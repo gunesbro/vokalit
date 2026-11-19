@@ -4,7 +4,8 @@ import { renderDub } from "./dub.js";
 import { renderModels } from "./models.js";
 import { popover } from "./settings.js";
 import { renderStudio } from "./studio.js";
-import { masterVolume, setMasterVolume } from "./volume.js";
+import { loadPreferences } from "./preferences.js";
+import { loadMasterVolume, masterVolume, setMasterVolume } from "./volume.js";
 
 const TOKEN = document.querySelector('meta[name="vokalit-token"]').content;
 
@@ -181,6 +182,9 @@ function volumeControl() {
 }
 
 window.addEventListener("hashchange", route);
-route();
 showGpu();
-volumeControl();
+loadPreferences().then(() => { // the volume and pane sizes kept from the last run, before the first screen
+  loadMasterVolume();
+  volumeControl();
+  route();
+});

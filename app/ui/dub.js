@@ -5,9 +5,10 @@ import { decode, encodeWav } from "./audio.js";
 import { clampSize, clipAt, clipFilter, clipsToPlay, createHistory, formatTime, onlyModel, parseTranslations,
   pasteTranslations, pickSelected, transcriptForTranslation, visibleRows, volumeRamps } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
+import { preference, savePreference } from "./preferences.js";
 import { timeline } from "./timeline.js";
 import { outputFor } from "./volume.js";
-import { player } from "./waveform.js";
+import { forgetWaveforms, player } from "./waveform.js";
 
 const AUDIO_TYPES = ["wav", "mp3", "m4a", "ogg", "flac"];
 const VIDEO_TYPES = ["mp4", "webm"];
@@ -42,12 +43,9 @@ const OVERSCAN = 10;
 const MIN_RIGHT = 320;
 const MIN_ABOVE_TIMELINE = 200;
 const SPLIT = 7; // px, a separator's width
-const sizes = (() => {
-  try { return { ...SIZES, ...JSON.parse(localStorage.getItem("vokalit.dubSizes") || "{}") }; } catch { return { ...SIZES }; }
-})();
-const saveSizes = () => {
-  try { localStorage.setItem("vokalit.dubSizes", JSON.stringify(sizes)); } catch { /* storage may be unavailable */ }
-};
+const sizes = { ...SIZES }; // the kept sizes are read when the first dub opens (the preferences load at start)
+let sizesRead = false;
+const saveSizes = () => savePreference("dubSizes", { ...sizes });
 const LISTENING = "Whisper is finding the sentences on the CPU; a long file takes a while.";
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select, [contenteditable]"));
 
@@ -179,6 +177,10 @@ export async function renderDub(root) {
 // One dub, laid out like a subtitle editor: a sentence table (left), the video and the selected sentence (right), and
 // the timeline (bottom). Every change the user makes goes through act(), so it can be undone. Returns {stop, transcribe}.
 function openDub(main, initial, { models, whisper, formats, refreshList }) {
+  if (!sizesRead) {
+    Object.assign(sizes, preference("dubSizes", {}));
+    sizesRead = true;
+  }
   let dub = initial;
   let selected = null;
   let filter = "all";
@@ -1005,6 +1007,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         try {
           const result = await api("POST", path(`/takes/clear${q(code)}`), {});
           history().drop((step) => step.language === code && step.takes); // their takes are gone
+          forgetWaveforms(fileUrl(`takes/${code}/`)); // new takes reuse the names
           apply(result);
           setMessage(message, `Deleted ${plural(result.removed, "take")} of ${languageName(code)}.`);
         } catch (error) { fail(error); }

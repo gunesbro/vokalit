@@ -39,7 +39,8 @@ file. Everything is done by clicking in a desktop window.
     whitespace. A line override equal to the session's value is not stored.
   - **Playback volume:** a speaker button at the bottom of the rail opens a slider (0-100 %, squared, kept between runs)
   and Mute; every sound the app plays follows it (players, Studio playback, the Dub preview), never exported or
-  generated files (`volume.js`).
+  generated files (`volume.js`). It and the Dub panes' sizes are kept by the server (`GET`/`PATCH /api/preferences`,
+  `.local/webview/preferences.json`): the page's own storage belongs to its address, whose port changes every launch.
 - **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
     before saving), or designed from a description by OmniVoice (its attributes) or VoxCPM2 (free text).
     Session-only characters can be saved to the library.
