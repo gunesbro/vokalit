@@ -227,6 +227,17 @@ TOOLS = {
         # Runs on the CPU (int8): no PyTorch, and the GPU stays free for the voice models.
         "pip_steps": [("faster-whisper", ["faster-whisper==1.2.1"])],
     },
+    "demucs": {
+        "title": "Voice separation (Demucs)",
+        "summary": "Separates speech from music and effects for Dub: voices are copied from clean speech, and the "
+                   "music stays at full level under the dub.",
+        "url": "https://github.com/facebookresearch/demucs",
+        "disk_gb": 0.6,  # estimate, besides PyTorch (shared with the voice models)
+        "license": "Code MIT. The pretrained htdemucs weights have no clear license (an old note calls them research "
+                   "use); they are downloaded to this computer by the install, never shipped with Vokalit.",
+        # PyTorch (the shared CUDA build) runs it on the GPU when there is one, else on the CPU.
+        "pip_steps": [("PyTorch", TORCH_CUDA), ("Demucs", ["demucs==4.0.1", "soundfile"])],
+    },
 }
 
 
@@ -851,6 +862,14 @@ def transcribe(audio, language):
         raise RuntimeError("Whisper is not installed.")
     reply = _request("whisper", {"task": "transcribe", "audio": audio, "language": language})
     return {"text": reply["text"], "language": reply.get("language")}
+
+
+def separate(audio, voices, background):
+    """Splits the WAV `audio` into the WAVs `voices` (speech, singing) and `background` (music, effects), with Demucs,
+    on this computer."""
+    if not is_installed("demucs"):
+        raise RuntimeError("Voice separation is not installed. Install it in Models.")
+    _request("demucs", {"task": "separate", "audio": audio, "voices": voices, "background": background})
 
 
 def transcribe_segments(audio, language):
