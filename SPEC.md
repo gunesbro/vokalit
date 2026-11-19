@@ -265,10 +265,18 @@ All interface text is English. The visual design is the design canvas; behaviour
   timing, model and settings (one dub track per language; old dubs migrate on load). Layout: top bar (name, source
   language -> language tabs, model, settings, progress "translated / voiced / too long", Undo/Redo, Generate missing, Export, Transcribe again);
   a compact table (#, time, original, translation edited in place, status), filters with counts (All, Untranslated,
-  No take, Too long), "Copy for translation" (numbered, with an instruction naming the target language) and "Paste
-  translations" (placed by number, or in order; summary of found and missing; one request); on the right the video
+  No take, Too long), "Copy for translation" (numbered, each line with its time until the next sentence, "[3.4 s]", and
+  an instruction naming the target language and asking for translations short enough) and "Paste
+  translations" (placed by number, or in order, a copied-back time dropped; summary of found and missing; one request);
+  only the rows in view are drawn (fixed 38 px rows; the row being typed in stays drawn), lookups are built once per
+  change, and the timeline draws only the clips around its window, so tens of thousands of sentences stay quick;
+  dub.json is written compact. Fit: a too-long take is sped up with the same pitch (WSOLA, `app/stretch.py`) to end
+  0.05 s before the next sentence, as a new selected take that remembers its original (fitting again starts from it),
+  up to 1.25x; beyond that, "Shorten the translation". "Fit" on the selected sentence, "Fit N" in the Too long tab (a
+  job, cancellable); sped-up sentences stay under Too long, showing their speed ("1.18x") in the table, the details
+  and the takes list; on the right the video
   (muted; or a clock for audio) with the original under the takes through Web Audio, and the selected sentence:
-  original text (the voice sample's transcript), translation, Voice from (default this sentence; never neighbours,
+  original text (the voice sample's transcript), translation, Voice from (a search list; default this sentence; never neighbours,
   which may be another speaker), takes to pick and play, Generate, Delete; below, the timeline (`timeline.js`: lanes and
   clips in seconds, a ~30 s window that follows the playhead, zoom, the original's waveform, overlaps in red, Dub
   clips dragged). Playback marks the sentence being played and selects it unless you are typing. Keys: Up/Down,
@@ -278,7 +286,7 @@ All interface text is English. The visual design is the design canvas; behaviour
   with 50 ms fades, and skip its takes. Undo/Redo (Ctrl+Z, Ctrl+Shift+Z/Ctrl+Y outside text boxes), per dub
   while the app runs, last 100 steps: text and translation edits, pasted translations, moves, Voice from, take
   choice, deleted sentences (their take files stay until the dub is deleted), generations (the previous takes are
-  selected again), model, language, settings, volume, name. Transcribing again is confirmed and not undoable.
+  selected again, in one request), fits (likewise), model, language, settings, volume, name. Transcribing again is confirmed and not undoable.
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not
