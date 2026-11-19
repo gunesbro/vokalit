@@ -1,7 +1,8 @@
 // Characters screen: library list, rename, delete, and the samples panel (also used by Studio).
-import { api, editableTitle, el, icon, ICONS, rememberMicrophone, revealButton, setMessage, waitForJob } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, lastOpened, rememberMicrophone, rememberOpened, revealButton, setMessage,
+  waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record, trim } from "./audio.js";
-import { designLanguage, designText, isCut } from "./script.js";
+import { descriptionGroups, designLanguage, designText, isCut, pickSelected } from "./script.js";
 import { searchSelect } from "./settings.js";
 import { player, rangeEditor, stopAudio } from "./waveform.js";
 
@@ -31,6 +32,10 @@ function languages() {
   return allLanguages;
 }
 
+// Open "Design a voice" panels by "<session>/<character>": choices, the running job and its results, kept while the
+// app runs so they survive a change of screen.
+const designs = new Map();
+
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const query = (sessionId) => (sessionId ? `?session=${encodeURIComponent(sessionId)}` : "");
 
@@ -52,7 +57,8 @@ export async function renderCharacters(root) {
     main);
 
   let characters = [];
-  const selectedId = () => (location.hash.match(/^#\/characters\/([0-9-]+)/) || [])[1] || characters[0]?.id;
+  const selectedId = () => pickSelected(characters.map((c) => c.id),
+    (location.hash.match(/^#\/characters\/([0-9-]+)/) || [])[1], lastOpened("characters"));
 
   async function refreshList() {
     characters = await api("GET", "/api/characters");
@@ -83,6 +89,7 @@ export async function renderCharacters(root) {
       main.append(el("div", { class: "empty" }, el("p", {}, "This character no longer exists.")));
       return;
     }
+    rememberOpened("characters", id);
     main.append(header(character), el("div", { class: "main-body" }, samplePanel(null, id, null, refreshList)));
   }
 
@@ -376,7 +383,9 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
       }
     }
 
-    // Design: a model speaks a text in voices made from a description; one of them is kept as a sample.
+    // Design: a model speaks a text in voices made from a description; one of them is kept as a sample. The panel's
+    // state lives in `designs`, so leaving the screen and coming back shows the same panel, job and results.
+    const designKey = `${sessionId || ""}/${charId}`;
     async function toggleDesigner() {
       if (!designer.hidden) return closeDesigner();
       designer.hidden = false;
@@ -388,18 +397,19 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
         designer.hidden = true;
         return fail(error);
       }
-      drawDesigner(list);
+      if (!designs.has(designKey)) designs.set(designKey, { text: null, description: "", job: null, result: null });
+      drawDesigner(list, designs.get(designKey));
     }
 
-    let designJob = null; // the running job, cancelled when the panel closes
     function closeDesigner() {
-      if (designJob) api("POST", `/api/jobs/${designJob}/cancel`).catch(() => {});
-      designJob = null;
+      const job = designs.get(designKey)?.job;
+      if (job) api("POST", `/api/jobs/${job.id}/cancel`).catch(() => {});
+      designs.delete(designKey);
       designer.hidden = true;
       designer.replaceChildren();
     }
 
-    function drawDesigner(list) {
+    function drawDesigner(list, state) {
       const usable = list.filter((m) => m.installed);
       const head = el("div", { class: "row" }, el("h4", {}, "Design a voice"), el("div", { class: "spacer" }),
         el("button", { class: "btn btn-ghost btn-small", onclick: closeDesigner }, "Close"));
@@ -409,17 +419,17 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
           el("a", { href: "#/models" }, "Models screen"), "."));
         return;
       }
-      let model = usable[0];
-      let language = "en";
-      let typedText = false;
+      let model = usable.find((m) => m.name === state.model) || usable[0];
       const modelSelect = el("select", { class: "select", "aria-label": "Model", onchange: () => {
         model = usable.find((m) => m.name === modelSelect.value);
+        state.model = model.name;
         drawOptions();
       } }, ...list.map((m) => el("option", { value: m.name, disabled: !m.installed },
         m.installed ? m.title : `${m.title} (install it in Models)`)));
       modelSelect.value = model.name;
+      // state.text is null while the default sentence is shown, so a language change replaces it.
       const text = el("textarea", { class: "textarea", rows: 3, "aria-label": "Text the voices read",
-        oninput: () => { typedText = true; textNote.hidden = true; } });
+        oninput: () => { state.text = text.value; textNote.hidden = true; } });
       const languageHolder = el("span");
       const textNote = el("div", { class: "warn small", hidden: true });
       const description = el("div", { class: "row wrap" });
@@ -430,16 +440,16 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
 
       function setLanguage(code) {
         const sentence = designText(code);
-        if (!typedText) text.value = sentence.text;
-        language = code;
+        text.value = state.text ?? sentence.text;
+        state.language = code;
         const name = model.languages.find((l) => l.code === code)?.name || code;
-        textNote.hidden = typedText || sentence.own;
+        textNote.hidden = state.text !== null || sentence.own;
         textNote.textContent = `This sentence is English: write one in ${name} so the voices speak it.`;
         drawDescription(); // OmniVoice accents are for English only
       }
 
       function drawOptions() {
-        const code = designLanguage(model.languages.map((l) => l.code), language);
+        const code = designLanguage(model.languages.map((l) => l.code), state.language || "en");
         languageHolder.replaceChildren(searchSelect({ label: "Language", small: true, value: code,
           options: model.languages.map((l) => ({ value: l.code, label: l.name })), onChange: setLanguage }));
         setLanguage(code);
@@ -447,43 +457,64 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
 
       function drawDescription() {
         if (model.design.kind === "text") {
-          const box = el("input", { class: "input design-text", maxlength: model.design.max_length,
-            "aria-label": "Voice description", placeholder: "e.g. a warm, deep male voice, speaking slowly" });
+          const box = el("input", { class: "input design-text", maxlength: model.design.max_length, value: state.description,
+            "aria-label": "Voice description", placeholder: "e.g. a warm, deep male voice, speaking slowly",
+            oninput: () => { state.description = box.value; } });
           describe = () => box.value;
           return description.replaceChildren(box);
         }
         const options = model.design.options;
-        const pick = (group, name) => el("select", { class: "select select-small", "aria-label": name, "data-group": group },
-          el("option", { value: "" }, `Any ${name.toLowerCase()}`), ...options[group].map((o) => el("option", { value: o }, o)));
+        const chosen = descriptionGroups(options, state.description); // kept across language and model changes
+        const remember = () => { state.description = describe(); };
+        const pick = (group, name) => {
+          const select = el("select", { class: "select select-small", "aria-label": name, "data-group": group, onchange: remember },
+            el("option", { value: "" }, `Any ${name.toLowerCase()}`), ...options[group].map((o) => el("option", { value: o }, o)));
+          select.value = chosen[group] || "";
+          return select;
+        };
         const selects = [pick("gender", "Gender"), pick("age", "Age"), pick("pitch", "Pitch")];
-        if (language === "en") selects.push(pick("accent", "Accent"));
-        const whisper = el("input", { type: "checkbox" });
+        if (state.language === "en") selects.push(pick("accent", "Accent"));
+        const whisper = el("input", { type: "checkbox", checked: chosen.style === "whisper", onchange: remember });
         describe = () => [...selects.map((s) => s.value), whisper.checked ? "whisper" : ""].filter(Boolean).join(", ");
         description.replaceChildren(...selects, el("label", { class: "row small" }, whisper, "Whisper"));
       }
 
       async function run() {
+        try {
+          const job = await api("POST", `/api/characters/${charId}/design${query(sessionId)}`,
+            { model: model.name, language: state.language, text: text.value, description: describe() });
+          state.result = null;
+          state.error = null;
+          // The job keeps running when the screen changes; the panel drawn on return follows the same promise.
+          state.job = { id: job.id, done: waitForJob(job.id).then((result) => { state.result = result; },
+            (error) => { state.error = error; throw error; })
+            .finally(() => { if (state.job?.id === job.id) state.job = null; }) };
+          follow();
+        } catch (error) {
+          status.className = "small warn";
+          status.textContent = error.message;
+        }
+      }
+
+      async function follow() {
+        const { id, done } = state.job;
         generate.disabled = true;
         results.replaceChildren();
         status.className = "small muted";
-        status.replaceChildren("Generating\u2026");
+        status.replaceChildren("Generating\u2026", " ", el("button", { class: "btn btn-ghost btn-small", onclick: () => {
+          api("POST", `/api/jobs/${id}/cancel`).catch(() => {});
+        } }, "Cancel"));
         try {
-          const job = await api("POST", `/api/characters/${charId}/design${query(sessionId)}`,
-            { model: model.name, language, text: text.value, description: describe() });
-          designJob = job.id;
-          status.append(" ", el("button", { class: "btn btn-ghost btn-small", onclick: () => {
-            api("POST", `/api/jobs/${job.id}/cancel`).catch(() => {});
-          } }, "Cancel"));
-          const result = await waitForJob(job.id);
-          if (designJob !== job.id) return; // the panel was closed
+          await done;
+          if (!status.isConnected || designs.get(designKey) !== state) return; // left or closed
           status.textContent = "Listen and keep the one you like.";
-          drawCandidates(result);
+          drawCandidates(state.result);
         } catch (error) {
+          if (!status.isConnected) return;
           status.className = error.cancelled ? "small muted" : "small warn";
           status.textContent = error.cancelled ? "Cancelled." : error.message;
         } finally {
-          designJob = null;
-          generate.disabled = false;
+          if (status.isConnected) generate.disabled = false;
         }
       }
 
@@ -514,6 +545,14 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
         el("div", { class: "faint small" }, `Keep the text long enough for ${MIN_SECONDS} seconds of speech.`),
         el("div", { class: "row" }, generate, status), results);
       drawOptions();
+      if (state.job) follow();
+      else if (state.error) {
+        status.className = state.error.cancelled ? "small muted" : "small warn";
+        status.textContent = state.error.cancelled ? "Cancelled." : state.error.message;
+      } else if (state.result) {
+        status.textContent = "Listen and keep the one you like.";
+        drawCandidates(state.result);
+      }
     }
 
     // known: what a designed sample says, its language and label, so Whisper is not asked.
@@ -613,6 +652,7 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
     }
 
     fillMicrophones();
+    if (designs.has(designKey)) toggleDesigner(); // it was open when the screen was left
     return box;
   }
 

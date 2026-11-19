@@ -102,6 +102,11 @@ export function setMessage(node, text = "", kind = "info") {
   node.setAttribute("role", "status");
 }
 
+// The list item each screen had open (a session, a character), so coming back to the screen continues there.
+const opened = {};
+export const lastOpened = (screen) => opened[screen];
+export const rememberOpened = (screen, id) => { opened[screen] = id; };
+
 const SCREENS = {
   models: renderModels,
   studio: renderStudio,

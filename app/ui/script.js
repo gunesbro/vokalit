@@ -123,3 +123,18 @@ export const designLanguage = (codes, current) => (codes.includes(current) ? cur
 
 // Whether a review range cuts the clip (more than a hair at either end), so its known text may no longer match.
 export const isCut = (start, end, duration) => start > 0.05 || end < duration - 0.05;
+
+// Which list item a screen opens: the one in the address, else the one open last time if it still exists, else the
+// first.
+export const pickSelected = (ids, fromAddress, remembered) =>
+  fromAddress || (ids.includes(remembered) ? remembered : ids[0]);
+
+// An OmniVoice description ("female, elderly") as {group: attribute}, to fill the selects again.
+export function descriptionGroups(options, description) {
+  const groups = {};
+  for (const item of description.split(",").map((part) => part.trim()).filter(Boolean)) {
+    const group = Object.keys(options).find((g) => options[g].includes(item));
+    if (group) groups[group] = item;
+  }
+  return groups;
+}

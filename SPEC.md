@@ -263,8 +263,10 @@ All interface text is English. The visual design is the design canvas; behaviour
   installed are listed but disabled), language, a default ~15-20 s text, the description (OmniVoice: gender, age, pitch,
   English accent selects and Whisper; VoxCPM2: a text box), "Generate 3 voices" (Cancel while running; candidates under 10 s are
   marked "Too short" and cannot be kept) and "Keep this one", which opens the same review with the text, language and description (as the label) filled in; the source is
-  "designed". Note: "Only use your own voice or voices you have
-  permission to use."
+  "designed". The open Design panel keeps its choices, running job and results while the app runs, so leaving the
+  screen and coming back shows them again. Note: "Only use your own voice or voices you have permission to use."
+- Coming back to Studio or Characters opens the session or character that was open last (while the app runs), not
+  the first in the list.
 - **Models:** as in §6.1.
 - Messages appear on the page (a message line per screen), not as pop-up toasts.
 

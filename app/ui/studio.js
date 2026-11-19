@@ -1,9 +1,11 @@
 // Studio screen: sessions, cast, script lines with takes, generation, export.
-import { api, editableTitle, el, icon, ICONS, rememberMicrophone, revealButton, setMessage, waitForJob } from "./app.js";
+import { api, editableTitle, el, icon, ICONS, lastOpened, rememberMicrophone, rememberOpened, revealButton, setMessage,
+  waitForJob } from "./app.js";
 import { decode, encodeWav, microphones, record } from "./audio.js";
 import { avatar, characterColors, samplePanel } from "./characters.js";
 import { soundEditor, soundText } from "./editor.js";
-import { commonLanguages, findPlayable, formatTime, moveLine, settingsChanges, splitSentences, takeNumber } from "./script.js";
+import { commonLanguages, findPlayable, formatTime, moveLine, pickSelected, settingsChanges, splitSentences, takeNumber }
+  from "./script.js";
 import { contextMenu, dot, modelColor, modelPicker, modelTabs, popover, searchSelect, sliders } from "./settings.js";
 import { pauseAll, player, rangeEditor, stopAudio } from "./waveform.js";
 
@@ -128,7 +130,8 @@ export async function renderStudio(root) {
   const castEntry = (id) => session.cast.find((c) => c.character === id);
   const fail = (error) => setMessage(message, error.message, "error");
   const sid = () => session.id;
-  const selectedId = () => (location.hash.match(/^#\/studio\/([0-9-]+)/) || [])[1] || sessions[0]?.id;
+  const selectedId = () => pickSelected(sessions.map((s) => s.id), (location.hash.match(/^#\/studio\/([0-9-]+)/) || [])[1],
+    lastOpened("studio"));
 
   function sampleOf(line) {
     const entry = castEntry(line.character);
@@ -166,6 +169,7 @@ export async function renderStudio(root) {
     const changed = session?.id !== id;
     try {
       session = await api("GET", `/api/sessions/${id}`);
+      rememberOpened("studio", id);
       if (changed) {
         performing?.recorder.stop().catch(() => {});
         performing = null;

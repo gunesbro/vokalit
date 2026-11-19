@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, pickerLabel, settingsChanges,
+import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, pickSelected,
+  pickerLabel, settingsChanges,
   takeNumber } from "../script.js";
 
 test("moveLine places a line before or after the target", () => {
@@ -114,4 +115,18 @@ test("isCut tells a trimmed clip from the whole one", () => {
 test("designText sentences are long enough for a 10 s sample", () => {
   // Measured: the Turkish sentence of 22 words came out at 4-9.9 s with OmniVoice.
   for (const code of ["en", "tr"]) assert.ok(designText(code).text.split(/\s+/).length >= 38, code);
+});
+
+test("pickSelected prefers the address, then the remembered one if it still exists, then the first", () => {
+  assert.equal(pickSelected(["a", "b", "c"], "c", "b"), "c");
+  assert.equal(pickSelected(["a", "b", "c"], undefined, "b"), "b");
+  assert.equal(pickSelected(["a", "b"], undefined, "gone"), "a");
+  assert.equal(pickSelected([], undefined, "b"), undefined);
+});
+
+test("descriptionGroups maps a description back to its attribute groups", () => {
+  const options = { gender: ["male", "female"], age: ["elderly"], style: ["whisper"], accent: ["british accent"] };
+  assert.deepEqual(descriptionGroups(options, "female, elderly, whisper"), { gender: "female", age: "elderly", style: "whisper" });
+  assert.deepEqual(descriptionGroups(options, ""), {});
+  assert.deepEqual(descriptionGroups(options, "british accent, purple"), { accent: "british accent" });
 });
