@@ -260,9 +260,9 @@ All interface text is English. The visual design is the design canvas; behaviour
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not
-  installed are listed but disabled), language, a default ~12 s text, the description (OmniVoice: gender, age, pitch,
-  English accent selects and Whisper; VoxCPM2: a text box), "Generate 3 voices" (Cancel while running) and "Keep this
-  one", which opens the same review with the text, language and description (as the label) filled in; the source is
+  installed are listed but disabled), language, a default ~15-20 s text, the description (OmniVoice: gender, age, pitch,
+  English accent selects and Whisper; VoxCPM2: a text box), "Generate 3 voices" (Cancel while running; candidates under 10 s are
+  marked "Too short" and cannot be kept) and "Keep this one", which opens the same review with the text, language and description (as the label) filled in; the source is
   "designed". Note: "Only use your own voice or voices you have
   permission to use."
 - **Models:** as in §6.1.

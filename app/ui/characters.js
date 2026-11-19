@@ -489,16 +489,21 @@ export function samplePanel(container, charId, sessionId, onChange = () => {}) {
 
       function drawCandidates(result) {
         const label = (result.description || "designed voice").slice(0, 40);
-        results.replaceChildren(...result.candidates.map((candidate, i) => el("div", { class: "row design-candidate" },
-          player(`/files/${candidate.file}`, { label: `Play voice ${i + 1}` }),
-          el("button", { class: "btn btn-small", onclick: async () => {
-            try {
-              const { samples, sampleRate } = await decode(`/files/${candidate.file}`);
-              showReview(samples, sampleRate, "design", { text: result.text, language: result.language, label });
-            } catch (error) {
-              fail(error);
-            }
-          } }, "Keep this one"))));
+        results.replaceChildren(...result.candidates.map((candidate, i) => {
+          const short = candidate.seconds < MIN_SECONDS; // the review would refuse it
+          return el("div", { class: "row design-candidate" },
+            player(`/files/${candidate.file}`, { label: `Play voice ${i + 1}` }),
+            short && el("span", { class: "warn small" }, "Too short"),
+            el("button", { class: "btn btn-small", disabled: short,
+              title: short ? `Samples need ${MIN_SECONDS} seconds: make the text longer.` : "", onclick: async () => {
+                try {
+                  const { samples, sampleRate } = await decode(`/files/${candidate.file}`);
+                  showReview(samples, sampleRate, "design", { text: result.text, language: result.language, label });
+                } catch (error) {
+                  fail(error);
+                }
+              } }, "Keep this one"));
+        }));
       }
 
       designer.replaceChildren(head,

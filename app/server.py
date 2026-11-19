@@ -529,7 +529,8 @@ def design_voice(req, cid):
                 raise
             finally:
                 job["model"] = None
-            candidates.append({"file": out.relative_to(ws.workspace_root()).as_posix(), "seed": seed})
+            candidates.append({"file": out.relative_to(ws.workspace_root()).as_posix(), "seed": seed,
+                               "seconds": round(ws.wav_duration(out), 2)})
         return {"candidates": candidates, "text": text, "language": language, "description": description}
     return _start_job(work, kind="design")
 

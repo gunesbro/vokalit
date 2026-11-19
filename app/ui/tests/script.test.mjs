@@ -110,3 +110,8 @@ test("isCut tells a trimmed clip from the whole one", () => {
   assert.equal(isCut(1.5, 12, 12), true);
   assert.equal(isCut(0, 9, 12), true);
 });
+
+test("designText sentences are long enough for a 10 s sample", () => {
+  // Measured: the Turkish sentence of 22 words came out at 4-9.9 s with OmniVoice.
+  for (const code of ["en", "tr"]) assert.ok(designText(code).text.split(/\s+/).length >= 38, code);
+});

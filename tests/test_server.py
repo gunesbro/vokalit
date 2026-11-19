@@ -1026,6 +1026,7 @@ def test_design_makes_three_candidates(api, tmp_workspace, monkeypatch):
     assert len(result["candidates"]) == 3 and len({c["seed"] for c in result["candidates"]}) == 3
     for candidate in result["candidates"]:
         assert candidate["file"].startswith(".tmp/")
+        assert candidate["seconds"] == 1.0  # the review needs 10 s, so short ones are marked
         assert api("GET", f"/files/{candidate['file']}")[0] == 200
     assert [c[0] for c in calls] == ["omnivoice"] * 3
 

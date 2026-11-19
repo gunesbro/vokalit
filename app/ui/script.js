@@ -103,12 +103,17 @@ export function filterOptions(options, search) {
   return options.map((o) => [rank(o), o]).filter(([r]) => r !== null).sort((a, b) => a[0] - b[0]).map(([, o]) => o);
 }
 
-// What designed voices read: about 12 seconds of speech, so a candidate is long enough to keep as a sample.
+// What designed voices read: about 15-20 seconds of speech, so a candidate is long enough to keep as a sample even
+// when the model speaks fast.
 const DESIGN_TEXT = {
   en: "The morning was quiet, and the city was just waking up. I poured a cup of coffee, opened the window, "
-    + "and listened to the rain for a while before the long day began.",
+    + "and listened to the rain for a while before the long day began. Somewhere down the street, a bus stopped, "
+    + "a dog barked, and an old radio started playing a familiar song.",
   tr: "Sabah sessizdi ve \u015fehir yeni uyan\u0131yordu. Bir fincan kahve koydum, pencereyi a\u00e7t\u0131m ve uzun "
-    + "g\u00fcn ba\u015flamadan \u00f6nce bir s\u00fcre ya\u011fmuru dinledim. Hava serindi ve sokaklar bombo\u015ftu.",
+    + "g\u00fcn ba\u015flamadan \u00f6nce bir s\u00fcre ya\u011fmuru dinledim. Hava serindi ve sokaklar bombo\u015ftu. "
+    + "Soka\u011f\u0131n sonunda bir otob\u00fcs durdu, bir k\u00f6pek havlad\u0131 ve eski bir radyoda tan\u0131d\u0131k "
+    + "bir \u015fark\u0131 \u00e7almaya ba\u015flad\u0131. Kahvemi bitirip pencereyi kapatt\u0131m ve i\u015fe gitmek "
+    + "i\u00e7in haz\u0131rlanmaya ba\u015flad\u0131m.",
 };
 // The sentence for a language; own is false when it falls back to English.
 export const designText = (language) => ({ text: DESIGN_TEXT[language] || DESIGN_TEXT.en, own: language in DESIGN_TEXT });
