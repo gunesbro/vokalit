@@ -47,7 +47,8 @@ English script. Unmute the player to listen.
   with filters (untranslated, no take, too long), the video and the selected sentence beside it, and a zoomable
   timeline with the original's waveform where a translation that runs long shows red and clips can be dragged.
   *Copy for translation* copies every sentence, numbered, for the translation tool you like; *Paste translations*
-  puts its reply back. Every change can be undone (Ctrl+Z). The mix is exported as one audio file. Made for clips up
+  puts its reply back. One dub can have several target languages (tabs), each with its own translations, takes,
+  timing and model. Every change can be undone (Ctrl+Z). The mix is exported as one audio file. Made for clips up
   to about 20 minutes.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.

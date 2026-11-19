@@ -260,8 +260,10 @@ All interface text is English. The visual design is the design canvas; behaviour
 - **Dub:** list of dubs (new from a file or by dropping one, rename, delete); import reads the file's sound in the
   window (MP4, WebM, WAV, MP3, M4A, OGG, FLAC; size and length shown, a warning past 20 minutes; a video whose sound
   the window cannot read asks for its audio as a separate file) and copies the file into `workspace/dubs/<id>/`;
-  Whisper (timed segments, long ones split at sentence ends) makes the sentences. Layout: top bar (name, from -> to,
-  model, settings, progress "translated / voiced / too long", Undo/Redo, Generate missing, Export, Transcribe again);
+  Whisper (timed segments, long ones split at sentence ends) makes the sentences, shared by every target language;
+  each language is a tab ("+ Add language"; x removes one, confirmed, not undoable) with its own translations, takes,
+  timing, model and settings (one dub track per language; old dubs migrate on load). Layout: top bar (name, source
+  language -> language tabs, model, settings, progress "translated / voiced / too long", Undo/Redo, Generate missing, Export, Transcribe again);
   a compact table (#, time, original, translation edited in place, status), filters with counts (All, Untranslated,
   No take, Too long), "Copy for translation" (numbered, with an instruction naming the target language) and "Paste
   translations" (placed by number, or in order; summary of found and missing; one request); on the right the video

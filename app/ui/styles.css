@@ -555,8 +555,9 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 
 /* Dub: a subtitle-editor layout (table | video and selected sentence, timeline below) */
 .dub-head { flex-wrap: nowrap; gap: 8px; }
-.dub-head .title-input { width: 160px; }
-.dub-head .editable-title { min-width: 0; flex: 0 1 auto; }
+
+.dub-head .editable-title { min-width: 110px; flex: 0 1 170px; }
+.dub-head .title-input { width: 100%; }
 .dub-langs { gap: 6px; }
 .dub-progress { white-space: nowrap; }
 .dub-layout { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
@@ -594,3 +595,7 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .ok { color: var(--ok); }
 .paste-menu { padding: 10px; gap: 8px; width: min(560px, 80vw); }
 .paste-box { width: 100%; resize: vertical; }
+.dub-tabs { gap: 2px; }
+.dub-tab { display: inline-flex; align-items: center; border-radius: 6px; }
+.dub-tab.active { background: var(--hover); }
+.dub-tab .tab-x { border: none; background: none; color: var(--faint, var(--muted)); cursor: pointer; padding: 0 6px 0 0; }
