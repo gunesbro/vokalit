@@ -160,8 +160,9 @@ def delete_source_clip(dub_id: str, clip_id: str) -> None:
                 clip["voice_from"] = clip["source_clip"]
 
 
-def restore_sentence(dub_id: str, source: dict, clip: dict, index: int) -> None:
-    """Puts a deleted sentence (its source clip and dub clip, as they were) back at `index`, or at the end."""
+def restore_sentence(dub_id: str, source: dict, clip: dict, index: int, voices: list[str] = ()) -> None:
+    """Puts a deleted sentence (its source clip and dub clip, as they were) back at `index`, or at the end. `voices`:
+    the dub clips that took their voice from it before the delete, pointed back at it."""
     with _editing(dub_id) as data:
         taken = {c["id"] for c in _source_clips(data)} | {c["id"] for c in _dub_clips(data)}
         if source["id"] in taken or clip["id"] in taken:
@@ -173,6 +174,9 @@ def restore_sentence(dub_id: str, source: dict, clip: dict, index: int) -> None:
         _dub_clips(data).insert(place, {**clip, "voice_from": clip["voice_from"]
                                         if any(c["id"] == clip["voice_from"] for c in _source_clips(data))
                                         else source["id"]})
+        for other in _dub_clips(data):
+            if other["id"] in voices:
+                other["voice_from"] = source["id"]
 
 
 def update_dub_clip(dub_id: str, clip_id: str, *, start: float | None = None, translation: str | None = None,

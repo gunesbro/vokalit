@@ -194,33 +194,37 @@ export function parseTranslations(reply, count) {
   return { texts, missing: texts.flatMap((text, i) => (text === null ? [i + 1] : [])) };
 }
 
-// Undo/redo of steps {label, undo, redo} (async). A new step clears redo; past `limit` the oldest step is dropped. A step
-// whose undo or redo fails stays where it was.
+// Undo/redo of steps {label, undo, redo} (async; what they return is kept as lastResult(), e.g. the dub as saved). A new
+// step clears redo; past `limit` the oldest step is dropped. A step whose undo or redo fails stays where it was. While
+// one undo or redo runs, others are ignored (a held Ctrl+Z must not undo the same step twice).
 export function createHistory(limit = 100) {
   const done = [];
   const undone = [];
+  let busy = false;
+  let result = null;
+  const move = async (from, to, action) => {
+    const step = from.at(-1);
+    if (!step || busy) return null;
+    busy = true;
+    try {
+      result = await step[action]();
+    } finally {
+      busy = false;
+    }
+    to.push(from.pop());
+    return step.label;
+  };
   return {
     push(step) {
       done.push(step);
       if (done.length > limit) done.shift();
       undone.length = 0;
     },
-    async undo() {
-      const step = done.at(-1);
-      if (!step) return null;
-      await step.undo();
-      undone.push(done.pop());
-      return step.label;
-    },
-    async redo() {
-      const step = undone.at(-1);
-      if (!step) return null;
-      await step.redo();
-      done.push(undone.pop());
-      return step.label;
-    },
+    undo: () => move(done, undone, "undo"),
+    redo: () => move(undone, done, "redo"),
     undoLabel: () => done.at(-1)?.label ?? null,
     redoLabel: () => undone.at(-1)?.label ?? null,
+    lastResult: () => result,
   };
 }
 

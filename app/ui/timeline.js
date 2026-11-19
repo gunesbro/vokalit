@@ -25,7 +25,7 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
   const playhead = el("div", { class: "tl-playhead", "aria-hidden": "true" });
   const range = el("span", { class: "faint small num" });
   const zoomOut = el("button", { type: "button", class: "btn btn-ghost btn-small", title: "Show more time",
-    "aria-label": "Zoom out", onclick: () => zoom(2) }, "−");
+    "aria-label": "Zoom out", onclick: () => zoom(2) }, "\u2212");
   const zoomIn = el("button", { type: "button", class: "btn btn-ghost btn-small", title: "Show less time",
     "aria-label": "Zoom in", onclick: () => zoom(0.5) }, "+");
   const element = el("div", { class: "timeline" },
@@ -93,7 +93,7 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
   function paint() {
     playhead.style.left = `${timeToX(time, scale)}px`;
     const from = visibleStart();
-    range.textContent = `${fmt(from)} – ${fmt(Math.min(total, from + width))}`;
+    range.textContent = `${fmt(from)} \u2013 ${fmt(Math.min(total, from + width))}`;
     const pixels = Math.max(1, scroller.clientWidth);
     const lane = content.querySelector(".tl-lane");
     canvas.width = pixels;

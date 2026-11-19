@@ -242,3 +242,26 @@ test("followWindow keeps the playhead visible, a page at a time", () => {
   assert.equal(followWindow(40, 30, 10, 100), 10);
   assert.equal(followWindow(0, 30, 95, 100), 70);
 });
+
+test("createHistory hands back what a step's undo and redo return", async () => {
+  const h = createHistory();
+  h.push({ label: "a", undo: async () => "before", redo: async () => "after" });
+  assert.deepEqual(await h.undo(), "a");
+  assert.equal(h.lastResult(), "before");
+  await h.redo();
+  assert.equal(h.lastResult(), "after");
+});
+
+test("createHistory ignores an undo while another is running", async () => {
+  const log = [];
+  let release;
+  const h = createHistory();
+  h.push({ label: "s1", undo: async () => log.push("undo s1"), redo: async () => {} });
+  h.push({ label: "s2", undo: () => new Promise((done) => { release = () => { log.push("undo s2"); done(); }; }), redo: async () => {} });
+  const first = h.undo();
+  assert.equal(await h.undo(), null);
+  release();
+  assert.equal(await first, "s2");
+  assert.deepEqual(log, ["undo s2"]);
+  assert.equal(h.undoLabel(), "s1");
+});

@@ -318,3 +318,14 @@ def test_select_take_none_clears_the_choice(tmp_workspace):
     dubs.select_take(dub, "d1", None)
     clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
     assert clip["selected"] is None and len(clip["takes"]) == 1
+
+
+def test_restore_sentence_points_voices_back_at_it(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.update_dub_clip(dub, "d2", voice_from="o1")
+    data = dubs.load_dub(dub)
+    source, clip = data["tracks"][0]["clips"][0], data["tracks"][1]["clips"][0]
+    dubs.delete_source_clip(dub, "o1")
+    dubs.restore_sentence(dub, source, clip, 0, voices=["d2"])
+    assert dubs.load_dub(dub)["tracks"][1]["clips"][1]["voice_from"] == "o1"

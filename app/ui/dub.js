@@ -151,7 +151,10 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   let filter = "all";
   let job = null; // {id, kind, clips: Set, progress}
   if (!histories.has(dub.id)) histories.set(dub.id, createHistory(100));
-  const history = histories.get(dub.id);
+  // Read on every use: Transcribe again starts a new history. Steps return the dub as saved, and whichever screen is
+  // open applies it, so undo works after leaving the screen and coming back.
+  const history = () => histories.get(dub.id);
+  let stopped = false;
   const message = el("div", { class: "message" });
   const fail = (error) => setMessage(message, error.message, "error");
   const installed = models.filter((m) => m.installed);
@@ -205,25 +208,38 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   async function act(label, run, revert) {
     try {
       apply(await run());
-      history.push({ label, undo: async () => apply(await revert()), redo: async () => apply(await run()) });
+      history().push({ label, undo: revert, redo: run });
       drawHeader();
     } catch (error) { fail(error); }
   }
 
   async function step(kind) {
+    if (job) return setMessage(message, "Wait for the current job to finish, then undo.", "warn");
     try {
-      const label = await history[kind]();
-      if (label) setMessage(message, `${kind === "undo" ? "Undid" : "Redid"} ${label}.`);
+      const label = await history()[kind]();
+      if (label) {
+        apply(history().lastResult());
+        setMessage(message, `${kind === "undo" ? "Undid" : "Redid"} ${label}.`);
+      }
     } catch (error) { fail(error); }
     drawHeader();
   }
 
   const sequence = async (requests) => { let last = null; for (const request of requests) last = await request(); return last; };
 
+  // Ctrl+Enter: the typed translation is saved first, so the take speaks it.
+  async function saveThenGenerate(clip, box) {
+    if (box.value !== box.dataset.saved) {
+      box.dataset.saved = box.value; // its blur must not save it a second time
+      await editTranslation(clip, box.value);
+    }
+    generate([clip.id]);
+  }
+
   function editTranslation(clip, text) {
     const before = clip.translation;
-    if (text.trim() === before) return;
-    act(`translation of sentence ${numberOf(clip.id)}`, () => api("PATCH", path(`/clips/${clip.id}`), { translation: text }),
+    if (text.trim() === before) return null;
+    return act(`translation of sentence ${numberOf(clip.id)}`, () => api("PATCH", path(`/clips/${clip.id}`), { translation: text }),
       () => api("PATCH", path(`/clips/${clip.id}`), { translation: before }));
   }
 
@@ -251,38 +267,46 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const index = clips().indexOf(clip);
     const source = sourceOf(clip);
     const number = index + 1;
+    // Sentences that took their voice from this one fall back to their own; undo points them back.
+    const voices = clips().filter((c) => c.id !== clip.id && c.voice_from === source.id).map((c) => c.id);
     if (selected === clip.id) selected = clips()[index + 1]?.id || clips()[index - 1]?.id || null;
     act(`deleting sentence ${number}`, () => api("DELETE", path(`/source/${source.id}`)),
-      () => api("POST", path("/source/restore"), { source, clip, index }));
+      () => api("POST", path("/source/restore"), { source, clip, index, voices }));
   }
 
   // --- Jobs ------------------------------------------------------------------------------------
 
   async function follow(started, kind, ids = []) {
-    const before = Object.fromEntries(clips().map((c) => [c.id, c.selected])); // for undoing a generation
+    // The generated sentences' takes before, for undoing the generation.
+    const before = Object.fromEntries(clips().filter((c) => ids.includes(c.id)).map((c) => [c.id, c.selected]));
     job = { id: started.id, kind, clips: new Set(ids), progress: started.progress || "" };
     draw();
     try {
-      apply(await waitForJob(started.id, (update) => {
+      const result = await waitForJob(started.id, (update) => {
         if (job && update.progress !== job.progress) {
           job.progress = update.progress;
           header.querySelector(".job-progress")?.replaceChildren(update.progress || "Working\u2026");
         }
-      }));
+      });
+      if (stopped) return; // the screen was left; the screen open now follows the job itself
+      apply(result);
       if (kind === "transcribe" && !dub.notice) {
         setMessage(message, `Found ${plural(sources().length, "sentence")}. Use \u201cCopy for translation\u201d, then `
           + "\u201cPaste translations\u201d, or type them in the table.");
       }
       if (kind === "generate") recordGeneration(before);
     } catch (error) {
+      if (stopped) return;
       if (error.cancelled) setMessage(message, "Cancelled.");
       else fail(error);
       apply(await api("GET", path()).catch(() => dub));
       if (kind === "generate") recordGeneration(before);
     } finally {
-      job = null;
-      draw();
-      refreshList().catch(() => {});
+      if (!stopped) {
+        job = null;
+        draw();
+        refreshList().catch(() => {});
+      }
     }
   }
 
@@ -291,8 +315,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const changed = clips().filter((c) => c.id in before && c.selected !== before[c.id]).map((c) => [c.id, before[c.id], c.selected]);
     if (!changed.length) return;
     const select = (index) => sequence(changed.map((item) => () => api("POST", path(`/clips/${item[0]}/select`), { file: item[index] })));
-    history.push({ label: `generating ${plural(changed.length, "sentence")}`, undo: async () => apply(await select(1)),
-      redo: async () => apply(await select(2)) });
+    history().push({ label: `generating ${plural(changed.length, "sentence")}`, undo: () => select(1), redo: () => select(2) });
   }
 
   async function transcribe() {
@@ -365,8 +388,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub\u2026")), { align: "right" });
     const exportButton = el("button", { class: "btn", disabled: !dub.source.duration, title: "Mix the dub into one audio file",
       onclick: () => popover(exportButton, exportPanel(), { align: "right" }) }, "Export");
-    const undoLabel = history.undoLabel();
-    const redoLabel = history.redoLabel();
+    const undoLabel = history().undoLabel();
+    const redoLabel = history().redoLabel();
     header.replaceChildren(
       editableTitle(name),
       el("span", { class: "row small muted dub-langs" }, dub.source.language ? languageName(dub.source.language) : "Not transcribed",
@@ -420,7 +443,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
             " to find the sentences and their times.")));
       return;
     }
-    const shown = new Set(clipFilter(all, dub.fit, filter));
+    const visible = clipFilter(all, dub.fit, filter);
+    const shown = new Set(visible);
     const ids = all.map((c) => c.id);
     const rows = all.filter((c) => shown.has(c.id)).map((clip) => {
       const number = numberOf(clip.id);
@@ -429,11 +453,14 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       const input = el("input", { class: "input dub-tr", value: clip.translation, "data-saved": clip.translation,
         "data-key": `tr-${clip.id}`, placeholder: "Translation", "aria-label": `Translation of sentence ${number}`,
         onblur: () => input.value !== input.dataset.saved && editTranslation(clip, input.value),
-        onkeydown: (e) => {
-          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); input.blur(); generate([clip.id]); }
-          else if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+        onkeydown: async (e) => {
+          if (e.isComposing) return; // an input method is still composing the text
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
-            const next = ids[ids.indexOf(clip.id) + (e.key === "ArrowUp" ? -1 : 1)];
+            await saveThenGenerate(clip, input);
+          } else if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            const next = visible[visible.indexOf(clip.id) + (e.key === "ArrowUp" ? -1 : 1)]; // within the filter
             input.blur();
             if (next) { choose(next); table.querySelector(`[data-key="tr-${next}"]`)?.focus(); }
           } else if (e.key === "Escape") { input.value = input.dataset.saved; input.blur(); }
@@ -486,7 +513,9 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const translation = el("textarea", { class: "textarea", rows: 3, value: clip.translation, "data-saved": clip.translation,
       "data-key": `insp-${clip.id}`, placeholder: "Translation", "aria-label": `Translation of sentence ${number} (details)`,
       onblur: () => translation.value !== translation.dataset.saved && editTranslation(clip, translation.value),
-      onkeydown: (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); translation.blur(); generate([clip.id]); } } });
+      onkeydown: (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); saveThenGenerate(clip, translation); }
+      } });
     const voice = el("select", { class: "select select-small", "aria-label": `Voice from, sentence ${number}`,
       title: "Whose voice and mood the sentence copies. A very short sentence clones weakly: pick a longer one of the same speaker.",
       onchange: () => {
@@ -777,10 +806,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     if (!main.isConnected) return document.removeEventListener("keydown", onKey);
     if (document.querySelector(".popover")) return;
     const inText = typing(e.target);
+    const onControl = Boolean(e.target?.closest?.("button, a")); // Enter and Space press it, as everywhere else
     const mod = e.ctrlKey || e.metaKey;
     if (mod && !inText && e.key.toLowerCase() === "z") { e.preventDefault(); step(e.shiftKey ? "redo" : "undo"); return; }
     if (mod && !inText && e.key.toLowerCase() === "y") { e.preventDefault(); step("redo"); return; }
-    if (inText) return;
+    if (inText || (onControl && (e.code === "Space" || e.key === "Enter"))) return;
     const visible = clipFilter(clips(), dub.fit, filter);
     if (e.code === "Space") { e.preventDefault(); play.toggle(); }
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -798,5 +828,5 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
   api("GET", path("/jobs")).then(([running]) => {
     if (running && !job && main.isConnected) follow(running, running.kind, running.clips);
   }).catch(() => {});
-  return { stop: () => { play.stop(); document.removeEventListener("keydown", onKey); }, transcribe };
+  return { stop: () => { stopped = true; play.stop(); document.removeEventListener("keydown", onKey); }, transcribe };
 }

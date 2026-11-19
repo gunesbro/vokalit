@@ -1057,7 +1057,8 @@ def restore_dub_sentence(req, did):
     """Undo of a deleted sentence: puts it back as it was."""
     _dub_or_404(did)
     body = req["json"]
-    dubs.restore_sentence(did, dict(body["source"]), dict(body["clip"]), int(body.get("index", 0)))
+    dubs.restore_sentence(did, dict(body["source"]), dict(body["clip"]), int(body.get("index", 0)),
+                          voices=[str(v) for v in body.get("voices", [])])
     return _dub_view(did)
 
 
