@@ -47,6 +47,10 @@ const sizes = { ...SIZES }; // the kept sizes are read when the first dub opens 
 let sizesRead = false;
 const saveSizes = () => savePreference("dubSizes", { ...sizes });
 const LISTENING = "Whisper is finding the sentences on the CPU; a long file takes a while.";
+const SEPARATING_THEN_LISTENING = "Separating the voices from the music, then Whisper finds the sentences; a long file "
+  + "takes a while.";
+const SEPARATING = "Separating the voices from the music and effects; a long file takes a while.";
+const SEPARATION_HINT = "Install Voice separation on the Models screen to keep the music and clean the voices.";
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select, [contenteditable]"));
 
 export async function renderDub(root) {
@@ -67,6 +71,7 @@ export async function renderDub(root) {
   let items = [];
   let models = [];
   let whisper = false;
+  let demucs = false; // Voice separation
   let formats = [];
   let view = null; // the open dub's screen (see openDub), stopped when another opens
   let transcribeNext = null; // a dub just imported: transcribed once it is open
@@ -97,7 +102,7 @@ export async function renderDub(root) {
     }
     rememberOpened("dub", id);
     try {
-      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, formats, refreshList });
+      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, demucs, formats, refreshList });
       if (transcribeNext === id) {
         transcribeNext = null;
         view.transcribe();
@@ -168,15 +173,17 @@ export async function renderDub(root) {
   window.addEventListener("hashchange", onHash);
 
   [models, formats] = await Promise.all([api("GET", "/api/models"), api("GET", "/api/export-formats").catch(() => [])]);
-  whisper = await api("GET", "/api/components")
-    .then(({ items: parts }) => Boolean(parts.find((c) => c.name === "whisper")?.installed)).catch(() => false);
+  const parts = await api("GET", "/api/components").then(({ items }) => items).catch(() => []);
+  const installedTool = (name) => Boolean(parts.find((c) => c.name === name)?.installed);
+  whisper = installedTool("whisper");
+  demucs = installedTool("demucs");
   await refreshList();
   show();
 }
 
 // One dub, laid out like a subtitle editor: a sentence table (left), the video and the selected sentence (right), and
 // the timeline (bottom). Every change the user makes goes through act(), so it can be undone. Returns {stop, transcribe}.
-function openDub(main, initial, { models, whisper, formats, refreshList }) {
+function openDub(main, initial, { models, whisper, demucs, formats, refreshList }) {
   if (!sizesRead) {
     Object.assign(sizes, preference("dubSizes", {}));
     sizesRead = true;
@@ -435,7 +442,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const before = Object.fromEntries(generating.filter((c) => wanted.has(c.id)).map((c) => [c.id, c.selected]));
     job = { id: started.id, kind, clips: new Set(ids), progress: started.progress || "" };
     // Also shown when the screen comes back to a transcription that is still running.
-    if (kind === "transcribe") setMessage(message, LISTENING);
+    if (kind === "transcribe") setMessage(message, listening());
+    if (kind === "separate") setMessage(message, SEPARATING);
     draw();
     try {
       const result = await waitForJob(started.id, (update) => {
@@ -446,6 +454,10 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       });
       if (stopped) return; // the screen was left; the screen open now follows the job itself
       apply(result);
+      if (kind === "separate") {
+        play.forgetStems(); // "Separate voices again" keeps the flag but replaces the files
+        setMessage(message, "Separated the voices: references and the export use them now.");
+      }
       if (kind === "transcribe" && !dub.notice) {
         setMessage(message, `Found ${plural(sources().length, "sentence")}. Use \u201cCopy for translation\u201d, then `
           + "\u201cPaste translations\u201d, or type them in the table.");
@@ -480,6 +492,15 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const label = `${kind === "fit" ? "fitting" : "generating"} ${plural(changed.length, "sentence")}`;
     history().push({ label: tracks().length > 1 ? `${label} (${languageName(language)})` : label, undo: () => select(previous),
       redo: () => select(next), language, takes: true });
+  }
+
+  // What a transcription does: it separates the voices first when it can (the server decides the same way).
+  const listening = () => (demucs && !dub.stems ? SEPARATING_THEN_LISTENING : LISTENING);
+
+  async function separate() {
+    try {
+      await follow(await api("POST", path("/separate"), {}), "separate");
+    } catch (error) { fail(error); }
   }
 
   async function transcribe() {
@@ -568,6 +589,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe again or delete" }, "\u22ef");
     more.onclick = () => popover(more, el("div", { class: "menu" },
       el("button", { class: "menu-item", disabled: Boolean(job) || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again\u2026"),
+      el("button", { class: "menu-item", disabled: Boolean(job) || !demucs || !dub.source.duration,
+        title: demucs ? "Separate the speech from the music and effects" : SEPARATION_HINT,
+        onclick: () => { close(); separate(); } }, dub.stems ? "Separate voices again" : "Separate voices"),
+      dub.stems && el("button", { class: "menu-item", disabled: Boolean(job), onclick: () => confirmFullMix(more) },
+        "Use the full mix\u2026"),
       el("button", { class: "menu-item danger", disabled: Boolean(job) || !takeCount(),
         onclick: () => confirmClearTakes(more) }, `Delete all takes of ${languageName(track().language)}\u2026`),
       el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub\u2026")), { align: "right" });
@@ -674,15 +700,18 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
           title: "Copy every sentence, numbered and with its times, with an instruction for a translation tool" }, "Copy for translation"),
         pasteButton()),
       // Too long or too short, split on a row of its own: what can still be fitted, what was, what needs another translation.
-      group && el("div", { class: "row dub-subrow" },
+      // (replaceChildren writes null as text, unlike el: "" when there is none.)
+      !group ? "" : el("div", { class: "row dub-subrow" },
         el("div", { class: "row dub-filters", role: "tablist", "aria-label": names[group] },
           GROUPS[group].keys.map((key) => chip(key, key === group ? "All" : names[key], filter === key))),
         el("div", { class: "spacer" }), fitButton(all, group), originalsButton(all, group)));
     if (!all.length) {
       table.replaceChildren(el("div", { class: "empty small" }, dub.source.language
         ? el("p", { class: "muted" }, "No sentences. Transcribe again, or import another file.")
-        : job?.kind === "transcribe" ? el("p", { class: "muted" }, LISTENING)
-        : whisper ? el("button", { class: "btn btn-primary", disabled: Boolean(job), onclick: transcribe }, "Find the sentences")
+        : job?.kind === "transcribe" ? el("p", { class: "muted" }, listening())
+        : whisper ? el("div", {},
+          el("button", { class: "btn btn-primary", disabled: Boolean(job), onclick: transcribe }, "Find the sentences"),
+          !demucs && el("p", { class: "faint small" }, SEPARATION_HINT))
           : el("p", { class: "muted" }, "Install Whisper on the ", el("a", { href: "#/models" }, "Models screen"),
             " to find the sentences and their times.")));
       return;
@@ -879,7 +908,7 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
             el("button", { class: "btn btn-small", disabled: Boolean(job), onclick: () => useOriginals([clip.id]),
               title: "Use the take as it was generated, before it was stretched" }, "Use the original"))
           : clipFit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet")),
-      cannotFit(clipFit) && el("div", { class: "faint small" }, cannotFit(clipFit)), // on its own line: it can be long
+      cannotFit(clipFit) ? el("div", { class: "faint small" }, cannotFit(clipFit)) : "", // on its own line: it can be long
       el("label", { class: "field-label" }, "Original"), original, keep,
       el("label", { class: "field-label" }, "Translation"), translation,
       el("div", { class: "row" }, el("label", { class: "row small muted" }, "Voice", voice)),
@@ -995,6 +1024,21 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
 
   const takeCount = () => clips().reduce((n, c) => n + c.takes.length, 0);
 
+  // Back to the original sound: the separated files are deleted (not undoable; Separate voices makes them again).
+  function confirmFullMix(anchor) {
+    popover(anchor, el("div", { class: "menu confirm-menu" },
+      el("strong", {}, "Use the full mix?"),
+      el("div", { class: "muted small" }, "The separated voices and background are deleted; references and the export "
+        + "use the original sound again."),
+      el("button", { class: "btn btn-danger", onclick: async () => {
+        close();
+        try {
+          apply(await api("DELETE", path("/separate")));
+          setMessage(message, "The full mix is used again.");
+        } catch (error) { fail(error); }
+      } }, "Use the full mix")), { align: "right" });
+  }
+
   // Every take of the language shown, files included; the sentences and translations stay. Not undoable.
   function confirmClearTakes(anchor) {
     const code = track().language;
@@ -1041,19 +1085,35 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     if (video) video.muted = true;
     const button = el("button", { class: "btn icon-btn transport-play", "aria-label": "Play", title: "Play (Space)" }, icon(ICONS.play));
     const clock = el("span", { class: "num small muted" }, "0:00");
-    const volume = el("input", { type: "range", min: 0, max: 1, step: 0.05, value: dub.original_volume,
-      "aria-label": "Original volume", title: "The original under the dub (music, effects). 0 = the dub alone." });
-    const volumeLabel = el("span", { class: "num small muted" }, `${Math.round(dub.original_volume * 100)} %`);
+    // Separated: the background always plays in full and the slider sets the original voices; otherwise the whole
+    // original under the dub.
+    const volumeKey = () => (dub.stems ? "voices_volume" : "original_volume");
+    const volume = el("input", { type: "range", min: 0, max: 1, step: 0.05 });
+    const volumeName = el("span");
+    const volumeLabel = el("span", { class: "num small muted" });
+    const showVolume = () => {
+      volume.value = dub[volumeKey()];
+      volumeLabel.textContent = `${Math.round(dub[volumeKey()] * 100)} %`;
+      volumeName.textContent = dub.stems ? "Original voices" : "Original";
+      volume.setAttribute("aria-label", dub.stems ? "Original voices' volume" : "Original volume");
+      volume.title = dub.stems ? "The original voices under the dub; the music and effects always play in full."
+        : "The original under the dub (music, effects). 0 = the dub alone.";
+    };
+    showVolume();
     stage.replaceChildren(video || el("div", { class: "dub-audio-only faint small" }, "Audio file \u2014 no picture"),
       el("div", { class: "row dub-transport" }, button, clock, el("div", { class: "spacer" }),
-        el("label", { class: "row small muted" }, "Original", volume, volumeLabel)));
+        el("label", { class: "row small muted" }, volumeName, volume, volumeLabel)));
     if (video) video.addEventListener("error", () => stage.querySelector(".dub-video")?.replaceWith(
       el("div", { class: "dub-audio-only warn small" }, "This window cannot show this video; the dub plays without the picture.")));
 
     const context = new AudioContext(); // suspended until Play; decodes the original for the waveform now
     const output = outputFor(context); // everything plays at the app's volume
     const buffers = new Map(); // url -> Promise<AudioBuffer>
-    const original = fileUrl("audio.wav");
+    // Under the dub: the voices (separated) or the whole original, and the background when separated.
+    const originalUrl = () => fileUrl(dub.stems ? "voices.wav" : "audio.wav");
+    const backgroundUrl = fileUrl("background.wav");
+    let waveFrom = null; // the file the waveform was drawn from
+    let stemsSeen = dub.stems;
     let gain = null;
     let sources = [];
     let playing = false;
@@ -1079,8 +1139,11 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
     };
     const now = () => (playing ? origin + context.currentTime - contextStart : time);
 
-    if (dub.source.duration) {
-      load(original).then((buffer) => {
+    // The timeline's waveform: of the voices when separated (the speech is what is lined up), else of the original.
+    const drawWave = () => {
+      if (!dub.source.duration || waveFrom === originalUrl()) return;
+      waveFrom = originalUrl();
+      load(waveFrom).then((buffer) => {
         const data = buffer.getChannelData(0);
         const step = Math.max(1, Math.floor(buffer.sampleRate / WAVE_PER_SECOND));
         const values = new Float32Array(Math.ceil(data.length / step));
@@ -1093,14 +1156,16 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         }
         if (top) for (let i = 0; i < values.length; i++) values[i] /= top;
         if (!stopped) lanes.setWave(values, buffer.sampleRate / step);
-      }).catch(() => {});
-    }
+      }).catch(() => { waveFrom = null; });
+    };
+    drawWave();
 
     async function start(at) {
       const items = clips().filter((c) => takeOf(c) && !isKept(c)).map((c) => ({ id: c.id, start: c.start, duration: takeOf(c).duration,
         url: fileUrl(c.selected) }));
       // A take that cannot be played is skipped (and named), so one bad file does not stop the whole preview.
-      const [base, ...loaded] = await Promise.all([load(original), ...items.map((c) => load(c.url).catch((error) => error))]);
+      const [base, background, ...loaded] = await Promise.all([load(originalUrl()), dub.stems ? load(backgroundUrl) : null,
+        ...items.map((c) => load(c.url).catch((error) => error))]);
       if (stopped) return;
       const decoded = new Map(items.map((c, i) => [c.id, loaded[i]]).filter(([, b]) => !(b instanceof Error)));
       const failed = items.filter((c) => !decoded.has(c.id));
@@ -1136,6 +1201,13 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       node.connect(gain);
       node.start(contextStart, at);
       sources = [node];
+      if (background) { // separated: the music and effects at full level
+        const under = context.createBufferSource();
+        under.buffer = background;
+        under.connect(output);
+        under.start(contextStart, at);
+        sources.push(under);
+      }
       for (const item of clipsToPlay(items.filter((c) => decoded.has(c.id)), at)) {
         const source = context.createBufferSource();
         source.buffer = decoded.get(item.id);
@@ -1186,7 +1258,8 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       volumeLabel.textContent = `${Math.round(volume.value * 100)} %`;
       if (gain && !keptRanges().length) gain.gain.value = Number(volume.value); // with kept stretches: applied on release
     };
-    volume.onchange = () => setOption("changing the original's volume", "original_volume", Number(volume.value));
+    volume.onchange = () => setOption(dub.stems ? "changing the original voices' volume" : "changing the original's volume",
+      volumeKey(), Number(volume.value));
 
     return {
       toggle: () => button.click(),
@@ -1196,11 +1269,21 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
         else { clock.textContent = formatTime(t); lanes.setTime(t); if (video) video.currentTime = t; }
       },
       changed() {
-        // Take names repeat after transcribing again (takes/d1-1.wav): decode takes afresh, keep the original.
-        for (const url of [...buffers.keys()]) if (url !== original) buffers.delete(url);
-        volume.value = dub.original_volume;
-        volumeLabel.textContent = `${Math.round(dub.original_volume * 100)} %`;
+        // Take names repeat after transcribing again (takes/d1-1.wav): decode takes afresh; the original's files stay.
+        const kept = new Set([fileUrl("audio.wav"), fileUrl("voices.wav"), backgroundUrl]);
+        for (const url of [...buffers.keys()]) if (!kept.has(url)) buffers.delete(url);
+        if (dub.stems !== stemsSeen) this.forgetStems(false); // separated, or back to the full mix
+        showVolume();
         if (playing) start(now()).catch(fail);
+      },
+      // New separated files (a separation ran): decoded and drawn again.
+      forgetStems(restart = true) {
+        stemsSeen = dub.stems;
+        buffers.delete(fileUrl("voices.wav"));
+        buffers.delete(backgroundUrl);
+        waveFrom = null;
+        drawWave();
+        if (restart && playing) start(now()).catch(fail);
       },
       stop() { stopped = true; pause(); context.close(); },
     };
