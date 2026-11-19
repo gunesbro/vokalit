@@ -567,3 +567,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .ok { color: var(--ok); }
 .dub-actions .row > select { flex: 1 1 auto; min-width: 0; }
 .dub-actions .row > span { white-space: nowrap; }
+.dub-rows-head { gap: 8px; padding: 0 8px; }
+.paste-menu { padding: 10px; gap: 8px; width: min(560px, 80vw); }
+.paste-box { width: 100%; resize: vertical; }

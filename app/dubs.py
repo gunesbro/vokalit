@@ -179,6 +179,14 @@ def update_dub_clip(dub_id: str, clip_id: str, *, start: float | None = None, tr
             clip["voice_from"] = voice_from
 
 
+def set_translations(dub_id: str, translations: dict[str, str]) -> None:
+    """Several translations at once (a whole translated transcript pasted in), by dub clip id."""
+    with _editing(dub_id) as data:
+        clips = [_find(_dub_clips(data), clip_id) for clip_id in translations]
+        for clip, text in zip(clips, translations.values()):
+            clip["translation"] = str(text).strip()
+
+
 def set_options(dub_id: str, *, target_language: str | None = None, model: str | None = None,
                 settings: dict | None = None, original_volume: float | None = None) -> None:
     """Checked values only: languages and settings are checked by the caller against the models."""

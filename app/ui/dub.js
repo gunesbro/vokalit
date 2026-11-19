@@ -2,7 +2,8 @@
 import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, revealButton, setMessage, waitForJob }
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
-import { clipsToPlay, formatTime, pasteTranslations, pickSelected } from "./script.js";
+import { clipsToPlay, formatTime, parseTranslations, pasteTranslations, pickSelected, transcriptForTranslation }
+  from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { timeline } from "./timeline.js";
 import { player } from "./waveform.js";
@@ -361,7 +362,13 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       return;
     }
     const ids = clips.map((c) => c.id);
-    rows.replaceChildren(...clips.map((clip, i) => {
+    const copyButton = el("button", { class: "btn btn-small", title: "Copy every sentence, numbered, with an instruction for "
+      + "a translation tool", onclick: copyTranscript }, "Copy for translation");
+    const pasteButton = el("button", { class: "btn btn-small", title: "Paste a translation tool's reply: each numbered line "
+      + "goes to its sentence" }, "Paste translations");
+    pasteButton.onclick = () => popover(pasteButton, pastePanel(), { align: "right", up: true });
+    rows.replaceChildren(el("div", { class: "row dub-rows-head" }, el("strong", {}, plural(clips.length, "sentence")),
+      el("div", { class: "spacer" }), copyButton, pasteButton), ...clips.map((clip, i) => {
       const source = sourceOf(clip);
       const fit = dub.fit[clip.id] || { state: "missing" };
       // Saved when the box loses the focus (not on "change": a redraw that keeps typed text would hide the change).
@@ -417,6 +424,56 @@ function openDub(main, initial, { models, whisper, formats, refreshList }) {
       row.addEventListener("focusin", () => choose(clip.id));
       return row;
     }));
+  }
+
+  const targetName = () => models.flatMap((m) => m.languages).find((l) => l.code === dub.target_language)?.name
+    || dub.target_language;
+  const sentences = () => dub.tracks[1].clips.map((c) => sourceOf(c)?.text || "");
+
+  async function copyTranscript() {
+    const text = transcriptForTranslation(sentences(), targetName());
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch { // no clipboard permission: copy through a hidden text box
+      const box = el("textarea", { class: "sr-only" });
+      box.value = text;
+      document.body.append(box);
+      box.select();
+      document.execCommand("copy");
+      box.remove();
+    }
+    setMessage(message, `Copied ${plural(sentences().length, "sentence")}. Paste them into a translation tool, then use `
+      + "\u201cPaste translations\u201d with its reply.");
+  }
+
+  // A translation tool's whole reply: checked, summarized, then saved in one request.
+  function pastePanel() {
+    const clips = dub.tracks[1].clips;
+    const box = el("textarea", { class: "textarea paste-box", rows: 10, "aria-label": "Translated sentences",
+      placeholder: "1. Hello, today we're trying something new.\n2. Yes.\n3. \u2026" });
+    const summary = el("div", { class: "small muted" }, `Paste the reply for ${plural(clips.length, "sentence")}.`);
+    const apply = el("button", { class: "btn btn-primary", disabled: true }, "Apply");
+    let parsed = null;
+    box.addEventListener("input", () => {
+      parsed = box.value.trim() ? parseTranslations(box.value, clips.length) : null;
+      const found = parsed ? clips.length - parsed.missing.length : 0;
+      apply.disabled = !found;
+      summary.className = parsed?.missing.length ? "small warn" : "small muted";
+      summary.textContent = !parsed ? `Paste the reply for ${plural(clips.length, "sentence")}.`
+        : `Translations for ${found} of ${plural(clips.length, "sentence")}`
+          + (parsed.missing.length ? `; missing: ${parsed.missing.slice(0, 12).join(", ")}`
+            + `${parsed.missing.length > 12 ? "\u2026" : ""}. Those keep what they have.` : ".");
+    });
+    apply.onclick = async () => {
+      const translations = Object.fromEntries(clips.flatMap((clip, i) => (parsed.texts[i] === null ? []
+        : [[clip.id, parsed.texts[i]]])));
+      close();
+      await change(api("PATCH", path("/translations"), { translations }));
+      setMessage(message, `Pasted ${plural(Object.keys(translations).length, "translation")}.`);
+    };
+    setTimeout(() => box.focus(), 0);
+    return el("div", { class: "menu paste-menu" }, el("strong", {}, "Paste translations"), box, summary,
+      el("div", { class: "row" }, apply, el("button", { class: "btn btn-ghost", onclick: close }, "Cancel")));
   }
 
   async function pasteAll(values) {

@@ -1061,6 +1061,13 @@ def update_dub_clip(req, did, cid):
     return _dub_view(did)
 
 
+@route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/translations")
+def set_dub_translations(req, did):
+    _dub_or_404(did)
+    dubs.set_translations(did, dict(req["json"].get("translations") or {}))
+    return _dub_view(did)
+
+
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/clips/(?P<cid>d[0-9]+)/select")
 def select_dub_take(req, did, cid):
     _dub_or_404(did)

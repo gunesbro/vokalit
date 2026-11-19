@@ -256,3 +256,15 @@ def test_concurrent_changes_are_not_lost(tmp_workspace, monkeypatch):
         thread.join()
     clips = dubs.load_dub(dub)["tracks"][1]["clips"]
     assert clips[0]["selected"] == "takes/d1-1.wav" and clips[1]["translation"] == "How are you?"
+
+
+def test_set_translations_saves_many_at_once(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.update_dub_clip(dub, "d2", translation="Old.")
+    dubs.set_translations(dub, {"d1": " Hello. "})
+    clips = dubs.load_dub(dub)["tracks"][1]["clips"]
+    assert [c["translation"] for c in clips] == ["Hello.", "Old."]
+    with pytest.raises(ws.WorkspaceError):
+        dubs.set_translations(dub, {"d9": "x"})
+    assert dubs.load_dub(dub)["tracks"][1]["clips"][0]["translation"] == "Hello."

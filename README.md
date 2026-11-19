@@ -45,7 +45,8 @@ English script. Unmute the player to listen.
   translations, and each sentence is spoken in the new language **in its own original voice** (cloned from that
   sentence, so every speaker keeps their voice and mood). A two-lane timeline shows where a translation runs long;
   drag a clip to move it. The video plays muted with the dub in sync and the original quietly underneath, and the
-  mix is exported as one audio file. Made for clips up to about 20 minutes; translations are typed or pasted.
+  mix is exported as one audio file. Made for clips up to about 20 minutes. *Copy for translation* copies every
+  sentence, numbered, for the translation tool you like; *Paste translations* puts its reply back, each line in its place.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.
 - **Tags** — sounds (laughter, sighs, …), emotions, styles and delivery (speed, pitch, pauses) as chips inside a

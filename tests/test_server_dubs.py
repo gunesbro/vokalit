@@ -212,3 +212,10 @@ def test_one_job_at_a_time_per_dub(api, tmp_path, monkeypatch):
     release.set()
     assert _wait(api, first["id"])["state"] == "done"
     assert api("GET", f"/api/dubs/{dub['id']}/jobs")[1] == []
+
+
+def test_paste_all_translations(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    status, dub, _ = api("PATCH", f"/api/dubs/{dub['id']}/translations",
+                         {"translations": {"d1": "Hello.", "d2": "How are you?"}})
+    assert status == 200 and [c["translation"] for c in dub["tracks"][1]["clips"]] == ["Hello.", "How are you?"]

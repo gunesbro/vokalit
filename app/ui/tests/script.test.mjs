@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampStart, clipsToPlay, overlapRanges, pasteTranslations, timeToX, xToTime } from "../script.js";
+import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
+  xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
   pickSelected,
   pickerLabel, settingsChanges,
@@ -168,4 +169,18 @@ test("overlapRanges finds where a clip runs into the next", () => {
 test("pasteTranslations fills the following sentences, one line each", () => {
   assert.deepEqual(pasteTranslations(["d1", "d2", "d3"], 1, "Hello.\n\nHow are you?\nExtra"), { d2: "Hello.", d3: "How are you?" });
   assert.deepEqual(pasteTranslations(["d1"], 0, "  One line  "), { d1: "One line" });
+});
+
+test("transcriptForTranslation numbers the sentences under an instruction", () => {
+  assert.equal(transcriptForTranslation(["Merhaba.", "Evet."], "English"),
+    "Translate each numbered line into English. Keep the numbers, one line per sentence.\n\n1. Merhaba.\n2. Evet.");
+});
+
+test("parseTranslations places numbered lines by number and reports the missing ones", () => {
+  const reply = "Here you go:\n\n1. Hello.\n3) I wanted this.\n 2 - Yes.\n7. Extra";
+  assert.deepEqual(parseTranslations(reply, 4), { texts: ["Hello.", "Yes.", "I wanted this.", null], missing: [4] });
+});
+
+test("parseTranslations without numbers takes the lines in order", () => {
+  assert.deepEqual(parseTranslations("Hello.\n\nYes.\n", 3), { texts: ["Hello.", "Yes.", null], missing: [3] });
 });

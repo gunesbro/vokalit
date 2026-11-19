@@ -262,7 +262,9 @@ All interface text is English. The visual design is the design canvas; behaviour
   the window cannot read asks for its audio as a separate file) and copies the file into `workspace/dubs/<id>/`;
   Whisper (timed segments, long ones split at sentence ends) fills the Original lane; each sentence row has its
   editable original text (it is the voice sample's transcript), the translation (pasting several lines fills the
-  following sentences), "Voice from" (default: this sentence; never neighbours, which may be another speaker),
+  following sentences; "Copy for translation" copies all sentences numbered under an instruction naming the target
+  language, and "Paste translations" places a tool's reply by number — or in order without numbers — after a summary
+  of found and missing ones, saved in one request), "Voice from" (default: this sentence; never neighbours, which may be another speaker),
   Generate/Again, the selected take, its status (fits / "0.8 s too long" / no take) and Delete. Header: target
   language, model, settings, Generate missing (Cancel), Export (one audio file: the takes at their starts over the
   original at its volume), Transcribe again (confirmed: it replaces everything). Preview: the video muted (or a clock
