@@ -111,6 +111,15 @@ on the GPU when there is one, else the CPU. It splits a dub's sound into voices 
 have no clear license, so the install downloads them and Vokalit never ships them (shown on the Models screen).
 `python worker.py --selftest` checks an install.
 
+**Video export** (`TOOLS["ffmpeg"]`, Dub only): `imageio-ffmpeg==0.6.0` brings FFmpeg's program (a GPL build,
+downloaded at install, never shipped); no worker: `models.ffmpeg_path()` finds it in the tool's environment and
+`dubs.export_video` runs it on local files only (`-protocol_whitelist file`). The source video is copied
+(`-c:v copy`) with the dub's mix (`mix_dub`, the audio export's) as AAC 192k in MP4 or Opus 128k in WebM, the
+source's container; with "every language", each language's mix then the original sound are separate tracks, tagged
+with ISO 639-2 language codes and named (title and, for MP4, handler name), the first the default. Temporary WAVs
+and a failed output are removed; FFmpeg's last lines are in the error. `POST /api/dubs/<id>/export-video`
+`{every_language}` (synchronous, like the audio export).
+
 **Speaker finder** (`TOOLS["speakers"]`, Dub only): PyTorch (shared CUDA build) and `speechbrain==1.1.0`, model
 `speechbrain/spkrec-ecapa-voxceleb` (Apache-2.0, copied into `.local/speakers/cache`, never linked: Windows), on the GPU
 when there is one. One request per dub: `{audio, spans, count}` gives a speaker number per sentence. Each span's middle
@@ -353,7 +362,8 @@ All interface text is English. The visual design is the design canvas; behaviour
   Speakers: a coloured chip before each original ("S1" for "Speaker 1", else initials; 8 colours by place), a Speaker
   select in the panel (the speakers, Unknown, New speaker…), and in the More menu "Find speakers…"/"Find speakers
   again…" (a count, empty to guess; disabled with a hint without the tool) and "Speakers…" (name fields, sentence
-  counts, Merge into…); all undoable.
+  counts, Merge into…); all undoable. The Export popover of a video dub also has "Video (MP4|WebM)" (disabled with a
+  hint without the tool) and, with several languages, "Include every language as its own audio track".
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not

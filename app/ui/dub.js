@@ -74,6 +74,7 @@ export async function renderDub(root) {
   let whisper = false;
   let demucs = false; // Voice separation
   let speakerTool = false; // The speaker finder
+  let videoTool = false; // Video export (FFmpeg)
   let formats = [];
   let view = null; // the open dub's screen (see openDub), stopped when another opens
   let transcribeNext = null; // a dub just imported: transcribed once it is open
@@ -104,7 +105,8 @@ export async function renderDub(root) {
     }
     rememberOpened("dub", id);
     try {
-      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, demucs, speakerTool, formats, refreshList });
+      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, demucs, speakerTool, videoTool, formats,
+        refreshList });
       if (transcribeNext === id) {
         transcribeNext = null;
         view.transcribe();
@@ -180,13 +182,14 @@ export async function renderDub(root) {
   whisper = installedTool("whisper");
   demucs = installedTool("demucs");
   speakerTool = installedTool("speakers");
+  videoTool = installedTool("ffmpeg");
   await refreshList();
   show();
 }
 
 // One dub, laid out like a subtitle editor: a sentence table (left), the video and the selected sentence (right), and
 // the timeline (bottom). Every change the user makes goes through act(), so it can be undone. Returns {stop, transcribe}.
-function openDub(main, initial, { models, whisper, demucs, speakerTool, formats, refreshList }) {
+function openDub(main, initial, { models, whisper, demucs, speakerTool, videoTool, formats, refreshList }) {
   if (!sizesRead) {
     Object.assign(sizes, preference("dubSizes", {}));
     sizesRead = true;
@@ -1210,15 +1213,30 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, formats,
   }
 
   function exportPanel() {
-    return el("div", { class: "menu" }, formats.map((f) => el("button", { class: "menu-item", onclick: async () => {
+    const exported = async (label, request) => {
       close();
-      setMessage(message, "Exporting\u2026");
+      setMessage(message, `Exporting${label}\u2026`);
       try {
-        const { path: file } = await api("POST", path(`/export${q()}`), { format: f.id });
+        const { path: file } = await request();
         message.replaceChildren(`Exported ${file.split("/").pop()}. `, revealButton(file, { text: true }));
         message.className = "message info";
       } catch (error) { fail(error); }
-    } }, el("strong", {}, f.label), el("span", { class: "faint small" }, f.note))));
+    };
+    const sound = formats.map((f) => el("button", { class: "menu-item", onclick: () => exported("",
+      () => api("POST", path(`/export${q()}`), { format: f.id })) }, el("strong", {}, f.label), el("span", { class: "faint small" }, f.note)));
+    if (dub.source.kind !== "video") return el("div", { class: "menu" }, sound);
+    // The video as it is, with the dub as its sound; with several languages, optionally each as its own audio track.
+    const every = el("input", { type: "checkbox" });
+    const container = dub.source.file.split(".").pop().toUpperCase();
+    return el("div", { class: "menu" }, sound,
+      el("div", { class: "menu-sep" }),
+      el("button", { class: "menu-item", disabled: !videoTool,
+        title: videoTool ? "" : "Install Video export (FFmpeg) on the Models screen.",
+        onclick: () => exported(" the video", () => api("POST", path(`/export-video${q()}`), { every_language: every.checked })) },
+      el("strong", {}, `Video (${container})`), el("span", { class: "faint small" },
+        videoTool ? "the video as it is, with this dub's sound" : "install Video export (FFmpeg) on the Models screen")),
+      tracks().length > 1 ? el("label", { class: "row small muted export-every" }, every,
+        "Include every language as its own audio track") : "");
   }
 
   function confirmTranscribe(anchor) {

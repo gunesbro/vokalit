@@ -66,7 +66,9 @@ English script. Unmute the player to listen.
   on the Original lane of the timeline and press *Add sentence*; Whisper writes what it hears there (*Listen* does it
   again for any sentence), and you correct it. Start and end times can be typed in. Takes can be deleted one by one,
   or all of a tab's sentences with *Delete takes*. Every change can be undone
-  (Ctrl+Z). The mix is exported as one audio file. The screen stays quick with tens of thousands of sentences; the
+  (Ctrl+Z). The mix is exported as one audio file, or, with **Video export** (FFmpeg, on the Models screen), as
+  the video itself with the dub as its sound (the picture copied as it is; optionally every language as its own audio
+  track, then the original). The screen stays quick with tens of thousands of sentences; the
   file itself is best kept to about 20 minutes, as the window decodes its sound.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a
   language among OmniVoice's 646.
