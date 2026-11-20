@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeClip, dragRange, originalOf, parseSeconds, sentencePayload, touchesFiles, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
+import { activeClip, dragRange, speakerChip, originalOf, parseSeconds, sentencePayload, touchesFiles, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -419,4 +419,15 @@ test("parseSeconds reads a typed time, or nothing for an empty or broken one", (
   assert.equal(parseSeconds("  "), null);
   assert.equal(parseSeconds("abc"), null);
   assert.equal(parseSeconds("0"), 0);
+});
+
+test("speakerChip labels and colours speakers", () => {
+  const speakers = [{ id: "s1", name: "Speaker 1" }, { id: "s4", name: "ali veli" }, { id: "s5", name: "Zeynep" }];
+  assert.equal(speakerChip(speakers, "s1").label, "S1");
+  assert.equal(speakerChip(speakers, "s4").label, "AV");
+  assert.equal(speakerChip(speakers, "s5").label, "Z");
+  assert.equal(speakerChip(speakers, "s4").name, "ali veli");
+  assert.notEqual(speakerChip(speakers, "s1").color, speakerChip(speakers, "s4").color);
+  assert.equal(speakerChip(speakers, "s9"), null);
+  assert.equal(speakerChip(speakers, undefined), null);
 });

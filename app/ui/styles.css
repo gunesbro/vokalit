@@ -626,5 +626,10 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .dub-line.kept .dub-tr { opacity: .45; }
 .dub-keep { gap: 6px; }
 .dub-times { gap: 10px; }
+.dub-speaker { display: inline-block; min-width: 20px; margin-right: 6px; padding: 0 4px; border-radius: 4px;
+  color: #111; font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; vertical-align: 1px; }
+.speakers-pop { min-width: 340px; gap: 8px; }
+.speaker-row { gap: 8px; }
+.speaker-row .input { flex: 1; min-width: 0; }
 .dub-time { width: 84px; }
 .tl-clip.kept { background: repeating-linear-gradient(135deg, var(--accent-line) 0 4px, transparent 4px 8px); }

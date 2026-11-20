@@ -273,6 +273,19 @@ export function parseSeconds(value) {
   return text === "" || !Number.isFinite(seconds) ? null : Math.round(seconds * 1000) / 1000;
 }
 
+// A speaker's chip in the dub table: "S1" for "Speaker 1", else up to two initials, and a colour by the speaker's
+// place in the list. null for an unknown speaker.
+const SPEAKER_COLORS = ["#e8a33d", "#5aa9e6", "#7bc47f", "#d97bb6", "#b18cf2", "#e0705b", "#4fc1b6", "#c9c35a"];
+export function speakerChip(speakers, id) {
+  const index = speakers.findIndex((s) => s.id === id);
+  if (index < 0) return null;
+  const { name } = speakers[index];
+  const numbered = /^Speaker (\d+)$/.exec(name);
+  const label = numbered ? `S${numbered[1]}`
+    : name.trim().split(/\s+/).slice(0, 2).map((word) => word[0] || "").join("").toUpperCase();
+  return { label, name, color: SPEAKER_COLORS[index % SPEAKER_COLORS.length] };
+}
+
 // Whether an undo step selects one of `files` (deleted takes): such a step could only fail now. Steps that select
 // takes list the files they refer to.
 export function touchesFiles(step, files) {

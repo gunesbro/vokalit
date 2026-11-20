@@ -2,7 +2,7 @@
 import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, revealButton, setMessage, waitForJob }
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
-import { clampSize, clipAt, clipFilter, clipsToPlay, createHistory, originalOf, parseSeconds, sentencePayload, touchesFiles, formatTime, onlyModel, parseTranslations,
+import { clampSize, clipAt, clipFilter, clipsToPlay, createHistory, originalOf, speakerChip, parseSeconds, sentencePayload, touchesFiles, formatTime, onlyModel, parseTranslations,
   pasteTranslations, pickSelected, transcriptForTranslation, visibleRows, volumeRamps } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { preference, savePreference } from "./preferences.js";
@@ -49,6 +49,7 @@ const saveSizes = () => savePreference("dubSizes", { ...sizes });
 const LISTENING = "Whisper is finding the sentences on the CPU; a long file takes a while.";
 const SEPARATING_THEN_LISTENING = "Separating the voices from the music, then Whisper finds the sentences; a long file "
   + "takes a while.";
+const SPEAKERS_HINT = "Install the speaker finder on the Models screen to find who says what.";
 const SEPARATING = "Separating the voices from the music and effects; a long file takes a while.";
 const SEPARATION_HINT = "Install Voice separation on the Models screen to keep the music and clean the voices.";
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select, [contenteditable]"));
@@ -72,6 +73,7 @@ export async function renderDub(root) {
   let models = [];
   let whisper = false;
   let demucs = false; // Voice separation
+  let speakerTool = false; // The speaker finder
   let formats = [];
   let view = null; // the open dub's screen (see openDub), stopped when another opens
   let transcribeNext = null; // a dub just imported: transcribed once it is open
@@ -102,7 +104,7 @@ export async function renderDub(root) {
     }
     rememberOpened("dub", id);
     try {
-      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, demucs, formats, refreshList });
+      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, demucs, speakerTool, formats, refreshList });
       if (transcribeNext === id) {
         transcribeNext = null;
         view.transcribe();
@@ -177,13 +179,14 @@ export async function renderDub(root) {
   const installedTool = (name) => Boolean(parts.find((c) => c.name === name)?.installed);
   whisper = installedTool("whisper");
   demucs = installedTool("demucs");
+  speakerTool = installedTool("speakers");
   await refreshList();
   show();
 }
 
 // One dub, laid out like a subtitle editor: a sentence table (left), the video and the selected sentence (right), and
 // the timeline (bottom). Every change the user makes goes through act(), so it can be undone. Returns {stop, transcribe}.
-function openDub(main, initial, { models, whisper, demucs, formats, refreshList }) {
+function openDub(main, initial, { models, whisper, demucs, speakerTool, formats, refreshList }) {
   if (!sizesRead) {
     Object.assign(sizes, preference("dubSizes", {}));
     sizesRead = true;
@@ -419,6 +422,101 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
       () => api("PATCH", path(`/source/${source.id}`), { keep_original: !keep }));
   }
 
+  // --- Speakers ------------------------------------------------------------------------------
+
+  const chipNode = (id) => {
+    const chip = speakerChip(dub.speakers || [], id);
+    return chip ? el("span", { class: "dub-speaker", title: chip.name, style: { background: chip.color } }, chip.label) : "";
+  };
+  // Who says what, as PUT /speakers puts it back: undo of a merge or of finding them again.
+  const speakersState = () => ({ speakers: dub.speakers.map((s) => ({ ...s })),
+    assignments: Object.fromEntries(sources().filter((s) => s.speaker).map((s) => [s.id, s.speaker])) });
+
+  function speakerSelect(source) {
+    const select = el("select", { class: "select select-small", "aria-label": "Speaker of the sentence",
+      title: "Who says it: the voice sample also takes this speaker's nearby sentences",
+      onchange: () => setSpeaker(source, select.value) },
+    ...(dub.speakers || []).map((s) => el("option", { value: s.id }, s.name)),
+    el("option", { value: "" }, "Unknown"), el("option", { value: "new" }, "New speaker\u2026"));
+    select.value = source.speaker || "";
+    return select;
+  }
+
+  function setSpeaker(source, value) {
+    const before = source.speaker || null;
+    let chosen = value || null; // "new" becomes the id it got, so redo gives the same speaker back
+    act(`speaker of sentence ${sources().indexOf(source) + 1}`, async () => {
+      const result = await api("PATCH", path(`/source/${source.id}`), { speaker: chosen });
+      chosen = result.speaker ?? null;
+      return result;
+    }, () => api("PATCH", path(`/source/${source.id}`), { speaker: before }));
+  }
+
+  function speakersPanel() {
+    const counts = new Map();
+    for (const s of sources()) if (s.speaker) counts.set(s.speaker, (counts.get(s.speaker) || 0) + 1);
+    return el("div", { class: "menu speakers-pop" }, el("strong", {}, "Speakers"),
+      ...dub.speakers.map((speaker) => {
+        const chip = speakerChip(dub.speakers, speaker.id);
+        const name = el("input", { class: "input", value: speaker.name, "aria-label": `Name of ${speaker.name}`,
+          onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); }, onblur: () => renameSpeaker(speaker, name) });
+        const merge = el("select", { class: "select select-small", "aria-label": `Merge ${speaker.name} into`,
+          title: "The same person found twice: their sentences go to the one chosen",
+          onchange: () => merge.value && mergeSpeaker(speaker, merge.value) },
+        el("option", { value: "" }, "Merge into\u2026"),
+        ...dub.speakers.filter((s) => s.id !== speaker.id).map((s) => el("option", { value: s.id }, s.name)));
+        return el("div", { class: "row speaker-row" },
+          el("span", { class: "dub-speaker", style: { background: chip.color } }, chip.label), name,
+          el("span", { class: "faint small num" }, plural(counts.get(speaker.id) || 0, "sentence")), merge);
+      }));
+  }
+
+  function renameSpeaker(speaker, input) {
+    const before = speaker.name;
+    const name = input.value.trim();
+    if (!name || name === before) { input.value = before; return; }
+    act(`name of ${before}`, () => api("PATCH", path(`/speakers/${speaker.id}`), { name }),
+      () => api("PATCH", path(`/speakers/${speaker.id}`), { name: before }));
+  }
+
+  function mergeSpeaker(speaker, into) {
+    const before = speakersState();
+    const target = dub.speakers.find((s) => s.id === into);
+    close();
+    act(`merging ${speaker.name} into ${target?.name || "another speaker"}`,
+      () => api("POST", path(`/speakers/${speaker.id}/merge`), { into }), () => api("PUT", path("/speakers"), before));
+  }
+
+  function confirmFindSpeakers(anchor) {
+    const count = el("input", { type: "number", class: "input dub-time", min: 1, max: 20, placeholder: "guess",
+      "aria-label": "How many speakers? (empty: guess)" });
+    popover(anchor, el("div", { class: "menu confirm-menu" },
+      el("strong", {}, dub.speakers?.length ? "Find speakers again?" : "Find speakers?"),
+      el("label", { class: "row small muted" }, "How many speakers? (empty: guess)", count),
+      dub.speakers?.length ? el("div", { class: "muted small" }, "Your corrections to the speakers are replaced; undo "
+        + "brings them back.") : "",
+      el("button", { class: "btn btn-primary", onclick: () => { close(); findSpeakers(count.value); } }, "Find speakers")),
+    { align: "right" });
+  }
+
+  let speakersBefore = null; // who said what before finding them again, for undo
+  async function findSpeakers(count) {
+    speakersBefore = speakersState();
+    try {
+      follow(await api("POST", path("/speakers"), { count: count === "" ? null : Number(count) }), "speakers");
+    } catch (error) { fail(error); }
+  }
+
+  function recordSpeakers() {
+    if (!speakersBefore) return; // a screen opened later follows the job without what came before
+    const before = speakersBefore;
+    const after = speakersState();
+    speakersBefore = null;
+    history().push({ label: "finding speakers", undo: () => api("PUT", path("/speakers"), before),
+      redo: () => api("PUT", path("/speakers"), after) });
+    drawHeader();
+  }
+
   const tenths = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 
   // A range marked on the Original lane: a sentence Whisper missed can be added there.
@@ -534,6 +632,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     // Also shown when the screen comes back to a transcription that is still running.
     if (kind === "transcribe") setMessage(message, listening());
     if (kind === "separate") setMessage(message, SEPARATING);
+    if (kind === "speakers") setMessage(message, "Finding the speakers\u2026");
     if (kind === "listen") setMessage(message, `Listening to sentence ${sources().findIndex((s) => s.id === ids[0]) + 1}\u2026`);
     draw();
     try {
@@ -555,6 +654,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
       }
       if (kind === "generate" || kind === "fit") recordSelection(before, language, kind);
       if (kind === "listen") heardText(ids[0], result.heard);
+      if (kind === "speakers") recordSpeakers();
     } catch (error) {
       if (stopped) return;
       if (error.cancelled) setMessage(message, "Cancelled.");
@@ -678,7 +778,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     const long = all.filter((c) => fit()[c.id]?.state === "long").length;
     const short = all.filter((c) => fit()[c.id]?.state === "short").length;
     const missing = all.filter((c) => !c.selected && c.translation.trim() && !isKept(c)).map((c) => c.id);
-    const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe again or delete" }, "\u22ef");
+    const more = el("button", { class: "btn btn-ghost icon-btn", "aria-label": "More", title: "Transcribe, separate, speakers or delete" }, "\u22ef");
     more.onclick = () => popover(more, el("div", { class: "menu" },
       el("button", { class: "menu-item", disabled: Boolean(job) || !whisper, onclick: () => confirmTranscribe(more) }, "Transcribe again\u2026"),
       el("button", { class: "menu-item", disabled: Boolean(job) || !demucs || !dub.source.duration,
@@ -686,6 +786,12 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
         onclick: () => { close(); separate(); } }, dub.stems ? "Separate voices again" : "Separate voices"),
       dub.stems && el("button", { class: "menu-item", disabled: Boolean(job), onclick: () => confirmFullMix(more) },
         "Use the full mix\u2026"),
+      el("button", { class: "menu-item", disabled: Boolean(job) || !speakerTool || !sources().length,
+        title: speakerTool ? "Find who says each sentence, so each is cloned from its own speaker's nearby sentences"
+          : SPEAKERS_HINT, onclick: () => confirmFindSpeakers(more) },
+      dub.speakers?.length ? "Find speakers again\u2026" : "Find speakers\u2026"),
+      dub.speakers?.length ? el("button", { class: "menu-item", title: "Name the speakers, or merge one found twice",
+        onclick: () => { close(); popover(more, speakersPanel(), { align: "right" }); } }, "Speakers\u2026") : "",
       el("button", { class: "menu-item danger", disabled: Boolean(job) || !takeCount(),
         onclick: () => confirmClearTakes(more) }, `Delete all takes of ${languageName(track().language)}\u2026`),
       el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub\u2026")), { align: "right" });
@@ -915,7 +1021,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     el("span", { class: "num faint small" }, number),
     el("button", { class: "num small link-btn dub-at", title: "Play from here", onclick: () => { choose(clip.id); play.seek(clip.start, true); } },
       formatTime(source.start)),
-    el("span", { class: "dub-orig", title: source.text }, source.text),
+    el("span", { class: "dub-orig", title: source.text }, chipNode(source.speaker), source.text),
     input, generating ? el("span", { class: "dub-status faint" }, "\u2026") : status);
     return row;
   }
@@ -1009,7 +1115,8 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
           : clipFit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet")),
       cannotFit(clipFit) ? el("div", { class: "faint small" }, cannotFit(clipFit)) : "", // on its own line: it can be long
       el("div", { class: "row" }, el("label", { class: "field-label" }, "Original"), el("div", { class: "spacer" }),
-        listenButton(source)), original, timesRow(source), keep,
+        listenButton(source)), original, timesRow(source),
+      el("div", { class: "row" }, el("label", { class: "row small muted" }, "Speaker", speakerSelect(source))), keep,
       el("label", { class: "field-label" }, "Translation"), translation,
       el("div", { class: "row" }, el("label", { class: "row small muted" }, "Voice", voice)),
       takes.length ? el("div", { class: "dub-takes" }, takes) : el("p", { class: "faint small" }, "No takes yet."),

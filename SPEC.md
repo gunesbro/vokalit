@@ -44,6 +44,17 @@ file. Everything is done by clicking in a desktop window.
     voices at `voices_volume` (default 0, "Original voices"; `original_volume`, "Original", applies without stems).
     The More menu has "Separate voices (again)" and "Use the full mix" (deletes the stems). The timeline waveform is
     the voices'.
+  - **Dub speakers:** with the speaker finder installed, transcribing (after Whisper; a failure goes on without
+    speakers and says so) finds who says each sentence: `data["speakers"]` `[{id: "s<n>", name}]` (ids from the
+    growing counter `last_speaker`, never reused; found ones named "Speaker 1..n", "New speaker" the lowest free
+    "Speaker n"), each sentence's `speaker` (none: unknown). Transcribing again clears them. Corrections are undoable:
+    a sentence's speaker (`PATCH /source/<id>` `{speaker: id | "new" | null}`), rename (`PATCH /speakers/<sid>`),
+    merge (`POST /speakers/<sid>/merge` `{into}`; undo `PUT /speakers` with the state before). "Find speakers
+    again…" (`POST /speakers` `{count}`, a job; undoable the same way) replaces them.
+  - **Dub references:** a sentence is cloned from its "voice from" sentence joined (padded, 0.25 s apart, in time
+    order, from the voices when separated) with the same speaker's sentences nearest in time within 60 s (not kept
+    ones, not under 0.5 s) until 8 s, never past 10 s; alone when its speaker is unknown or it is already 8 s. The
+    reference text is theirs in the same order.
   - **Playback volume:** a speaker button at the bottom of the rail opens a slider (0-100 %, squared, kept between
     runs) and Mute; every sound the app plays follows it (players, Studio playback, the Dub preview), never exported
     or generated files (`volume.js`). It and the Dub panes' sizes are kept by the server (`GET`/`PATCH
@@ -99,6 +110,13 @@ on the GPU when there is one, else the CPU. It splits a dub's sound into voices 
 (music, effects), one request per file, the network blocked like every worker. The code is MIT; the pretrained weights
 have no clear license, so the install downloads them and Vokalit never ships them (shown on the Models screen).
 `python worker.py --selftest` checks an install.
+
+**Speaker finder** (`TOOLS["speakers"]`, Dub only): PyTorch (shared CUDA build) and `speechbrain==1.1.0`, model
+`speechbrain/spkrec-ecapa-voxceleb` (Apache-2.0, copied into `.local/speakers/cache`, never linked: Windows), on the GPU
+when there is one. One request per dub: `{audio, spans, count}` gives a speaker number per sentence. Each span's middle
+(at most 10 s, 16 kHz) becomes an embedding; spans of at least 1 s are grouped by average-linkage clustering on cosine
+distance (cut at `count` groups, or at 0.6, a first guess), at most 2000 of them (the longest of each stretch of the
+file); shorter and remaining spans join the nearest group; silent ones get none (`workers/speakers/grouping.py`, pure).
 
 ## 5. Architecture
 
@@ -332,6 +350,10 @@ All interface text is English. The visual design is the design canvas; behaviour
   follows the times; undoable). Takes are deleted with a trash button under each (inline confirm) or "Delete takes N"
   for the tab's sentences (confirmed): not undoable, files removed, a deleted selected take gives way to the newest
   left, undo steps that select a deleted take are dropped (take steps carry their files); not while the dub works.
+  Speakers: a coloured chip before each original ("S1" for "Speaker 1", else initials; 8 colours by place), a Speaker
+  select in the panel (the speakers, Unknown, New speaker…), and in the More menu "Find speakers…"/"Find speakers
+  again…" (a count, empty to guess; disabled with a hint without the tool) and "Speakers…" (name fields, sentence
+  counts, Merge into…); all undoable.
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not

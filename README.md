@@ -57,7 +57,12 @@ English script. Unmute the player to listen.
   own translations, takes, timing and model. Music or singing that Whisper wrote down can be marked *Keep the original here* (K): the original
   plays there at full volume in every language, and nothing is translated or generated. With **Voice separation**
   (Demucs, on the Models screen) the speech is separated from the music and effects first: voices are copied from
-  clean speech, and the music stays at full level under the dub. A part Whisper missed can be added: drag over it
+  clean speech, and the music stays at full level under the dub. With the **Speaker finder** (SpeechBrain ECAPA, on
+  the Models screen) transcription also finds who says each sentence (a coloured chip in the table; change it in the
+  sentence panel, name or merge speakers under *Speakers…*, or *Find speakers again…* with a count when the guess is
+  off: its threshold is a first guess). Each sentence is then cloned from its own sound joined with the same
+  speaker's nearest sentences within a minute, about 8 s (at most 10 s): a steadier voice and accent that still
+  carries the moment's mood. A part Whisper missed can be added: drag over it
   on the Original lane of the timeline and press *Add sentence*; Whisper writes what it hears there (*Listen* does it
   again for any sentence), and you correct it. Start and end times can be typed in. Takes can be deleted one by one,
   or all of a tab's sentences with *Delete takes*. Every change can be undone
