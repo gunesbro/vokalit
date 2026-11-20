@@ -489,6 +489,42 @@ def test_deleting_takes_is_refused_while_the_dub_works(api, tmp_path, monkeypatc
     assert status == 200 and body["removed"] == 1 and body["tracks"][1]["clips"][1]["takes"] == []
 
 
+def test_restore_brings_an_added_sentence_back_with_its_id(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/source", {"start": 9.5, "end": 11.0})
+    assert status == 200 and body["added"] == "o3"
+    source = body["tracks"][0]["clips"][2]
+    clips = {t["language"]: t["clips"][2] for t in body["tracks"][1:]}
+    api("DELETE", f"/api/dubs/{dub['id']}/source/o3")
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/source/restore",
+                          {"source": source, "clips": clips, "index": 2, "voices": {}})
+    assert status == 200 and [s["id"] for s in body["tracks"][0]["clips"]] == ["o1", "o2", "o3"]
+    assert api("POST", f"/api/dubs/{dub['id']}/source", {"start": 11.2, "end": 11.8})[1]["added"] == "o4"
+    status, body, _ = api("PATCH", f"/api/dubs/{dub['id']}/source/o3", {"start": 0.0, "end": 0.4})
+    assert status == 200 and [s["id"] for s in body["tracks"][0]["clips"]][0] == "o3"
+
+
+def test_adding_a_sentence_during_generation_keeps_the_job_working(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    release = threading.Event()
+
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        release.wait(5)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", slow_generate)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "higgs"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
+    assert api("POST", f"/api/dubs/{dub['id']}/source", {"start": 3.1, "end": 3.9})[0] == 200
+    release.set()
+    done = _wait(api, job["id"])
+    assert done["state"] == "done", done
+    clips = dubs.load_dub(dub["id"])["tracks"][1]["clips"]
+    assert [c["id"] for c in clips] == ["d1", "d3", "d2"] and len(clips[2]["takes"]) == 1
+
+
 def test_fit_route_lengthens_and_counts_the_ones_needing_longer(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     _take(dub["id"], "d1", 1.9)  # 2.5 s spoken: lengthened at 0.85x

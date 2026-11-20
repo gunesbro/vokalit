@@ -25,6 +25,7 @@ KEPT_FADE = 0.05  # seconds to fade the original up and down around a sentence t
 MAX_SPEEDUP = 1.25  # a take is sped up at most this much to fit; beyond it speech stops sounding natural
 FIT_GAP = 0.05  # seconds left free before the next sentence when a take is fitted
 MIN_SPEED = 0.85  # a take that ends early is slowed down at most this much; slower drags
+MIN_SENTENCE = 0.2  # seconds: the shortest sentence that can be added or retimed by hand
 LEVEL_FRAME = 0.05  # seconds per frame when measuring how loud speech is
 LEVEL_GATE_DB = 30  # frames this far below the loudest are pauses, not speech
 LEVEL_MAX_GAIN_DB = 12  # a new take is raised or lowered at most this much to match its sentence
@@ -272,6 +273,50 @@ def set_transcript(dub_id: str, language: str, segments: list[dict]) -> None:
                    for n, s in enumerate(segments, 1)]
         data["tracks"] = [{"id": "original", "kind": "source", "clips": sources}] + [
             _language_track(t["language"], t.get("model"), t.get("settings"), sources) for t in data["tracks"][1:]]
+        data["last_sentence"] = len(sources)
+
+
+def _next_sentence(data: dict) -> int:
+    """The number of a new sentence's ids (o<n>, d<n>). A counter that only grows, so a sentence that undo can bring
+    back never finds its id taken; dubs from before it start after their highest id."""
+    if "last_sentence" not in data:
+        numbers = [int(c["id"][1:]) for track in data["tracks"] for c in track["clips"]]
+        data["last_sentence"] = max(numbers, default=0)
+    data["last_sentence"] += 1
+    return data["last_sentence"]
+
+
+def _check_times(data: dict, start: float, end: float) -> None:
+    if not (end - start >= MIN_SENTENCE):
+        raise ws.WorkspaceError(f"A sentence must end after it starts and last at least {MIN_SENTENCE} s.")
+    duration = data["source"]["duration"] or 0.0
+    if start < 0 or end > duration:
+        raise ws.WorkspaceError(f"A sentence must lie within the sound (0\u2013{duration:.1f} s).")
+
+
+def _sort_sentences(data: dict) -> None:
+    """Sentences in time order (stable), and every language's clips in the order of their sentences."""
+    sources = data["tracks"][0]["clips"]
+    sources.sort(key=lambda s: s["start"])
+    order = {s["id"]: n for n, s in enumerate(sources)}
+    for track in data["tracks"][1:]:
+        track["clips"].sort(key=lambda c: order.get(c["source_clip"], len(order)))
+
+
+def add_source_clip(dub_id: str, start: float, end: float, text: str = "") -> str:
+    """A sentence Whisper missed, added by hand: in time order, with an empty clip at its start in every language.
+    Returns its id."""
+    start, end = round(float(start), 3), round(float(end), 3)
+    with _editing(dub_id) as data:
+        _check_times(data, start, end)
+        n = _next_sentence(data)
+        source = {"id": f"o{n}", "start": start, "end": end, "text": text.strip()}
+        place = sum(1 for s in _source_clips(data) if s["start"] <= start)
+        _source_clips(data).insert(place, source)
+        for track in data["tracks"][1:]:
+            track["clips"].insert(place, _new_clip(n, source))
+        _sort_sentences(data)  # clips may not have followed the sentences' order exactly
+    return source["id"]
 
 
 def add_language(dub_id: str, language: str) -> None:
@@ -301,9 +346,26 @@ def set_language_options(dub_id: str, language: str | None, *, model: str | None
             track["settings"] = settings
 
 
-def update_source_clip(dub_id: str, clip_id: str, text: str) -> None:
+def update_source_clip(dub_id: str, clip_id: str, text: str | None = None, start: float | None = None,
+                       end: float | None = None) -> None:
+    """A sentence's text, or its times: a new start moves its clip in every language by as much (a clip moved by hand
+    keeps its offset), and the sentences stay in time order."""
     with _editing(dub_id) as data:
-        _find(_source_clips(data), clip_id)["text"] = text.strip()
+        source = _find(_source_clips(data), clip_id)
+        if text is not None:
+            source["text"] = text.strip()
+        if start is None and end is None:
+            return
+        new_start = source["start"] if start is None else round(float(start), 3)
+        new_end = source["end"] if end is None else round(float(end), 3)
+        _check_times(data, new_start, new_end)
+        shift = new_start - source["start"]
+        source["start"], source["end"] = new_start, new_end
+        for track in data["tracks"][1:]:
+            for clip in track["clips"]:
+                if clip["source_clip"] == clip_id:
+                    clip["start"] = round(max(0.0, clip["start"] + shift), 3)
+        _sort_sentences(data)
 
 
 def set_keep_original(dub_id: str, clip_id: str, keep: bool) -> None:

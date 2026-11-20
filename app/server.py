@@ -1160,11 +1160,22 @@ def use_full_mix(req, did):
 def update_dub_source(req, did, oid):
     _dub_or_404(did)
     body = req["json"]
-    if "text" in body:
-        dubs.update_source_clip(did, oid, str(body["text"]))
+    if "text" in body or "start" in body or "end" in body:
+        dubs.update_source_clip(did, oid, str(body["text"]) if "text" in body else None,
+                                start=float(body["start"]) if "start" in body else None,
+                                end=float(body["end"]) if "end" in body else None)
     if "keep_original" in body:
         dubs.set_keep_original(did, oid, bool(body["keep_original"]))
     return _dub_view(did)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/source")
+def add_dub_sentence(req, did):
+    """A sentence Whisper missed: {start, end}; empty, in every language. Returns the dub and its id ("added")."""
+    _dub_or_404(did)
+    body = req["json"]
+    added = dubs.add_source_clip(did, float(body["start"]), float(body["end"]), str(body.get("text") or ""))
+    return {**_dub_view(did), "added": added}
 
 
 @route("DELETE", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)")

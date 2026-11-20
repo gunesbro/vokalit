@@ -846,3 +846,58 @@ def test_delete_takes_refuses_an_unknown_file(tmp_workspace, tmp_path):
     with pytest.raises(dubs.ws.WorkspaceError, match="no longer exists"):
         dubs.delete_takes(dub, {"d1": ["takes/en/d1-9.wav"]})
     assert len(dubs.load_dub(dub)["tracks"][1]["clips"][0]["takes"]) == 3
+
+
+def _two_languages(tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)  # sentences at 0.5-3.0 and 4.0-9.0
+    dubs.add_language(dub, "de")
+    return dub
+
+
+def test_add_source_clip_inserts_by_time_in_every_language(tmp_workspace, tmp_path):
+    dub = _two_languages(tmp_path)
+    assert dubs.add_source_clip(dub, 3.2, 3.8) == "o3"
+    data = dubs.load_dub(dub)
+    assert [s["id"] for s in data["tracks"][0]["clips"]] == ["o1", "o3", "o2"]
+    assert data["tracks"][0]["clips"][1] == {"id": "o3", "start": 3.2, "end": 3.8, "text": ""}
+    for track in data["tracks"][1:]:
+        clip = track["clips"][1]
+        assert clip["id"] == "d3" and clip["source_clip"] == "o3" and clip["start"] == 3.2 and clip["translation"] == ""
+
+
+def test_added_ids_never_reuse_a_deleted_sentence_s(tmp_workspace, tmp_path):
+    dub = _two_languages(tmp_path)
+    assert dubs.add_source_clip(dub, 10.0, 11.0) == "o3"
+    dubs.delete_source_clip(dub, "o3")
+    assert dubs.add_source_clip(dub, 10.0, 11.0) == "o4"
+
+
+@pytest.mark.parametrize("start,end", [(5.0, 5.0), (5.0, 5.1), (11.5, 12.5), (-0.5, 1.0), (6.0, 5.0)])
+def test_add_source_clip_refuses_bad_times(tmp_workspace, tmp_path, start, end):
+    dub = _two_languages(tmp_path)
+    with pytest.raises(dubs.ws.WorkspaceError, match="A sentence must"):
+        dubs.add_source_clip(dub, start, end)
+
+
+def test_retiming_moves_its_clips_and_keeps_time_order(tmp_workspace, tmp_path):
+    dub = _two_languages(tmp_path)
+    dubs.update_dub_clip(dub, "d1", start=0.7, language="de")  # moved by hand: keeps its offset
+    dubs.update_source_clip(dub, "o1", start=10.0, end=11.0)
+    data = dubs.load_dub(dub)
+    assert [s["id"] for s in data["tracks"][0]["clips"]] == ["o2", "o1"]
+    assert data["tracks"][0]["clips"][1] == {"id": "o1", "start": 10.0, "end": 11.0, "text": "Merhaba."}
+    en, de = (track["clips"] for track in data["tracks"][1:])
+    assert [c["id"] for c in en] == [c["id"] for c in de] == ["d2", "d1"]
+    assert en[1]["start"] == 10.0 and de[1]["start"] == 10.2
+    dubs.update_source_clip(dub, "o1", start=0.5, end=3.0)
+    data = dubs.load_dub(dub)
+    assert [s["id"] for s in data["tracks"][0]["clips"]] == ["o1", "o2"]
+    assert [c["id"] for c in data["tracks"][2]["clips"]] == ["d1", "d2"] and data["tracks"][2]["clips"][0]["start"] == 0.7
+
+
+def test_retiming_refuses_bad_times(tmp_workspace, tmp_path):
+    dub = _two_languages(tmp_path)
+    with pytest.raises(dubs.ws.WorkspaceError, match="A sentence must"):
+        dubs.update_source_clip(dub, "o1", end=0.6)  # 0.1 s long
+    with pytest.raises(dubs.ws.WorkspaceError, match="A sentence must"):
+        dubs.update_source_clip(dub, "o2", end=13.0)
