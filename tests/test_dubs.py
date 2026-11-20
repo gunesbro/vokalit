@@ -901,3 +901,35 @@ def test_retiming_refuses_bad_times(tmp_workspace, tmp_path):
         dubs.update_source_clip(dub, "o1", end=0.6)  # 0.1 s long
     with pytest.raises(dubs.ws.WorkspaceError, match="A sentence must"):
         dubs.update_source_clip(dub, "o2", end=13.0)
+
+
+def test_fit_forgets_the_speed_when_the_original_take_is_gone(tmp_workspace, tmp_path):
+    dub = _long_take(tmp_path, 3.9)  # room 3.45 s: fitted at 1.13x
+    dubs.fit_take(dub, "d1")
+    original = dubs.load_dub(dub)["tracks"][1]["clips"][0]["takes"][0]["file"]
+    dubs.delete_takes(dub, {"d1": [original]})
+    assert "speed" not in dubs.fit(dubs.load_dub(dub))["d1"]  # nothing to go back to: no longer listed as fitted
+
+
+def test_bulk_delete_looks_each_sentence_up_once(tmp_workspace, tmp_path, monkeypatch):
+    dub, _ = _three_takes(tmp_path)
+    calls = []
+    find = dubs._find
+    monkeypatch.setattr(dubs, "_find", lambda clips, clip_id: calls.append(clip_id) or find(clips, clip_id))
+    assert dubs.delete_takes(dub, {"d1": None, "d2": None}) == 3
+    assert calls == []  # one lookup table, not a scan per sentence (30k sentences: tens of seconds)
+
+
+def test_delete_takes_goes_on_when_a_file_is_busy(tmp_workspace, tmp_path, monkeypatch):
+    dub, files = _three_takes(tmp_path)
+    unlink = Path.unlink
+
+    def busy(path, missing_ok=False):  # Windows: a file being read cannot be deleted
+        if path.name == Path(files[0]).name:
+            raise PermissionError("in use")
+        return unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", busy)
+    assert dubs.delete_takes(dub, {"d1": None}) == 3
+    assert dubs.load_dub(dub)["tracks"][1]["clips"][0]["takes"] == []
+    assert not (dubs.dub_dir(dub) / files[1]).exists() and not (dubs.dub_dir(dub) / files[2]).exists()

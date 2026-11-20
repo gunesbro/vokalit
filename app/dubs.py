@@ -512,10 +512,12 @@ def delete_takes(dub_id: str, files_by_clip: dict, language: str | None = None) 
     """Deletes takes, files included: {clip id: [files], or None for all of its takes}. A sentence whose selected take
     goes uses its newest remaining one. Returns how many were deleted. Not undoable."""
     with _editing(dub_id) as data:
-        clips = _dub_clips(data, language)
+        by_id = {c["id"]: c for c in _dub_clips(data, language)}  # one lookup table: a tab can hold 30k sentences
         gone = []
         for clip_id, files in files_by_clip.items():
-            clip = _find(clips, clip_id)
+            clip = by_id.get(clip_id)
+            if clip is None:
+                raise ws.WorkspaceError("This sentence no longer exists. Reload the dub.")
             doomed = clip["takes"] if files is None else [t for t in clip["takes"] if t["file"] in set(files)]
             if files is not None and len(doomed) != len(set(files)):
                 raise ws.WorkspaceError("This take no longer exists.")
@@ -524,7 +526,10 @@ def delete_takes(dub_id: str, files_by_clip: dict, language: str | None = None) 
                 clip["selected"] = clip["takes"][-1]["file"] if clip["takes"] else None
             gone += [t["file"] for t in doomed]
     for file in gone:  # after the save: nothing points at them
-        (dub_dir(dub_id) / file).unlink(missing_ok=True)
+        try:
+            (dub_dir(dub_id) / file).unlink(missing_ok=True)
+        except OSError:  # in use (Windows, a file being played): the dub no longer refers to it either way
+            pass
     return len(gone)
 
 
@@ -694,7 +699,8 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
         over = round(clip["start"] + duration - min(limits), 1) if limits else 0.0
         result[clip["id"]] = {"state": "long", "over": over} if over > 0 else {"state": "fits", "over": 0.0}
         selected = next(t for t in clip["takes"] if t["file"] == clip["selected"])
-        if selected.get("speed"):  # sped up to fit: still listed under "Too long", with how much
+        if selected.get("speed") and _original_take(clip, selected) is not selected:  # sped up to fit: still listed
+            # under "Too long", with how much (not once its original is deleted: there is nothing to go back to)
             result[clip["id"]]["speed"] = selected["speed"]
         room = (min(limits) - clip["start"] - FIT_GAP) if limits else float("inf")
         base = _original_take(clip, selected)

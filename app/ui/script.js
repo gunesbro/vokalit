@@ -248,6 +248,31 @@ export function dragRange(fromX, toX, scale, total, threshold = 4) {
   return { start: at(Math.min(fromX, toX)), end: at(Math.max(fromX, toX)) };
 }
 
+// What restoring a deleted sentence needs, as the dub has it now (its clip in every language with its takes, where
+// it stands, and the sentences that took their voice from it).
+export function sentencePayload(dub, sourceId) {
+  const sources = dub.tracks[0].clips;
+  const index = sources.findIndex((s) => s.id === sourceId);
+  const tracks = dub.tracks.slice(1);
+  return { source: sources[index], index,
+    clips: Object.fromEntries(tracks.map((t) => [t.language, t.clips.find((c) => c.source_clip === sourceId)])),
+    voices: Object.fromEntries(tracks.map((t) => [t.language,
+      t.clips.filter((c) => c.source_clip !== sourceId && c.voice_from === sourceId).map((c) => c.id)])) };
+}
+
+// The take a stretched take was made from, while it still exists (null otherwise).
+export function originalOf(clip, take) {
+  const from = take?.from;
+  return from && clip.takes.some((t) => t.file === from) ? from : null;
+}
+
+// A time typed in seconds (to the millisecond), or null when the box is empty or not a number.
+export function parseSeconds(value) {
+  const text = String(value).trim();
+  const seconds = Number(text);
+  return text === "" || !Number.isFinite(seconds) ? null : Math.round(seconds * 1000) / 1000;
+}
+
 // Whether an undo step selects one of `files` (deleted takes): such a step could only fail now. Steps that select
 // takes list the files they refer to.
 export function touchesFiles(step, files) {

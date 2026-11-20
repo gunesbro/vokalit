@@ -2,7 +2,7 @@
 import { api, editableTitle, el, icon, ICONS, lastOpened, rememberOpened, revealButton, setMessage, waitForJob }
   from "./app.js";
 import { decode, encodeWav } from "./audio.js";
-import { clampSize, clipAt, clipFilter, clipsToPlay, createHistory, touchesFiles, formatTime, onlyModel, parseTranslations,
+import { clampSize, clipAt, clipFilter, clipsToPlay, createHistory, originalOf, parseSeconds, sentencePayload, touchesFiles, formatTime, onlyModel, parseTranslations,
   pasteTranslations, pickSelected, transcriptForTranslation, visibleRows, volumeRamps } from "./script.js";
 import { popover, searchSelect, sliders } from "./settings.js";
 import { preference, savePreference } from "./preferences.js";
@@ -432,19 +432,18 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
   async function addSentence({ start, end }) {
     lanes.clearRange();
     let added = null;
-    let again = null; // what redo puts back
+    let again = null; // what redo puts back: the sentence as it was when undone (with takes made since)
     const run = async () => {
       const result = again ? await api("POST", path("/source/restore"), again)
         : await api("POST", path("/source"), { start, end });
       added ??= result.added;
-      if (!again) {
-        const index = result.tracks[0].clips.findIndex((s) => s.id === added);
-        again = { source: result.tracks[0].clips[index], index, voices: {},
-          clips: Object.fromEntries(result.tracks.slice(1).map((t) => [t.language, t.clips.find((c) => c.source_clip === added)])) };
-      }
       return result;
     };
-    await act("adding a sentence", run, () => api("DELETE", path(`/source/${added}`)));
+    const revert = () => {
+      again = sentencePayload(dub, added);
+      return api("DELETE", path(`/source/${added}`));
+    };
+    await act("adding a sentence", run, revert);
     if (!added) return;
     const clip = clips().find((c) => c.source_clip === added);
     if (clip) choose(clip.id);
@@ -496,7 +495,11 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     const field = (key, label) => el("label", { class: "row small muted" }, label,
       el("input", { type: "number", class: "input dub-time", step: 0.1, min: 0, max: dub.source.duration || undefined,
         value: source[key].toFixed(2), "aria-label": `${label} of the sentence, in seconds`,
-        onchange: (e) => retime(source, key, Math.round(Number(e.target.value) * 1000) / 1000) }));
+        onchange: (e) => {
+          const seconds = parseSeconds(e.target.value);
+          if (seconds === null) e.target.value = source[key].toFixed(2); // emptied or not a number: nothing changes
+          else retime(source, key, seconds);
+        } }));
     return el("div", { class: "row dub-times" }, field("start", "Start"), field("end", "End"),
       el("span", { class: "faint small" }, "s"));
   }
@@ -513,12 +516,10 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     const number = index + 1;
     // The sentence is shared by every language: undo brings back its clip in each, and points back the sentences that
     // took their voice from it (they fall back to their own).
-    const all = Object.fromEntries(tracks().map((t) => [t.language, t.clips.find((c) => c.source_clip === source.id)]));
-    const voices = Object.fromEntries(tracks().map((t) => [t.language,
-      t.clips.filter((c) => c.source_clip !== source.id && c.voice_from === source.id).map((c) => c.id)]));
+    const payload = sentencePayload(dub, source.id);
     if (selected === clip.id) selected = clips()[index + 1]?.id || clips()[index - 1]?.id || null;
     act(`deleting sentence ${number}`, () => api("DELETE", path(`/source/${source.id}`)),
-      () => api("POST", path("/source/restore"), { source, clips: all, index, voices }));
+      () => api("POST", path("/source/restore"), payload));
   }
 
   // --- Jobs ------------------------------------------------------------------------------------
@@ -842,7 +843,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
   // Selects the takes sped-up ones were made from (undoable; the sped-up takes stay in the list).
   function useOriginals(ids) {
     const changed = ids.map((id) => clips()[numberOf(id) - 1]).filter(Boolean)
-      .map((c) => [c.id, c.selected, takeOf(c)?.from]).filter(([, , from]) => from);
+      .map((c) => [c.id, c.selected, originalOf(c, takeOf(c))]).filter(([, , from]) => from); // still there
     if (!changed.length) return;
     const at = q();
     const select = (index) => api("POST", path(`/select${at}`), { selections: Object.fromEntries(changed.map((c) => [c[0], c[index]])) });
@@ -1140,13 +1141,13 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
 
   // Deleted takes: their playback stops, their waveforms go (a new take may reuse the name), and undo steps that
   // select them are forgotten, as they could only fail now.
-  function forgetTakes(files) {
+  function stopTakes(files) { // before deleting: a file being read cannot be deleted on Windows
     for (const file of files) {
       stopAudio(fileUrl(file));
       forgetWaveforms(fileUrl(file));
     }
-    history().drop((step) => step.language === track().language && touchesFiles(step, files));
   }
+  const forgetTakes = (files) => history().drop((step) => step.language === track().language && touchesFiles(step, files));
 
   // One take, with a confirm under it as in Studio. Not undoable: the file is removed.
   function confirmDeleteTake(row, clip, take, number) {
@@ -1156,6 +1157,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
       el("div", { class: "row" },
         el("button", { class: "btn btn-danger btn-small", onclick: async () => {
           try {
+            stopTakes([take.file]);
             const result = await api("DELETE", path(`/clips/${clip.id}/takes${q()}`), { file: take.file });
             forgetTakes(new Set([take.file]));
             apply(result);
@@ -1178,8 +1180,10 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
       el("button", { class: "btn btn-danger", onclick: async () => {
         close();
         try {
+          const files = shown.flatMap((c) => c.takes.map((t) => t.file));
+          stopTakes(files);
           const result = await api("POST", path(`/takes/delete${q()}`), { clips: shown.map((c) => c.id) });
-          forgetTakes(new Set(shown.flatMap((c) => c.takes.map((t) => t.file))));
+          forgetTakes(new Set(files));
           apply(result);
           setMessage(message, `Deleted ${plural(result.removed, "take")}.`);
         } catch (error) { fail(error); }

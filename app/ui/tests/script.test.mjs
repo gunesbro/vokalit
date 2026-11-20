@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeClip, dragRange, touchesFiles, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
+import { activeClip, dragRange, originalOf, parseSeconds, sentencePayload, touchesFiles, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -396,4 +396,27 @@ test("dragRange turns a drag into seconds and a click into nothing", () => {
   assert.deepEqual(dragRange(100, 150, 10, 60), { start: 10, end: 15 });
   assert.deepEqual(dragRange(150, 100, 10, 60), { start: 10, end: 15 });
   assert.deepEqual(dragRange(590, 700, 10, 60), { start: 59, end: 60 });
+});
+
+test("sentencePayload is what restoring a sentence needs, as it is now", () => {
+  const dub = { tracks: [{ clips: [{ id: "o1" }, { id: "o3" }] },
+    { language: "en", clips: [{ id: "d1", source_clip: "o1", voice_from: "o3" }, { id: "d3", source_clip: "o3", voice_from: "o3", takes: [{ file: "t" }] }] }] };
+  assert.deepEqual(sentencePayload(dub, "o3"), { source: { id: "o3" }, index: 1,
+    clips: { en: { id: "d3", source_clip: "o3", voice_from: "o3", takes: [{ file: "t" }] } }, voices: { en: ["d1"] } });
+});
+
+test("originalOf is the take a stretched one came from, while it exists", () => {
+  const clip = { takes: [{ file: "a" }, { file: "b", from: "a" }, { file: "c", from: "gone" }] };
+  assert.equal(originalOf(clip, clip.takes[1]), "a");
+  assert.equal(originalOf(clip, clip.takes[2]), null);
+  assert.equal(originalOf(clip, clip.takes[0]), null);
+  assert.equal(originalOf(clip, undefined), null);
+});
+
+test("parseSeconds reads a typed time, or nothing for an empty or broken one", () => {
+  assert.equal(parseSeconds("1.2345"), 1.235);
+  assert.equal(parseSeconds(""), null);
+  assert.equal(parseSeconds("  "), null);
+  assert.equal(parseSeconds("abc"), null);
+  assert.equal(parseSeconds("0"), 0);
 });
