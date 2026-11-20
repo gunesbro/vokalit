@@ -672,3 +672,28 @@ def test_separating_again_replaces_both_stems_or_neither(tmp_workspace, tmp_path
         dubs.keep_stems(dub)
     assert set(dubs._read(dubs.voices_path(dub))[1].tolist()) == {1000}
     assert set(dubs._read(dubs.background_path(dub))[1].tolist()) == {2000}
+
+
+def _timed_dub(tmp_path, next_start):
+    """A sentence spoken 1.0-5.0 s, its dub clip at 1.0 s, and a next sentence starting at `next_start`."""
+    dub = dubs.create_dub("Talk", b"x", "mp3")
+    dubs.set_source_audio(dub, make_wav(tmp_path / "source.wav", 12).read_bytes())
+    dubs.set_transcript(dub, "tr", [{"start": 1.0, "end": 5.0, "text": "Bir."},
+                                    {"start": max(next_start, 1.0), "end": 11.0, "text": "Iki."}])
+    return dub
+
+
+def test_generation_timing_targets_where_the_speaker_stops(tmp_workspace, tmp_path):
+    dub = _timed_dub(tmp_path, 8.0)
+    assert dubs.generation_timing(dub, "d1") == {"target": 4.0, "min_speed": 0.85, "max_speed": 1.25}
+
+
+def test_generation_timing_stops_before_the_next_sentence(tmp_workspace, tmp_path):
+    dub = _timed_dub(tmp_path, 3.0)
+    assert dubs.generation_timing(dub, "d1")["target"] == round(2.0 - dubs.FIT_GAP, 2)
+
+
+def test_generation_timing_is_none_without_room(tmp_workspace, tmp_path):
+    dub = _timed_dub(tmp_path, 8.0)
+    dubs.update_dub_clip(dub, "d2", start=1.0)  # the next sentence moved onto this one
+    assert dubs.generation_timing(dub, "d1") is None

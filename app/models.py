@@ -119,6 +119,7 @@ MODELS = {
         "title": "OmniVoice",
         "summary": "600+ languages \u00b7 cloning \u00b7 sound tags",
         "url": "https://huggingface.co/k2-fsa/OmniVoice",
+        "timed": True,  # generates to a given length (dubs: where the speaker stops)
         "disk_gb": 9.0,  # estimate until measured on Windows
         "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
         "supports_convert": False,
@@ -914,13 +915,17 @@ def model_language(name, code):
     return MODELS[name].get("language_codes", {}).get(code, code)
 
 
-def generate(name, text, ref, out, seed, settings, language, ref_text=None):
-    """Returns the generation time in seconds. `ref_text`: what is said in `ref` (models that need it)."""
+def generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
+    """Returns the generation time in seconds. `ref_text`: what is said in `ref` (models that need it). `timing`: for
+    a "timed" model, {"target", "min_speed", "max_speed"} (dubs.generation_timing)."""
     if language not in MODELS[name].get("languages", []):
         raise ValueError(f"{MODELS[name]['title']} does not support {LANGUAGE_NAMES.get(language, language)}.")
     settings = validate_settings(name, settings)
-    return _ask(name, {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings,
-                       "language": model_language(name, language), "ref_text": ref_text})
+    message = {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings,
+               "language": model_language(name, language), "ref_text": ref_text}
+    if timing is not None:
+        message["timing"] = timing
+    return _ask(name, message)
 
 
 def check_description(name, description):

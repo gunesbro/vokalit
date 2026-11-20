@@ -113,7 +113,7 @@ def test_dub_generate_uses_its_own_sentence_as_reference(api, tmp_path, monkeypa
     dub = _transcribed(api, tmp_path, monkeypatch)
     calls = []
 
-    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
         calls.append({"name": name, "text": text, "ref": ref, "language": language, "ref_text": ref_text})
         make_wav(out, 4.8)  # the sentence is spoken for 5 s: ends with its speaker
         return 0.5
@@ -130,6 +130,38 @@ def test_dub_generate_uses_its_own_sentence_as_reference(api, tmp_path, monkeypa
     clip = done["result"]["tracks"][1]["clips"][1]
     assert clip["selected"] == "takes/en/d2-1.wav" and clip["takes"][0]["seed"] == 7
     assert done["result"]["fit"]["en"]["d2"] == {"state": "fits", "over": 0.0}
+
+
+def test_dub_generate_gives_omnivoice_its_target(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    timings = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
+        timings.append(timing)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert timings == [dubs.generation_timing(dub["id"], "d2")] and timings[0]["target"] > 0
+
+
+def test_dub_generate_gives_other_models_no_target(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):  # no timing
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "higgs"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done", done
 
 
 def test_dub_generate_refuses_empty_translation(api, tmp_path, monkeypatch):
@@ -150,7 +182,7 @@ def test_dub_generate_can_be_cancelled(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     release, cancelled = threading.Event(), []
 
-    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
         release.wait(5)
         raise RuntimeError("The model process stopped unexpectedly.")
 
@@ -226,7 +258,7 @@ def test_one_job_at_a_time_per_dub(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     release = threading.Event()
 
-    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
         release.wait(5)
         make_wav(out, 1)
         return 0.1
@@ -267,7 +299,7 @@ def test_a_generating_language_cannot_be_removed(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     release = threading.Event()
 
-    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
         release.wait(5)
         make_wav(out, 1)
         return 0.1
@@ -349,7 +381,7 @@ def test_a_take_without_sound_is_not_kept(api, tmp_path, monkeypatch):
     """A take with no samples cannot be played (the window cannot decode it): it is refused, not added."""
     dub = _transcribed(api, tmp_path, monkeypatch)
 
-    def silent(name, text, ref, out, seed, settings, language, ref_text=None):
+    def silent(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
         make_wav(out, 0)
         return 0.1
 

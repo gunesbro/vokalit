@@ -42,6 +42,27 @@ def _target(clip: dict, source: dict | None, room: float) -> float:
     return min(room, source["end"] - clip["start"]) if source else 0.0
 
 
+def _room(data: dict, clips: list[dict], clip: dict) -> float:
+    """Seconds a clip's take may last: until FIT_GAP before the next sentence (by start) or the end of the file."""
+    order = sorted(clips, key=lambda c: c["start"])
+    following = order[order.index(clip) + 1:order.index(clip) + 2]
+    limits = [c["start"] for c in following] + ([data["source"]["duration"]] if data["source"]["duration"] else [])
+    return (min(limits) - clip["start"] - FIT_GAP) if limits else float("inf")
+
+
+def generation_timing(dub_id: str, clip_id: str, language: str | None = None) -> dict | None:
+    """For a model that can fix its length: where a clip's new take should end (as _target), and the speeds it may
+    take to get there. None when there is no speaker to match or no room."""
+    data = load_dub(dub_id)
+    clips = _dub_clips(data, language)
+    clip = _find(clips, clip_id)
+    source = next((s for s in _source_clips(data) if s["id"] == clip.get("source_clip")), None)
+    target = _target(clip, source, _room(data, clips, clip))
+    if source is None or target <= 0:
+        return None
+    return {"target": round(target, 2), "min_speed": MIN_SPEED, "max_speed": MAX_SPEEDUP}
+
+
 def _can_lengthen(duration: float, target: float) -> bool:
     """Slowed down to MIN_SPEED at most, the take ends within SHORT_GAP of the target."""
     return duration / MIN_SPEED >= target - SHORT_GAP
@@ -482,10 +503,7 @@ def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
     path = dub_dir(dub_id) / base["file"]
     if not path.exists():
         raise ws.WorkspaceError(f"Sentence {number}: the take file is missing ({base['file']}). Generate it again.")
-    order = sorted(clips, key=lambda c: c["start"])  # the next sentence as fit() sees it
-    following = order[order.index(clip) + 1:order.index(clip) + 2]
-    limits = [c["start"] for c in following] + ([data["source"]["duration"]] if data["source"]["duration"] else [])
-    room = (min(limits) - clip["start"] - FIT_GAP) if limits else float("inf")
+    room = _room(data, clips, clip)
     if room <= 0:
         raise NeedsShorter(f"Sentence {number} has no time before the next sentence. Move it or shorten the translation.")
     target = _target(clip, next((s for s in _source_clips(data) if s["id"] == clip["source_clip"]), None), room)

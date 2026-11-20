@@ -1273,10 +1273,12 @@ def generate_dub(req, did):
             settings = models.validate_settings(name, track_now["settings"].get(name, {}))
             take_seed = _random_seed() if seed is None else seed
             out = dubs.new_take_path(did, cid, language)
+            # A model that can fix its length is told where the speaker stops.
+            timed = {"timing": dubs.generation_timing(did, cid, language)} if models.MODELS[name].get("timed") else {}
             job["model"] = name  # what cancelling stops
             try:
                 seconds = models.generate(name, text, str(ref), str(out), take_seed, settings, language,
-                                          ref_text=ref_text)
+                                          ref_text=ref_text, **timed)
             except Exception as error:
                 if job.get("cancelled"):
                     out.unlink(missing_ok=True)  # a take cut off halfway
