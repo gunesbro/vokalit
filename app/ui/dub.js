@@ -798,7 +798,7 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
       el("button", { class: "menu-item danger", disabled: Boolean(job) || !takeCount(),
         onclick: () => confirmClearTakes(more) }, `Delete all takes of ${languageName(track().language)}\u2026`),
       el("button", { class: "menu-item danger", onclick: () => confirmDelete(more) }, "Delete dub\u2026")), { align: "right" });
-    const exportButton = el("button", { class: "btn", disabled: !dub.source.duration, title: "Mix the dub into one audio file",
+    const exportButton = el("button", { class: "btn", disabled: !dub.source.duration, title: "Mix the dub into one audio file, or into the video",
       onclick: () => popover(exportButton, exportPanel(), { align: "right" }) }, "Export");
     const undoLabel = history().undoLabel();
     const redoLabel = history().redoLabel();
@@ -1227,16 +1227,17 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
     if (dub.source.kind !== "video") return el("div", { class: "menu" }, sound);
     // The video as it is, with the dub as its sound; with several languages, optionally each as its own audio track.
     const every = el("input", { type: "checkbox" });
-    const container = dub.source.file.split(".").pop().toUpperCase();
+    const container = { mp4: "MP4", webm: "WebM" }[dub.source.file.split(".").pop().toLowerCase()] || "video";
+    // The option first: pressing the button exports at once.
     return el("div", { class: "menu" }, sound,
       el("div", { class: "menu-sep" }),
+      tracks().length > 1 ? el("label", { class: "row small muted export-every" }, every,
+        "Include every language as its own audio track") : "",
       el("button", { class: "menu-item", disabled: !videoTool,
         title: videoTool ? "" : "Install Video export (FFmpeg) on the Models screen.",
         onclick: () => exported(" the video", () => api("POST", path(`/export-video${q()}`), { every_language: every.checked })) },
       el("strong", {}, `Video (${container})`), el("span", { class: "faint small" },
-        videoTool ? "the video as it is, with this dub's sound" : "install Video export (FFmpeg) on the Models screen")),
-      tracks().length > 1 ? el("label", { class: "row small muted export-every" }, every,
-        "Include every language as its own audio track") : "");
+        videoTool ? "the video as it is, with this dub's sound" : "install Video export (FFmpeg) on the Models screen")));
   }
 
   function confirmTranscribe(anchor) {

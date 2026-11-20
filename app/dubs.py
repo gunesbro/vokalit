@@ -4,8 +4,10 @@ their own voices. Stored as tracks of clips (seconds, never pixels), so the time
 dub.json, source.<ext> (the imported file), audio.wav (its sound, decoded by the window), refs/, takes/, exports/.
 """
 import os
+import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import wave
@@ -873,12 +875,27 @@ def _export_path(dub_id: str, data: dict, label: str, ext: str) -> Path:
     return folder / f"{ws.slugify(data['name'])}-{label}-{time.strftime('%Y%m%d-%H%M%S')}.{ext}"
 
 
-# ISO 639-2 codes for a video's audio tracks (players show them); any other language keeps its own code.
-LANGUAGE_TAGS = {"en": "eng", "tr": "tur", "de": "ger", "fr": "fre", "es": "spa", "it": "ita", "pt": "por",
-                 "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "ar": "ara", "nl": "dut", "pl": "pol",
-                 "hi": "hin", "sv": "swe", "da": "dan", "fi": "fin", "no": "nor", "el": "gre", "cs": "cze",
-                 "hu": "hun", "ro": "rum", "uk": "ukr", "he": "heb", "id": "ind", "vi": "vie", "th": "tha",
-                 "fa": "per", "ms": "may", "bg": "bul", "hr": "hrv", "sk": "slo", "sr": "srp", "ca": "cat"}
+# ISO 639-2/B codes for a video's audio tracks (players show them), for every two-letter code the app offers;
+# three-letter codes (ISO 639-3) are kept as they are.
+LANGUAGE_TAGS = {"ab": "abk", "af": "afr", "am": "amh", "an": "arg", "ar": "ara", "as": "asm", "az": "aze",
+                 "ba": "bak", "be": "bel", "bg": "bul", "bn": "ben", "bo": "tib", "br": "bre", "bs": "bos",
+                 "ca": "cat", "cs": "cze", "cv": "chv", "cy": "wel", "da": "dan", "de": "ger", "dv": "div",
+                 "el": "gre", "en": "eng", "eo": "epo", "es": "spa", "et": "est", "eu": "baq", "fa": "per",
+                 "ff": "ful", "fi": "fin", "fr": "fre", "fy": "fry", "ga": "gle", "gl": "glg", "gn": "grn",
+                 "gu": "guj", "gv": "glv", "ha": "hau", "he": "heb", "hi": "hin", "hr": "hrv", "ht": "hat",
+                 "hu": "hun", "hy": "arm", "hz": "her", "ia": "ina", "id": "ind", "ig": "ibo", "ik": "ipk",
+                 "is": "ice", "it": "ita", "ja": "jpn", "jv": "jav", "ka": "geo", "kj": "kua", "kk": "kaz",
+                 "km": "khm", "kn": "kan", "ko": "kor", "ks": "kas", "kw": "cor", "ky": "kir", "la": "lat",
+                 "lb": "ltz", "lg": "lug", "ln": "lin", "lo": "lao", "lt": "lit", "lv": "lav", "mi": "mao",
+                 "mk": "mac", "ml": "mal", "mn": "mon", "mr": "mar", "ms": "may", "mt": "mlt", "my": "bur",
+                 "nb": "nob", "ne": "nep", "ng": "ndo", "nl": "dut", "nn": "nno", "no": "nor", "ny": "nya",
+                 "oc": "oci", "om": "orm", "os": "oss", "pa": "pan", "pl": "pol", "ps": "pus", "pt": "por",
+                 "rm": "roh", "ro": "rum", "ru": "rus", "rw": "kin", "sa": "san", "sc": "srd", "sd": "snd",
+                 "si": "sin", "sk": "slo", "sl": "slv", "sn": "sna", "so": "som", "sq": "alb", "sr": "srp",
+                 "sv": "swe", "sw": "swa", "ta": "tam", "te": "tel", "tg": "tgk", "th": "tha", "ti": "tir",
+                 "tk": "tuk", "tl": "tgl", "tn": "tsn", "tr": "tur", "tt": "tat", "tw": "twi", "ug": "uig",
+                 "uk": "ukr", "ur": "urd", "uz": "uzb", "vi": "vie", "wo": "wol", "xh": "xho", "yi": "yid",
+                 "yo": "yor", "zh": "chi", "zu": "zul"}
 
 
 def export_video(dub_id: str, language: str | None = None, every_language: bool = False, ffmpeg: str | None = None,
@@ -898,10 +915,16 @@ def export_video(dub_id: str, language: str | None = None, every_language: bool 
     if every_language:
         tracks.append((data["source"]["language"], "Original"))
     out = _export_path(dub_id, data, "all" if every_language else codes[0], ext)
+    n = 2
+    while out.exists():  # two exports in the same second: a failure must never delete the earlier one
+        out = out.with_name(f"{out.stem.rsplit('~', 1)[0]}~{n}{out.suffix}")
+        n += 1
     temporary = []
     try:
         for n, (code, _) in enumerate(tracks):
-            path = dub_dir(dub_id) / f"video-{n}.wav"
+            handle, name = tempfile.mkstemp(prefix="video-", suffix=".wav.tmp", dir=dub_dir(dub_id))  # own names:
+            os.close(handle)  # two exports at once do not share their inputs
+            path = Path(name)
             temporary.append(path)
             if n < len(codes):
                 _write(path, *mix_dub(dub_id, code))
@@ -918,10 +941,10 @@ def export_video(dub_id: str, language: str | None = None, every_language: bool 
             args += [f"-metadata:s:a:{n}", f"language={LANGUAGE_TAGS.get(code, code or 'und')}",
                      f"-metadata:s:a:{n}", f"title={title}", f"-metadata:s:a:{n}", f"handler_name={title}",
                      f"-disposition:a:{n}", "default" if n == 0 else "0"]
-        result = subprocess.run(args + [str(out)], capture_output=True, text=True)
+        # FFmpeg writes UTF-8 (paths with \u015e or \u011f included); Windows' own code page cannot read it.
+        result = subprocess.run(args + [str(out)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
-            why = " ".join(result.stderr.strip().splitlines()[-2:]) or f"FFmpeg stopped with code {result.returncode}"
-            raise ws.WorkspaceError(f"The video could not be exported: {why}")
+            raise ws.WorkspaceError(f"The video could not be exported: {_ffmpeg_reason(result)}")
         return out
     except BaseException:
         out.unlink(missing_ok=True)
@@ -929,6 +952,17 @@ def export_video(dub_id: str, language: str | None = None, every_language: bool 
     finally:
         for path in temporary:
             path.unlink(missing_ok=True)
+
+
+def _ffmpeg_reason(result) -> str:
+    """FFmpeg's error lines (it is run at -loglevel error, so they are few), without their "[muxer @ 0x...]" prefixes
+    and repeats: the reason is often not the last line."""
+    lines = []
+    for line in result.stderr.splitlines():
+        line = re.sub(r"^\[[^\]]*@ 0x[0-9a-f]+\]\s*", "", line.strip())
+        if line and line not in lines:
+            lines.append(line)
+    return " ".join(lines)[:400] or f"FFmpeg stopped with code {result.returncode}"
 
 
 def mix_dub(dub_id: str, language: str | None = None) -> tuple[int, np.ndarray]:

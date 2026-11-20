@@ -157,3 +157,56 @@ def test_export_video_route_needs_the_tool(api, tmp_workspace, monkeypatch):
     monkeypatch.setattr(models, "ffmpeg_path", lambda: None)
     status, body, _ = api("POST", f"/api/dubs/{dub}/export-video", {})
     assert status == 400 and "Install Video export (FFmpeg)" in body["error"]
+
+
+def test_every_offered_language_has_a_three_letter_tag():
+    import dubs
+    two = [code for code in models.LANGUAGE_NAMES if len(code) == 2]
+    assert [code for code in two if len(dubs.LANGUAGE_TAGS.get(code, "")) != 3] == []
+
+
+def test_ffmpeg_path_under_a_folder_with_brackets(tmp_path, monkeypatch):
+    root = tmp_path / "Vokalit [v2]"
+    monkeypatch.setattr(models, "model_dir", lambda name: str(root / name))
+    binaries = root / "ffmpeg" / "venv" / "lib" / "python3.11" / "site-packages" / "imageio_ffmpeg" / "binaries"
+    binaries.mkdir(parents=True)
+    (binaries / "ffmpeg-linux-x86_64-v7.0.2").write_bytes(b"")
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    assert models.ffmpeg_path() == str(binaries / "ffmpeg-linux-x86_64-v7.0.2")
+
+
+class _Failed:
+    returncode = 1
+    stderr = ("[matroska @ 0x55d0] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are "
+              "supported for WebM.\n[out#0/webm @ 0x55d1] Could not write header (incorrect codec parameters ?): "
+              "Invalid argument\nError opening output file x.webm.\nError opening output files: Invalid argument\n")
+
+
+def test_ffmpeg_errors_keep_the_reason_and_read_as_utf8(video_dub, monkeypatch):
+    import dubs
+    dub = video_dub()
+    seen = {}
+
+    def run(args, **kwargs):
+        seen.update(kwargs)
+        return _Failed()
+
+    monkeypatch.setattr(dubs.subprocess, "run", run)
+    with pytest.raises(dubs.ws.WorkspaceError) as error:
+        dubs.export_video(dub, "en", ffmpeg="ffmpeg", names=NAMES)
+    assert "Only VP8 or VP9 or AV1 video" in str(error.value) and "@ 0x" not in str(error.value)
+    assert seen.get("encoding") == "utf-8" and seen.get("errors") == "replace"  # Turkish Windows is not cp1254-safe
+
+
+def test_a_failed_export_keeps_an_earlier_file_of_the_same_name(video_dub, monkeypatch):
+    import dubs
+    dub = video_dub()
+    monkeypatch.setattr(dubs.time, "strftime", lambda fmt: "20261120-120000")
+    earlier = dubs.dub_dir(dub) / "exports" / "talk-en-20261120-120000.mp4"
+    earlier.parent.mkdir(exist_ok=True)
+    earlier.write_bytes(b"an export made a moment ago")
+    monkeypatch.setattr(dubs.subprocess, "run", lambda args, **kwargs: _Failed())
+    with pytest.raises(dubs.ws.WorkspaceError):
+        dubs.export_video(dub, "en", ffmpeg="ffmpeg", names=NAMES)
+    assert earlier.read_bytes() == b"an export made a moment ago"
+    assert sorted(p.name for p in dubs.dub_dir(dub).iterdir() if p.suffix == ".wav") == ["audio.wav"]

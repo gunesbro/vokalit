@@ -113,7 +113,8 @@ have no clear license, so the install downloads them and Vokalit never ships the
 
 **Video export** (`TOOLS["ffmpeg"]`, Dub only): `imageio-ffmpeg==0.6.0` brings FFmpeg's program (a GPL build,
 downloaded at install, never shipped); no worker: `models.ffmpeg_path()` finds it in the tool's environment and
-`dubs.export_video` runs it on local files only (`-protocol_whitelist file`). The source video is copied
+`dubs.export_video` runs it on files the app made or imported (`-protocol_whitelist file` on the source video),
+reading its errors as UTF-8. The source video is copied
 (`-c:v copy`) with the dub's mix (`mix_dub`, the audio export's) as AAC 192k in MP4 or Opus 128k in WebM, the
 source's container; with "every language", each language's mix then the original sound are separate tracks, tagged
 with ISO 639-2 language codes and named (title and, for MP4, handler name), the first the default. Temporary WAVs

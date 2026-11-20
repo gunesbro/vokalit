@@ -321,8 +321,8 @@ def ffmpeg_path():
     """The FFmpeg program the video export tool installed (inside its environment), or None."""
     if not is_installed("ffmpeg"):
         return None
-    found = sorted(glob.glob(os.path.join(model_dir("ffmpeg"), "venv", "**", "imageio_ffmpeg", "binaries", "ffmpeg*"),
-                             recursive=True))
+    found = sorted(glob.glob(os.path.join(glob.escape(model_dir("ffmpeg")), "venv", "**", "imageio_ffmpeg", "binaries",
+                                          "ffmpeg*"), recursive=True))  # escaped: a folder may be named "Vokalit [v2]"
     return next((path for path in found if os.path.isfile(path)), None)
 
 
