@@ -61,15 +61,16 @@ def generation_timing(dub_id: str, clip_id: str, language: str | None = None) ->
     clips = _dub_clips(data, language)
     clip = _find(clips, clip_id)
     source = next((s for s in _source_clips(data) if s["id"] == clip.get("source_clip")), None)
-    target = _target(clip, source, _room(data, clips, clip))
+    target = round(_target(clip, source, _room(data, clips, clip)), 2)
     if source is None or target <= 0:
         return None
-    return {"target": round(target, 2), "min_speed": MIN_SPEED, "max_speed": MAX_SPEEDUP}
+    return {"target": target, "min_speed": MIN_SPEED, "max_speed": MAX_SPEEDUP}
 
 
-def _can_lengthen(duration: float, target: float) -> bool:
-    """Slowed down to MIN_SPEED at most, the take ends within SHORT_GAP of the target."""
-    return duration / MIN_SPEED >= target - SHORT_GAP
+def _can_lengthen(duration: float, target: float, pace: float = 1.0) -> bool:
+    """Slowed down to MIN_SPEED of its natural pace at most (a timed take was made at `pace`), the take ends within
+    SHORT_GAP of the target."""
+    return duration / min(MIN_SPEED / pace, 1.0) >= target - SHORT_GAP
 
 
 def _root() -> Path:
@@ -544,15 +545,16 @@ def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
     if room <= 0:
         raise NeedsShorter(f"Sentence {number} has no time before the next sentence. Move it or shorten the translation.")
     target = _target(clip, next((s for s in _source_clips(data) if s["id"] == clip["source_clip"]), None), room)
+    pace = base.get("pace", 1.0)  # a timed take was already made faster or slower than natural: the limits count it
     if base["duration"] > room:  # too long: faster, to end before the next sentence
         speed = base["duration"] / room
-        if round(speed, 2) > MAX_SPEEDUP:  # as shown: a speed shown as 1.25x is within the limit
-            raise NeedsShorter(f"Sentence {number} would need {speed:.2f}\u00d7 faster. Shorten the translation.")
+        if round(speed * pace, 2) > MAX_SPEEDUP:  # as shown: a speed shown as 1.25x is within the limit
+            raise NeedsShorter(f"Sentence {number} would need {speed * pace:.2f}\u00d7 faster. Shorten the translation.")
     elif base["duration"] < target - SHORT_GAP:  # ends while the speaker still talks: slower, up to MIN_SPEED
-        if not _can_lengthen(base["duration"], target):
-            raise NeedsLonger(f"Sentence {number} would need {base['duration'] / target:.2f}\u00d7 to last as long as "
-                              "its speaker. Lengthen the translation.")
-        speed = max(base["duration"] / target, MIN_SPEED)
+        if not _can_lengthen(base["duration"], target, pace):
+            raise NeedsLonger(f"Sentence {number} would need {base['duration'] / target * pace:.2f}\u00d7 to last as "
+                              "long as its speaker. Lengthen the translation.")
+        speed = max(base["duration"] / target, min(MIN_SPEED / pace, 1.0))
     else:  # the take it came from fits as it is (the next sentence moved): use that one
         if selected is base:
             raise ws.WorkspaceError(f"Sentence {number} already fits.")
@@ -603,16 +605,17 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
         if selected.get("speed"):  # sped up to fit: still listed under "Too long", with how much
             result[clip["id"]]["speed"] = selected["speed"]
         room = (min(limits) - clip["start"] - FIT_GAP) if limits else float("inf")
-        original = _original_take(clip, selected)["duration"]
+        base = _original_take(clip, selected)
+        original, pace = base["duration"], base.get("pace", 1.0)  # a timed take's limits count its pace
         if over > 0:
             need = round(original / room, 2) if room > 0 else None
-            result[clip["id"]].update(need=need, can_fit=need is not None and need <= MAX_SPEEDUP)
+            result[clip["id"]].update(need=need, can_fit=need is not None and round(need * pace, 2) <= MAX_SPEEDUP)
             continue
         target = _target(clip, sources.get(clip.get("source_clip")), room)
         under = round(target - duration, 1)
         if duration < target - SHORT_GAP:  # the speaker is still talking when it ends
             result[clip["id"]].update(state="short", under=under, need=round(original / target, 2),
-                                      can_fit=_can_lengthen(original, target))
+                                      can_fit=_can_lengthen(original, target, pace))
     return result
 
 

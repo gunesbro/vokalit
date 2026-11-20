@@ -138,7 +138,8 @@ def test_dub_generate_gives_omnivoice_its_target(api, tmp_path, monkeypatch):
     timings = []
 
     def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
-        timings.append(timing)
+        timings.append(dict(timing))
+        timing["pace"] = 1.1  # what the worker reports
         make_wav(out, 1)
         return 0.1
 
@@ -148,6 +149,8 @@ def test_dub_generate_gives_omnivoice_its_target(api, tmp_path, monkeypatch):
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
     assert _wait(api, job["id"])["state"] == "done"
     assert timings == [dubs.generation_timing(dub["id"], "d2")] and timings[0]["target"] > 0
+    take = dubs.load_dub(dub["id"])["tracks"][1]["clips"][1]["takes"][0]
+    assert take["pace"] == 1.1  # Fit counts it
 
 
 def test_dub_generate_gives_other_models_no_target(api, tmp_path, monkeypatch):

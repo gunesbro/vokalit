@@ -291,7 +291,9 @@ All interface text is English. The visual design is the design canvas; behaviour
   change, and the timeline draws only the clips around its window, so tens of thousands of sentences stay quick;
   dub.json is written compact. Generate: a "timed" model (OmniVoice) is given where the speaker stops
   (`dubs.generation_timing`: the speaker's end, capped by the room before the next sentence) and generates to it,
-  within 0.85x-1.25x of its own natural-length estimate (`duration=`); every new take is then brought to its
+  within 0.85x-1.25x of its own natural-length estimate (from its voice prompt, the reference without silence;
+  `duration=`, no edge padding; none without the reference's text), and the take keeps that `pace`, which Fit's
+  limits count; every new take is then brought to its
   sentence's level (`dubs.match_level`: gated RMS over 50 ms frames, 30 dB gate, the voices stem when separated,
   at most ±12 dB, peak at most -1 dBFS). Fit: a too-long take is sped up with the same pitch (WSOLA, `app/stretch.py`) to end
   0.05 s before the next sentence, as a new selected take that remembers its original (fitting again starts from it),

@@ -15,9 +15,38 @@ class _Tokenizer:
     config = _Config()
 
 
+class _Tokens:
+    def __init__(self, count):
+        self.count = count
+
+    def size(self, dim):
+        return self.count
+
+
+class _Prompt:
+    """What create_voice_clone_prompt returns: the reference's tokens once its silence is removed (here: all of it
+    from the first sound on), and its text."""
+
+    def __init__(self, ref_audio, ref_text):
+        import wave
+        with wave.open(ref_audio, "rb") as w:
+            samples = w.readframes(w.getnframes())
+            rate = w.getframerate()
+        frames = [samples[i:i + 2] for i in range(0, len(samples), 2)]
+        first = next((i for i, f in enumerate(frames) if f != b"\x00\x00"), len(frames))
+        self.ref_audio_tokens = _Tokens((len(frames) - first) / rate * _Config.frame_rate)
+        self.ref_text = ref_text
+
+    def __repr__(self):
+        return f"prompt({self.ref_text})"
+
+
 class OmniVoice:
     duration_estimator = _Estimator()
     audio_tokenizer = _Tokenizer()
+
+    def create_voice_clone_prompt(self, ref_audio, ref_text=None):
+        return _Prompt(ref_audio, ref_text)
 
     @classmethod
     def from_pretrained(cls, name, device_map=None, dtype=None):

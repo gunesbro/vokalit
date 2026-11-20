@@ -10,7 +10,6 @@ import json
 import socket
 import sys
 import time
-import wave
 
 MODEL = "k2-fsa/OmniVoice"
 SAMPLE_RATE = 24000
@@ -36,21 +35,21 @@ def _out_of_memory(error):
 
 def timed_duration(timing, natural, speed=1.0):
     """The length to generate a dub take to: the target (where its speaker stops), but no more than max_speed faster
-    or min_speed slower than its natural pace (`natural` seconds, divided by the speed setting). No estimate: the
-    target."""
+    or min_speed slower than its natural pace (`natural` seconds, divided by the speed setting). No estimate: None,
+    its natural length."""
     pace = natural / speed
     if pace <= 0:
-        return timing["target"]
+        return None
     return round(min(max(timing["target"], pace / timing["max_speed"]), pace / timing["min_speed"]), 2)
 
 
-def _natural_seconds(model, text, ref, ref_text):
-    """How long OmniVoice would speak `text` in the reference's pace, as it estimates when given no duration. Its
-    estimator works in audio tokens (its boost for short texts is set in tokens), so seconds go in as tokens."""
-    with wave.open(ref, "rb") as w:
-        ref_seconds = w.getnframes() / w.getframerate()
+def _natural_seconds(model, text, prompt):
+    """How long OmniVoice would speak `text` in the reference's pace, as it estimates when given no duration: from
+    the prompt's tokens (the reference once its silence is removed) and text, in tokens (its boost for short texts is
+    set in tokens)."""
     frame_rate = model.audio_tokenizer.config.frame_rate
-    return model.duration_estimator.estimate_duration(text, ref_text or "", ref_seconds * frame_rate) / frame_rate
+    tokens = model.duration_estimator.estimate_duration(text, prompt.ref_text, prompt.ref_audio_tokens.size(-1))
+    return tokens / frame_rate
 
 
 def main():
@@ -94,17 +93,27 @@ def main():
             # description's attributes ("female, low pitch"; checked by the app).
             designed = request.get("description") and not request.get("ref")
             options = {"instruct": request["description"]} if designed else {}
-            if request.get("timing") and request.get("ref"):  # a dub take: as long as its speaker speaks
-                natural = _natural_seconds(model, request["text"], request["ref"], request.get("ref_text"))
-                options["duration"] = timed_duration(request["timing"], natural, settings.get("speed", 1.0))
-            audio = model.generate(text=request["text"], language=request.get("language"),
-                                   ref_audio=request.get("ref"), ref_text=request.get("ref_text"),
+            reference = {"ref_audio": request.get("ref"), "ref_text": request.get("ref_text")}
+            pace = None
+            if request.get("timing") and request.get("ref") and request.get("ref_text"):
+                # A dub take, as long as its speaker speaks. The prompt is what OmniVoice clones from (the reference
+                # without its silence), so the natural length is estimated as it would be.
+                prompt = model.create_voice_clone_prompt(request["ref"], request["ref_text"])
+                natural = _natural_seconds(model, request["text"], prompt)
+                duration = timed_duration(request["timing"], natural, settings.get("speed", 1.0))
+                if duration:
+                    reference = {"voice_clone_prompt": prompt}
+                    # No silence added around it: the take lasts what was asked.
+                    options.update(duration=duration, pad_duration=0)
+                    pace = round(natural / duration, 2)
+            audio = model.generate(text=request["text"], language=request.get("language"), **reference,
                                    speed=settings.get("speed", 1.0), num_step=int(settings.get("num_step", 32)),
                                    **options)
             # 16-bit PCM so the app can join takes with the standard wave module.
             sf.write(request["out"], audio[0], SAMPLE_RATE, subtype="PCM_16")
             send(ok=True, out=request["out"], seconds=round(time.perf_counter() - start, 1),
-                 vram_gb=round(torch.cuda.memory_reserved() / 1e9, 2))  # shown on the Models screen
+                 vram_gb=round(torch.cuda.memory_reserved() / 1e9, 2),  # shown on the Models screen
+                 **({"pace": pace} if pace else {}))
         except Exception as error:
             if _out_of_memory(error):  # recoverable: free the cache and let the app make room
                 if hasattr(torch.cuda, "empty_cache"):

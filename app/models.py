@@ -917,15 +917,19 @@ def model_language(name, code):
 
 def generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
     """Returns the generation time in seconds. `ref_text`: what is said in `ref` (models that need it). `timing`: for
-    a "timed" model, {"target", "min_speed", "max_speed"} (dubs.generation_timing)."""
+    a "timed" model, {"target", "min_speed", "max_speed"} (dubs.generation_timing); the worker's "pace" (how much
+    faster than its natural pace the take was made) is added to it when it used them."""
     if language not in MODELS[name].get("languages", []):
         raise ValueError(f"{MODELS[name]['title']} does not support {LANGUAGE_NAMES.get(language, language)}.")
     settings = validate_settings(name, settings)
     message = {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings,
                "language": model_language(name, language), "ref_text": ref_text}
-    if timing is not None:
-        message["timing"] = timing
-    return _ask(name, message)
+    if timing is None:
+        return _ask(name, message)
+    reply = _request(name, {**message, "timing": timing})
+    if reply.get("pace"):
+        timing["pace"] = reply["pace"]
+    return reply["seconds"]
 
 
 def check_description(name, description):

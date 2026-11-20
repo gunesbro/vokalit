@@ -108,22 +108,50 @@ def test_timed_duration_clamps_to_natural_pace():
     assert worker.timed_duration({**t, "target": 2.0}, 2.0) == 2.0
     assert worker.timed_duration({**t, "target": 1.0}, 2.0) == 1.6  # at most 1.25x faster
     assert worker.timed_duration({**t, "target": 4.0}, 2.0) == 2.35  # at most 0.85x slower
-    assert worker.timed_duration({**t, "target": 3.0}, 0.0) == 3.0  # no estimate: the target
+    assert worker.timed_duration({**t, "target": 3.0}, 0.0) is None  # no estimate: its natural length
     assert worker.timed_duration({**t, "target": 1.0}, 2.0, speed=2.0) == 1.0  # the speed setting sets the pace
 
 
+def _ref_with_silence(path):
+    """1 s of silence, then 2 s of tone: OmniVoice's prompt keeps the 2 s."""
+    import wave
+
+    import numpy as np
+    t = np.arange(48000) / 24000
+    pcm = np.concatenate([np.zeros(24000), 0.1 * np.sin(2 * np.pi * 220 * t)]) * 32767
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(24000)
+        w.writeframes(pcm.astype("<i2").tobytes())
+    return path
+
+
 def test_timing_is_sent_as_duration(installed, tmp_path):
-    from conftest import make_wav
     _, local = installed
-    ref = make_wav(tmp_path / "ref.wav", 2)
+    ref = _ref_with_silence(tmp_path / "ref.wav")
     out = str(Path(local) / "timed.wav")
+    timing = {"target": 3.2, "min_speed": 0.85, "max_speed": 1.25}
     models.generate("omnivoice", "abcdef", str(ref), out, seed=1, settings={}, language="en", ref_text="abcd",
-                    timing={"target": 3.2, "min_speed": 0.85, "max_speed": 1.25})
-    assert "duration=3.2" in _read(out)  # natural 3.0 s (6 letters at 2 s per 4): 3.2 is within the speeds
+                    timing=timing)
+    text = _read(out)
+    # Natural 3.0 s: 6 letters at 2 s (the prompt's speech, not the file's 3 s) per 4; 3.2 is within the speeds.
+    assert "duration=3.2" in text and "voice_clone_prompt=" in text
+    assert "pad_duration=0" in text  # no silence added after the length asked for
+    assert timing["pace"] == round(3.0 / 3.2, 2)  # how much faster than natural, for Fit
+
+
+def test_timing_without_reference_text_generates_naturally(installed, tmp_path):
+    _, local = installed
+    ref = _ref_with_silence(tmp_path / "ref2.wav")
+    out = str(Path(local) / "notext.wav")
+    models.generate("omnivoice", "abcdef", str(ref), out, seed=1, settings={}, language="en", ref_text="",
+                    timing={"target": 0.6, "min_speed": 0.85, "max_speed": 1.25})
+    assert "duration=" not in _read(out)
 
 
 def test_no_timing_sends_no_duration(installed):
     _, local = installed
     out = str(Path(local) / "untimed.wav")
     models.generate("omnivoice", "hello", "/refs/me.wav", out, seed=1, settings={}, language="en", ref_text="Hi")
-    assert "duration=" not in _read(out)
+    assert "duration=" not in _read(out) and "pad_duration" not in _read(out) and "ref_audio=/refs/me.wav" in _read(out)

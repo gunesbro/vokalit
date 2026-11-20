@@ -767,3 +767,32 @@ def test_match_level_with_a_sentence_past_the_end(tmp_workspace, tmp_path):
     dubs._write(dubs.audio_path(dub), 24000, _tone(0.2, 0.3))  # the sound ends before the sentence starts
     before = take.read_bytes()
     assert dubs.match_level(dub, "d1", take) == 0.0 and take.read_bytes() == before
+
+
+def _paced_take(tmp_path, seconds, pace):
+    """As _long_take, with a take a timed model made `pace` times its natural speed."""
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    take = dubs.new_take_path(dub, "d1")
+    make_wav(take, seconds)
+    dubs.add_take(dub, "d1", {"file": str(take), "seed": 1, "duration": float(seconds), "pace": pace})
+    return dub
+
+
+def test_fit_counts_the_speed_a_take_was_generated_at(tmp_workspace, tmp_path):
+    dub = _paced_take(tmp_path, 4.0, 1.2)  # 1.16x more would make it 1.39x its natural pace
+    assert dubs.fit(dubs.load_dub(dub))["d1"]["can_fit"] is False
+    with pytest.raises(dubs.NeedsShorter, match="1.39\u00d7 faster"):
+        dubs.fit_take(dub, "d1")
+
+
+def test_fit_does_not_slow_a_take_generated_slow(tmp_workspace, tmp_path):
+    dub = _paced_take(tmp_path, 1.9, 0.85)  # already as slow as speech may go
+    assert dubs.fit(dubs.load_dub(dub))["d1"]["can_fit"] is False
+    with pytest.raises(dubs.NeedsLonger):
+        dubs.fit_take(dub, "d1")
+
+
+def test_generation_timing_is_none_when_the_room_rounds_to_nothing(tmp_workspace, tmp_path):
+    dub = _timed_dub(tmp_path, 8.0)
+    dubs.update_dub_clip(dub, "d2", start=1.0 + dubs.FIT_GAP + 0.004)
+    assert dubs.generation_timing(dub, "d1") is None
