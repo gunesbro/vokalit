@@ -289,7 +289,11 @@ All interface text is English. The visual design is the design canvas; behaviour
   translations" (placed by number, or in order, a copied-back time dropped; summary of found and missing; one request);
   only the rows in view are drawn (fixed 38 px rows; the row being typed in stays drawn), lookups are built once per
   change, and the timeline draws only the clips around its window, so tens of thousands of sentences stay quick;
-  dub.json is written compact. Fit: a too-long take is sped up with the same pitch (WSOLA, `app/stretch.py`) to end
+  dub.json is written compact. Generate: a "timed" model (OmniVoice) is given where the speaker stops
+  (`dubs.generation_timing`: the speaker's end, capped by the room before the next sentence) and generates to it,
+  within 0.85x-1.25x of its own natural-length estimate (`duration=`); every new take is then brought to its
+  sentence's level (`dubs.match_level`: gated RMS over 50 ms frames, 30 dB gate, the voices stem when separated,
+  at most ±12 dB, peak at most -1 dBFS). Fit: a too-long take is sped up with the same pitch (WSOLA, `app/stretch.py`) to end
   0.05 s before the next sentence, as a new selected take that remembers its original (fitting again starts from it),
   up to 1.25x; beyond that, "Shorten the translation". "Fit" on the selected sentence, "Fit N" in the Too long tab (a
   job, cancellable); sped-up sentences stay under Too long, showing their speed ("1.18x") in the table, the details

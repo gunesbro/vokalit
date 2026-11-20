@@ -25,6 +25,10 @@ KEPT_FADE = 0.05  # seconds to fade the original up and down around a sentence t
 MAX_SPEEDUP = 1.25  # a take is sped up at most this much to fit; beyond it speech stops sounding natural
 FIT_GAP = 0.05  # seconds left free before the next sentence when a take is fitted
 MIN_SPEED = 0.85  # a take that ends early is slowed down at most this much; slower drags
+LEVEL_FRAME = 0.05  # seconds per frame when measuring how loud speech is
+LEVEL_GATE_DB = 30  # frames this far below the loudest are pauses, not speech
+LEVEL_MAX_GAIN_DB = 12  # a new take is raised or lowered at most this much to match its sentence
+LEVEL_PEAK_DB = -1  # and never peaks above this (dBFS)
 SHORT_GAP = 0.4  # seconds a take may end before its speaker does without counting as too short
 
 
@@ -468,6 +472,39 @@ def _write(path: Path, rate: int, samples: np.ndarray) -> None:
         w.setsampwidth(2)
         w.setframerate(rate)
         w.writeframes(samples.astype("<i2").tobytes())
+
+
+def _loudness(samples: np.ndarray, rate: int) -> float | None:
+    """How loud speech is, in dB of 16-bit full scale: the mean power of the LEVEL_FRAME frames within LEVEL_GATE_DB
+    of the loudest, so pauses do not count. None for no sound."""
+    size = min(max(1, round(LEVEL_FRAME * rate)), len(samples))  # a sound shorter than a frame is one frame
+    if size == 0:
+        return None
+    frames = samples[:len(samples) // size * size].astype(np.float64).reshape(-1, size)
+    power = (frames ** 2).mean(axis=1)
+    if power.max() <= 0:
+        return None
+    speech = power[power >= power.max() * 10 ** (-LEVEL_GATE_DB / 10)]
+    return 10 * np.log10(speech.mean() / 32767 ** 2)
+
+
+def match_level(dub_id: str, clip_id: str, take: Path, language: str | None = None) -> float:
+    """Raises or lowers a new take to how loud its sentence was spoken (the voices when separated, else the whole
+    sound), at most LEVEL_MAX_GAIN_DB and never peaking above LEVEL_PEAK_DB. Rewrites the take; returns the gain in
+    dB, 0.0 (untouched) when either is silent."""
+    data = load_dub(dub_id)
+    source = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["source_clip"])
+    rate, original = _read(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id))
+    take_rate, samples = _read(take)
+    wanted = _loudness(original[max(0, round(source["start"] * rate)):round(source["end"] * rate)], rate)
+    current = _loudness(samples, take_rate)
+    if wanted is None or current is None:
+        return 0.0
+    gain = min(max(wanted - current, -LEVEL_MAX_GAIN_DB), LEVEL_MAX_GAIN_DB)
+    peak = int(np.abs(samples.astype(np.int32)).max())
+    gain = min(gain, 20 * np.log10(32767 * 10 ** (LEVEL_PEAK_DB / 20) / peak))
+    _write(take, take_rate, np.clip(np.round(samples * 10 ** (gain / 20)), -32768, 32767))
+    return round(float(gain), 2)
 
 
 def cut_reference(dub_id: str, clip_id: str, language: str | None = None) -> tuple[Path, str]:

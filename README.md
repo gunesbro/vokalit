@@ -48,7 +48,8 @@ English script. Unmute the player to listen.
   timeline with the original's waveform where a translation that runs long shows red and clips can be dragged.
   *Copy for translation* copies every sentence, numbered and with its times (how long the original takes to say, and
   the most it may take), for the translation tool you like, asking for translations about as long as the original;
-  *Paste translations* puts its reply back. A take that still runs a little long, or ends while the speaker is still
+  *Paste translations* puts its reply back. Every new take is as loud as its sentence was spoken, and OmniVoice speaks
+  it for as long as the speaker did (within 0.85x-1.25x of its natural pace). A take that still runs a little long, or ends while the speaker is still
   talking, can be **fitted**: sped up (up to 1.25x) or slowed down (to 0.85x), same pitch, one sentence or all of them
   from the Too long / Too short tabs; fitted sentences stay listed with their speed, can go back to the original take,
   and the rest need a shorter or longer translation. One dub can have several target languages (tabs), each with its own translations, takes,

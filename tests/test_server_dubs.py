@@ -2,6 +2,7 @@
 import os
 import threading
 import time
+from pathlib import Path
 
 os.environ.setdefault("VOKALIT_UV", "uv")
 import dubs  # noqa: E402
@@ -162,6 +163,25 @@ def test_dub_generate_gives_other_models_no_target(api, tmp_path, monkeypatch):
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
     done = _wait(api, job["id"])
     assert done["state"] == "done", done
+
+
+def test_generated_takes_match_their_sentence_level(api, tmp_path, monkeypatch):
+    import numpy as np
+    dub = _transcribed(api, tmp_path, monkeypatch)  # its sound is a 0.1 tone
+
+    def quiet(name, text, ref, out, seed, settings, language, ref_text=None):
+        t = np.arange(24000) / 24000
+        dubs._write(Path(out), 24000, np.round(0.04 * 32767 * np.sin(2 * np.pi * 220 * t)))
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", quiet)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "higgs"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done", done
+    _, samples = dubs._read(dubs.dub_dir(dub["id"]) / done["result"]["tracks"][1]["clips"][0]["selected"])
+    assert abs(abs(samples.astype(int)).max() / (0.1 * 32767) - 1) < 0.02
 
 
 def test_dub_generate_refuses_empty_translation(api, tmp_path, monkeypatch):

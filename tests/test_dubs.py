@@ -697,3 +697,73 @@ def test_generation_timing_is_none_without_room(tmp_workspace, tmp_path):
     dub = _timed_dub(tmp_path, 8.0)
     dubs.update_dub_clip(dub, "d2", start=1.0)  # the next sentence moved onto this one
     assert dubs.generation_timing(dub, "d1") is None
+
+
+def _tone(amplitude, seconds=2.0, rate=24000):
+    import numpy as np
+    t = np.arange(int(seconds * rate)) / rate
+    return np.round(amplitude * 32767 * np.sin(2 * np.pi * 220 * t)).astype("<i2")
+
+
+def _level_dub(tmp_path, original, take):
+    """A dub whose sound is a tone of amplitude `original` and whose first sentence (0.5-3.0 s) has a take of
+    amplitude `take`. Returns the dub and the take's path."""
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs._write(dubs.audio_path(dub), 24000, _tone(original, 12))
+    path = dubs.new_take_path(dub, "d1")
+    dubs._write(path, 24000, _tone(take))
+    return dub, path
+
+
+def _span_loudness(dub, path):
+    rate, samples = dubs._read(path)
+    return dubs._loudness(samples, rate)
+
+
+def test_match_level_raises_a_quiet_take(tmp_workspace, tmp_path):
+    dub, take = _level_dub(tmp_path, 0.2, 0.08)
+    gain = dubs.match_level(dub, "d1", take)
+    rate, audio = dubs._read(dubs.audio_path(dub))
+    assert abs(_span_loudness(dub, take) - dubs._loudness(audio[int(0.5 * rate):int(3.0 * rate)], rate)) < 0.1
+    assert abs(gain - 7.96) < 0.05
+
+
+def test_match_level_gain_is_clamped(tmp_workspace, tmp_path):
+    dub, take = _level_dub(tmp_path, 0.2, 0.001)
+    assert dubs.match_level(dub, "d1", take) == 12.0
+    dub, take = _level_dub(tmp_path, 0.001, 0.5)
+    assert dubs.match_level(dub, "d1", take) == -12.0
+
+
+def test_match_level_keeps_the_peak_under_minus_one_dbfs(tmp_workspace, tmp_path):
+    dub, take = _level_dub(tmp_path, 0.6, 0.5)
+    rate, samples = dubs._read(take)
+    samples = samples.copy()
+    samples[100] = round(0.85 * 32767)
+    dubs._write(take, rate, samples)
+    dubs.match_level(dub, "d1", take)
+    _, after = dubs._read(take)
+    assert abs(after.astype(int)).max() <= round(32767 * 10 ** (-1 / 20)) + 1
+
+
+def test_match_level_leaves_the_take_when_the_original_is_silent(tmp_workspace, tmp_path):
+    dub, take = _level_dub(tmp_path, 0.0, 0.1)
+    before = take.read_bytes()
+    assert dubs.match_level(dub, "d1", take) == 0.0 and take.read_bytes() == before
+
+
+def test_match_level_measures_the_voices_stem(tmp_workspace, tmp_path):
+    import numpy as np
+    dub, take = _level_dub(tmp_path, 0.01, 0.1)
+    rate, audio = dubs._read(dubs.audio_path(dub))
+    dubs._write(dubs.voices_path(dub), rate, _tone(0.2, 12))
+    dubs._write(dubs.background_path(dub), rate, np.zeros(len(audio)))
+    dubs.match_level(dub, "d1", take)
+    assert abs(_span_loudness(dub, take) - _span_loudness(dub, dubs.voices_path(dub))) < 0.1
+
+
+def test_match_level_with_a_sentence_past_the_end(tmp_workspace, tmp_path):
+    dub, take = _level_dub(tmp_path, 0.2, 0.1)
+    dubs._write(dubs.audio_path(dub), 24000, _tone(0.2, 0.3))  # the sound ends before the sentence starts
+    before = take.read_bytes()
+    assert dubs.match_level(dub, "d1", take) == 0.0 and take.read_bytes() == before

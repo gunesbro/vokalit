@@ -1291,6 +1291,7 @@ def generate_dub(req, did):
                 out.unlink(missing_ok=True)
                 errors.append(f"Sentence {number}: the model returned no sound. Generate it again or change the translation.")
                 continue
+            dubs.match_level(did, cid, out, language)  # as loud as its sentence was spoken
             dubs.add_take(did, cid, {"file": str(out), "seed": take_seed, "model": name, "settings": settings,
                                      "language": language, "text": clip["translation"],
                                      "generation_seconds": seconds, "duration": round(ws.wav_duration(out), 2)},
