@@ -148,9 +148,82 @@ def test_dub_generate_gives_omnivoice_its_target(api, tmp_path, monkeypatch):
     api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
     assert _wait(api, job["id"])["state"] == "done"
-    assert timings == [dubs.generation_timing(dub["id"], "d2")] and timings[0]["target"] > 0
+    assert timings == [{"target": 5.0, "min_speed": 0.85, "max_speed": 1.25}]  # spoken 4.0-9.0 s
     take = dubs.load_dub(dub["id"])["tracks"][1]["clips"][1]["takes"][0]
     assert take["pace"] == 1.1  # Fit counts it
+
+
+def test_dub_generate_target_stops_before_the_next_sentence(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    timings = []
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
+        timings.append(timing)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"start": 2.0})  # the speaker of d1 talks until 3.0 s
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert timings[0]["target"] == 1.45  # 2.0 - 0.5 - FIT_GAP
+
+
+def _two_translated(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "higgs"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
+    return dub
+
+
+def test_a_level_error_fails_only_its_sentence(api, tmp_path, monkeypatch):
+    dub = _two_translated(api, tmp_path, monkeypatch)
+    matched = dubs.match_level
+
+    def broken(did, cid, take, language=None):
+        if cid == "d1":
+            raise OSError("cannot read the take")
+        return matched(did, cid, take, language)
+
+    monkeypatch.setattr(dubs, "match_level", broken)
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1", "d2"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Sentence 1: cannot read the take" in done["error"]
+    clips = dubs.load_dub(dub["id"])["tracks"][1]["clips"]
+    assert clips[0]["takes"] == [] and len(clips[1]["takes"]) == 1
+    assert not (dubs.dub_dir(dub["id"]) / "takes" / "en" / "d1-1.wav").exists()  # not left behind
+
+
+def test_a_timing_error_fails_only_its_sentence(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+
+    def fake_generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
+        make_wav(out, 1)
+        return 0.1
+
+    def broken(did, cid, language=None):
+        if cid == "d1":
+            raise ValueError("no timing")
+        return None
+
+    monkeypatch.setattr(models, "generate", fake_generate)
+    monkeypatch.setattr(dubs, "generation_timing", broken)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello."})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1", "d2"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "Sentence 1: no timing" in done["error"]
+    assert len(dubs.load_dub(dub["id"])["tracks"][1]["clips"][1]["takes"]) == 1
 
 
 def test_dub_generate_gives_other_models_no_target(api, tmp_path, monkeypatch):

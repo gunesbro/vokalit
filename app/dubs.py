@@ -467,6 +467,16 @@ def _read(path: Path) -> tuple[int, np.ndarray]:
         return w.getframerate(), np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
 
 
+def _read_span(path: Path, start: float, end: float) -> tuple[int, np.ndarray]:
+    """Only the samples from `start` to `end` seconds (fewer past the end of the file): a sentence of a long sound
+    without reading all of it."""
+    with wave.open(str(path), "rb") as w:
+        rate, frames = w.getframerate(), w.getnframes()
+        first = min(frames, max(0, round(start * rate)))
+        w.setpos(first)
+        return rate, np.frombuffer(w.readframes(max(0, min(frames, round(end * rate)) - first)), dtype="<i2")
+
+
 def _write(path: Path, rate: int, samples: np.ndarray) -> None:
     with wave.open(str(path), "wb") as w:
         w.setnchannels(1)
@@ -495,9 +505,10 @@ def match_level(dub_id: str, clip_id: str, take: Path, language: str | None = No
     dB, 0.0 (untouched) when either is silent."""
     data = load_dub(dub_id)
     source = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["source_clip"])
-    rate, original = _read(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id))
+    rate, original = _read_span(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id), source["start"],
+                                source["end"])
     take_rate, samples = _read(take)
-    wanted = _loudness(original[max(0, round(source["start"] * rate)):round(source["end"] * rate)], rate)
+    wanted = _loudness(original, rate)
     current = _loudness(samples, take_rate)
     if wanted is None or current is None:
         return 0.0
@@ -513,13 +524,12 @@ def cut_reference(dub_id: str, clip_id: str, language: str | None = None) -> tup
     which in a dialogue are often the other speaker), with a little padding; and that sentence's text."""
     data = load_dub(dub_id)
     source = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["voice_from"])
-    rate, samples = _read(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id))  # clean speech when separated
-    first = max(0, round((source["start"] - REFERENCE_PADDING) * rate))
-    last = min(len(samples), round((source["end"] + REFERENCE_PADDING) * rate))
+    rate, samples = _read_span(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id),  # clean speech
+                               source["start"] - REFERENCE_PADDING, source["end"] + REFERENCE_PADDING)  # when separated
     folder = dub_dir(dub_id) / "refs"
     folder.mkdir(exist_ok=True)
     path = folder / f"{source['id']}.wav"
-    _write(path, rate, samples[first:last])
+    _write(path, rate, samples)
     return path, source["text"]
 
 

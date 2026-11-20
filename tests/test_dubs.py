@@ -1,5 +1,6 @@
 """Dubbing: an audio or video file's sentences spoken again in another language, in their own voices."""
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -796,3 +797,18 @@ def test_generation_timing_is_none_when_the_room_rounds_to_nothing(tmp_workspace
     dub = _timed_dub(tmp_path, 8.0)
     dubs.update_dub_clip(dub, "d2", start=1.0 + dubs.FIT_GAP + 0.004)
     assert dubs.generation_timing(dub, "d1") is None
+
+
+def test_a_sentence_s_level_and_reference_read_only_its_span(tmp_workspace, tmp_path, monkeypatch):
+    dub, take = _level_dub(tmp_path, 0.2, 0.08)
+    whole = dubs._read
+
+    def only_takes(path):  # reading all of a long file per sentence is slow
+        assert Path(path).name not in ("audio.wav", "voices.wav"), path
+        return whole(path)
+
+    monkeypatch.setattr(dubs, "_read", only_takes)
+    assert abs(dubs.match_level(dub, "d1", take) - 7.96) < 0.05
+    path, _ = dubs.cut_reference(dub, "d1")
+    rate, samples = whole(path)
+    assert abs(len(samples) / rate - (2.5 + 2 * dubs.REFERENCE_PADDING)) < 0.01

@@ -1273,10 +1273,11 @@ def generate_dub(req, did):
             settings = models.validate_settings(name, track_now["settings"].get(name, {}))
             take_seed = _random_seed() if seed is None else seed
             out = dubs.new_take_path(did, cid, language)
-            # A model that can fix its length is told where the speaker stops.
-            timed = {"timing": dubs.generation_timing(did, cid, language)} if models.MODELS[name].get("timed") else {}
             job["model"] = name  # what cancelling stops
             try:
+                # A model that can fix its length is told where the speaker stops.
+                timed = {"timing": dubs.generation_timing(did, cid, language)} \
+                    if models.MODELS[name].get("timed") else {}
                 seconds = models.generate(name, text, str(ref), str(out), take_seed, settings, language,
                                           ref_text=ref_text, **timed)
             except Exception as error:
@@ -1291,7 +1292,12 @@ def generate_dub(req, did):
                 out.unlink(missing_ok=True)
                 errors.append(f"Sentence {number}: the model returned no sound. Generate it again or change the translation.")
                 continue
-            dubs.match_level(did, cid, out, language)  # as loud as its sentence was spoken
+            try:
+                dubs.match_level(did, cid, out, language)  # as loud as its sentence was spoken
+            except Exception as error:
+                out.unlink(missing_ok=True)
+                errors.append(f"Sentence {number}: {error}")
+                continue
             pace = (timed.get("timing") or {}).get("pace")  # a timed take: Fit counts the speed it was made at
             dubs.add_take(did, cid, {"file": str(out), "seed": take_seed, "model": name, "settings": settings,
                                      "language": language, "text": clip["translation"],

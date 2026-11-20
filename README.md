@@ -53,8 +53,8 @@ English script. Unmute the player to listen.
   or ends while the speaker is still talking, can be **fitted**: sped up (up to 1.25x of its natural pace, counting
   OmniVoice's) or slowed down (to 0.85x), same pitch, one sentence or all of them
   from the Too long / Too short tabs; fitted sentences stay listed with their speed, can go back to the original take,
-  and the rest need a shorter or longer translation. One dub can have several target languages (tabs), each with its own translations, takes,
-  timing and model. Music or singing that Whisper wrote down can be marked *Keep the original here* (K): the original
+  and the rest need a shorter or longer translation. One dub can have several target languages (tabs), each with its
+  own translations, takes, timing and model. Music or singing that Whisper wrote down can be marked *Keep the original here* (K): the original
   plays there at full volume in every language, and nothing is translated or generated. With **Voice separation**
   (Demucs, on the Models screen) the speech is separated from the music and effects first: voices are copied from
   clean speech, and the music stays at full level under the dub. Every change can be undone
