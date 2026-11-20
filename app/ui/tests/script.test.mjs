@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeClip, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
+import { activeClip, touchesFiles, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -382,4 +382,11 @@ test("volumeGain follows the ear: half the slider is a quarter of the level", as
   assert.equal(volumeGain(0), 0);
   assert.equal(volumeGain(150), 1);
   assert.equal(volumeGain(-5), 0);
+});
+
+test("touchesFiles finds steps that refer to a deleted take", () => {
+  assert.equal(touchesFiles({ takes: ["a", "b"] }, new Set(["b"])), true);
+  assert.equal(touchesFiles({ takes: ["a"] }, new Set(["b"])), false);
+  assert.equal(touchesFiles({ takes: true }, new Set(["b"])), false);
+  assert.equal(touchesFiles({}, new Set(["b"])), false);
 });

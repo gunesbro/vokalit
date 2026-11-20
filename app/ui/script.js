@@ -240,6 +240,12 @@ export function createHistory(limit = 100) {
   };
 }
 
+// Whether an undo step selects one of `files` (deleted takes): such a step could only fail now. Steps that select
+// takes list the files they refer to.
+export function touchesFiles(step, files) {
+  return Array.isArray(step.takes) && step.takes.some((file) => files.has(file));
+}
+
 // Dub sentences shown by a filter: "all", "untranslated", "missing" (no take) or "long" (runs into the next).
 export function clipFilter(clips, fit, name) {
   const keep = {
