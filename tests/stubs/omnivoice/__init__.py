@@ -2,7 +2,23 @@
 import torch
 
 
+class _Estimator:
+    def estimate_duration(self, target_text, ref_text, ref_duration):
+        return ref_duration * len(target_text) / len(ref_text) if ref_text else 0.0
+
+
+class _Config:
+    frame_rate = 25
+
+
+class _Tokenizer:
+    config = _Config()
+
+
 class OmniVoice:
+    duration_estimator = _Estimator()
+    audio_tokenizer = _Tokenizer()
+
     @classmethod
     def from_pretrained(cls, name, device_map=None, dtype=None):
         print(f"stub omnivoice {name} loaded on {device_map} as {dtype}")
