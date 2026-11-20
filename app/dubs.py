@@ -5,6 +5,7 @@ dub.json, source.<ext> (the imported file), audio.wav (its sound, decoded by the
 """
 import os
 import shutil
+import subprocess
 import threading
 import time
 import wave
@@ -852,11 +853,88 @@ def fit(data: dict, language: str | None = None) -> dict[str, dict]:
 
 
 def export_dub(dub_id: str, fmt: str = "wav", language: str | None = None) -> Path:
-    """Mixes every selected take at its start over the original (at original_volume) into exports/<name>-<time>.<fmt>;
-    with separated stems, over the background at full level and the original voices at voices_volume. Sentences
-    without a take are silent; the original still plays under them."""
+    """The dub's sound (mix_dub) as exports/<name>-<language>-<time>.<fmt>."""
     if fmt not in ws.export_formats():
         raise ws.WorkspaceError(f"This computer cannot export {fmt.upper()} files.")
+    data = load_dub(dub_id)
+    rate, mix = mix_dub(dub_id, language)
+    out = _export_path(dub_id, data, _track(data, language)["language"], fmt)
+    if fmt == "wav":
+        _write(out, rate, mix)
+    else:
+        major, subtype = ws.EXPORT_ENCODINGS[fmt]
+        sf.write(str(out), mix.astype(np.float32) / 32768, rate, format=major, subtype=subtype)
+    return out
+
+
+def _export_path(dub_id: str, data: dict, label: str, ext: str) -> Path:
+    folder = dub_dir(dub_id) / "exports"
+    folder.mkdir(exist_ok=True)
+    return folder / f"{ws.slugify(data['name'])}-{label}-{time.strftime('%Y%m%d-%H%M%S')}.{ext}"
+
+
+# ISO 639-2 codes for a video's audio tracks (players show them); any other language keeps its own code.
+LANGUAGE_TAGS = {"en": "eng", "tr": "tur", "de": "ger", "fr": "fre", "es": "spa", "it": "ita", "pt": "por",
+                 "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "ar": "ara", "nl": "dut", "pl": "pol",
+                 "hi": "hin", "sv": "swe", "da": "dan", "fi": "fin", "no": "nor", "el": "gre", "cs": "cze",
+                 "hu": "hun", "ro": "rum", "uk": "ukr", "he": "heb", "id": "ind", "vi": "vie", "th": "tha",
+                 "fa": "per", "ms": "may", "bg": "bul", "hr": "hrv", "sk": "slo", "sr": "srp", "ca": "cat"}
+
+
+def export_video(dub_id: str, language: str | None = None, every_language: bool = False, ffmpeg: str | None = None,
+                 names: dict | None = None) -> Path:
+    """The dub's video as it is (copied, not encoded again) with the dub as its sound: `language`'s mix, or every
+    language's then the original sound, each its own track (`names`: language names for the track titles). MP4 gets
+    AAC, WebM gets Opus, in the source's own container. `ffmpeg`: the program's path. Nothing is left on failure."""
+    data = load_dub(dub_id)
+    if data["source"]["kind"] != "video":
+        raise ws.WorkspaceError("This dub has no video. Export the sound instead.")
+    if not ffmpeg:
+        raise ws.WorkspaceError("Install Video export (FFmpeg) on the Models screen.")
+    names = names or {}
+    ext = Path(data["source"]["file"]).suffix.lstrip(".")
+    codes = languages(data) if every_language else [_track(data, language)["language"]]
+    tracks = [(code, names.get(code, code)) for code in codes]
+    if every_language:
+        tracks.append((data["source"]["language"], "Original"))
+    out = _export_path(dub_id, data, "all" if every_language else codes[0], ext)
+    temporary = []
+    try:
+        for n, (code, _) in enumerate(tracks):
+            path = dub_dir(dub_id) / f"video-{n}.wav"
+            temporary.append(path)
+            if n < len(codes):
+                _write(path, *mix_dub(dub_id, code))
+            else:  # the original sound, as imported
+                _write(path, *_read(audio_path(dub_id)))
+        args = [ffmpeg, "-nostdin", "-y", "-loglevel", "error", "-protocol_whitelist", "file",
+                "-i", str(dub_dir(dub_id) / data["source"]["file"])]
+        for path in temporary:
+            args += ["-i", str(path)]
+        args += ["-map", "0:v:0"] + [arg for n in range(len(tracks)) for arg in ("-map", f"{n + 1}:a:0")]
+        args += ["-c:v", "copy"] + (["-c:a", "libopus", "-b:a", "128k"] if ext == "webm" else ["-c:a", "aac", "-b:a", "192k"])
+        for n, (code, title) in enumerate(tracks):
+            # MP4 keeps a track's name as its handler name, Matroska/WebM as its title: both are set.
+            args += [f"-metadata:s:a:{n}", f"language={LANGUAGE_TAGS.get(code, code or 'und')}",
+                     f"-metadata:s:a:{n}", f"title={title}", f"-metadata:s:a:{n}", f"handler_name={title}",
+                     f"-disposition:a:{n}", "default" if n == 0 else "0"]
+        result = subprocess.run(args + [str(out)], capture_output=True, text=True)
+        if result.returncode != 0:
+            why = " ".join(result.stderr.strip().splitlines()[-2:]) or f"FFmpeg stopped with code {result.returncode}"
+            raise ws.WorkspaceError(f"The video could not be exported: {why}")
+        return out
+    except BaseException:
+        out.unlink(missing_ok=True)
+        raise
+    finally:
+        for path in temporary:
+            path.unlink(missing_ok=True)
+
+
+def mix_dub(dub_id: str, language: str | None = None) -> tuple[int, np.ndarray]:
+    """The dub's sound as 16-bit samples: every selected take at its start over the original (at original_volume);
+    with separated stems, over the background at full level and the original voices at voices_volume. Sentences
+    without a take are silent; the original still plays under them."""
     data = load_dub(dub_id)
     if not audio_path(dub_id).exists():
         raise ws.WorkspaceError("The dub has no sound yet. Import the file again.")
@@ -903,13 +981,4 @@ def export_dub(dub_id: str, fmt: str = "wav", language: str | None = None) -> Pa
         if first + len(samples) > len(mix):
             mix = np.concatenate([mix, np.zeros(first + len(samples) - len(mix))])
         mix[first:first + len(samples)] += samples
-    mix = np.clip(np.round(mix), -32768, 32767).astype("<i2")
-    folder = dub_dir(dub_id) / "exports"
-    folder.mkdir(exist_ok=True)
-    out = folder / f"{ws.slugify(data['name'])}-{track['language']}-{time.strftime('%Y%m%d-%H%M%S')}.{fmt}"
-    if fmt == "wav":
-        _write(out, rate, mix)
-    else:
-        major, subtype = ws.EXPORT_ENCODINGS[fmt]
-        sf.write(str(out), mix.astype(np.float32) / 32768, rate, format=major, subtype=subtype)
-    return out
+    return rate, np.clip(np.round(mix), -32768, 32767).astype("<i2")
