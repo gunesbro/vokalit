@@ -463,6 +463,32 @@ def test_clear_takes_route(api, tmp_path, monkeypatch):
     assert status == 200 and body["removed"] == 1 and body["tracks"][1]["clips"][0]["takes"] == []
 
 
+def test_deleting_takes_is_refused_while_the_dub_works(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    _take(dub["id"], "d1", 1.0)
+    file = dubs.load_dub(dub["id"])["tracks"][1]["clips"][0]["selected"]
+    release = threading.Event()
+
+    def slow_generate(name, text, ref, out, seed, settings, language, ref_text=None):
+        release.wait(5)
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "generate", slow_generate)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "higgs"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
+    one = api("DELETE", f"/api/dubs/{dub['id']}/clips/d1/takes?language=en", {"file": file})
+    some = api("POST", f"/api/dubs/{dub['id']}/takes/delete?language=en", {"clips": ["d1"]})
+    assert one[0] == some[0] == 400 and "already working" in one[1]["error"], (one, some)
+    release.set()
+    assert _wait(api, job["id"])["state"] == "done"
+    status, body, _ = api("DELETE", f"/api/dubs/{dub['id']}/clips/d1/takes?language=en", {"file": file})
+    assert status == 200 and body["tracks"][1]["clips"][0]["takes"] == []
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/takes/delete?language=en", {"clips": ["d2"]})
+    assert status == 200 and body["removed"] == 1 and body["tracks"][1]["clips"][1]["takes"] == []
+
+
 def test_fit_route_lengthens_and_counts_the_ones_needing_longer(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     _take(dub["id"], "d1", 1.9)  # 2.5 s spoken: lengthened at 0.85x

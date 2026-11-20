@@ -446,6 +446,26 @@ def clear_takes(dub_id: str, language: str) -> int:
     return removed
 
 
+def delete_takes(dub_id: str, files_by_clip: dict, language: str | None = None) -> int:
+    """Deletes takes, files included: {clip id: [files], or None for all of its takes}. A sentence whose selected take
+    goes uses its newest remaining one. Returns how many were deleted. Not undoable."""
+    with _editing(dub_id) as data:
+        clips = _dub_clips(data, language)
+        gone = []
+        for clip_id, files in files_by_clip.items():
+            clip = _find(clips, clip_id)
+            doomed = clip["takes"] if files is None else [t for t in clip["takes"] if t["file"] in set(files)]
+            if files is not None and len(doomed) != len(set(files)):
+                raise ws.WorkspaceError("This take no longer exists.")
+            clip["takes"] = [t for t in clip["takes"] if t not in doomed]
+            if clip["selected"] in {t["file"] for t in doomed}:
+                clip["selected"] = clip["takes"][-1]["file"] if clip["takes"] else None
+            gone += [t["file"] for t in doomed]
+    for file in gone:  # after the save: nothing points at them
+        (dub_dir(dub_id) / file).unlink(missing_ok=True)
+    return len(gone)
+
+
 def select_takes(dub_id: str, selections: dict, language: str | None = None) -> None:
     """Several clips' takes at once ({clip id: file or None}), in one save: undoing a generation or a fit of thousands
     of sentences. All or nothing."""

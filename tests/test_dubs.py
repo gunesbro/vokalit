@@ -812,3 +812,37 @@ def test_a_sentence_s_level_and_reference_read_only_its_span(tmp_workspace, tmp_
     path, _ = dubs.cut_reference(dub, "d1")
     rate, samples = whole(path)
     assert abs(len(samples) / rate - (2.5 + 2 * dubs.REFERENCE_PADDING)) < 0.01
+
+
+def _three_takes(tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    files = []
+    for seconds in (1.0, 1.5, 2.0):
+        take = dubs.new_take_path(dub, "d1")
+        make_wav(take, seconds)
+        dubs.add_take(dub, "d1", {"file": str(take), "seed": 1, "duration": seconds})
+        files.append(dubs.load_dub(dub)["tracks"][1]["clips"][0]["selected"])
+    return dub, files
+
+
+def test_delete_takes_removes_one_and_selects_the_newest_left(tmp_workspace, tmp_path):
+    dub, files = _three_takes(tmp_path)
+    assert dubs.delete_takes(dub, {"d1": [files[2]]}) == 1
+    clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
+    assert [t["file"] for t in clip["takes"]] == files[:2] and clip["selected"] == files[1]
+    assert not (dubs.dub_dir(dub) / files[2]).exists() and (dubs.dub_dir(dub) / files[0]).exists()
+
+
+def test_delete_takes_of_whole_sentences(tmp_workspace, tmp_path):
+    dub, files = _three_takes(tmp_path)
+    assert dubs.delete_takes(dub, {"d1": None, "d2": None}) == 3
+    clip = dubs.load_dub(dub)["tracks"][1]["clips"][0]
+    assert clip["takes"] == [] and clip["selected"] is None
+    assert not any((dubs.dub_dir(dub) / f).exists() for f in files)
+
+
+def test_delete_takes_refuses_an_unknown_file(tmp_workspace, tmp_path):
+    dub, files = _three_takes(tmp_path)
+    with pytest.raises(dubs.ws.WorkspaceError, match="no longer exists"):
+        dubs.delete_takes(dub, {"d1": ["takes/en/d1-9.wav"]})
+    assert len(dubs.load_dub(dub)["tracks"][1]["clips"][0]["takes"]) == 3
