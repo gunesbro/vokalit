@@ -1178,6 +1178,35 @@ def add_dub_sentence(req, did):
     return {**_dub_view(did), "added": added}
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)/listen")
+def listen_dub_sentence(req, did, oid):
+    """Whisper writes what is said in one sentence (from the voices when separated), as a job: {heard}. Nothing is
+    saved; the window puts it in as an edit the user can undo."""
+    _dub_or_404(did)
+    if not models.is_installed("whisper"):
+        raise ws.WorkspaceError("Install Whisper on the Models screen to listen.")
+
+    def work(job):
+        data = dubs.load_dub(did)
+        source = dubs._find(dubs._source_clips(data), oid)
+        audio = dubs.voices_path(did) if dubs.has_stems(did) else dubs.audio_path(did)
+        rate, samples = dubs._read_span(audio, source["start"], source["end"])
+        path = dubs.dub_dir(did) / "listen.wav"
+        dubs._write(path, rate, samples)
+        job["model"] = "whisper"  # what cancelling stops
+        try:
+            heard = models.transcribe(str(path), data["source"]["language"])
+        except Exception:
+            if job.get("cancelled"):
+                raise Cancelled() from None
+            raise
+        finally:
+            job["model"] = None
+            path.unlink(missing_ok=True)
+        return {**_dub_view(did), "heard": heard["text"].strip()}
+    return _start_dub_job(did, work, "listen", [oid])
+
+
 @route("DELETE", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)")
 def delete_dub_source(req, did, oid):
     _dub_or_404(did)

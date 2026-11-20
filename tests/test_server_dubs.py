@@ -4,6 +4,8 @@ import threading
 import time
 from pathlib import Path
 
+import numpy as np
+
 os.environ.setdefault("VOKALIT_UV", "uv")
 import dubs  # noqa: E402
 import models  # noqa: E402
@@ -652,3 +654,45 @@ def test_a_cancel_between_separating_and_listening_stops_before_whisper(api, tmp
     api("POST", f"/api/dubs/{dub['id']}/audio", raw=make_wav(tmp_path / "a.wav", 2).read_bytes(), content_type="audio/wav")
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/transcribe", {})
     assert _wait(api, job["id"])["state"] == "cancelled" and HEARD == []
+
+
+def _listener(monkeypatch, heard):
+    """A fake Whisper for one sentence: records how long and how loud what it heard was, and its language."""
+    def transcribe(audio, language):
+        rate, samples = dubs._read(Path(audio))
+        heard.append({"seconds": len(samples) / rate, "peak": int(abs(samples.astype(int)).max(initial=0)),
+                      "language": language})
+        return {"text": "  Merhaba dünya.  ", "language": "tr"}
+    monkeypatch.setattr(models, "transcribe", transcribe)
+
+
+def test_listen_hears_only_the_sentence(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    heard = []
+    _listener(monkeypatch, heard)
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/source/o2/listen", {})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done", done
+    assert done["result"]["heard"] == "Merhaba dünya."
+    assert abs(heard[0]["seconds"] - 5.0) < 0.01 and heard[0]["language"] == "tr" and heard[0]["peak"] > 0
+    assert dubs.load_dub(dub["id"])["tracks"][0]["clips"][1]["text"] == "Nasılsın?"  # not saved
+    assert not (dubs.dub_dir(dub["id"]) / "listen.wav").exists()
+
+
+def test_listen_uses_the_voices_when_separated(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch, separate=_separator([]))
+    dubs._write(dubs.voices_path(dub["id"]), 24000, np.zeros(12 * 24000))  # silent voices: the mix is a tone
+    heard = []
+    _listener(monkeypatch, heard)
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/source/o1/listen", {})
+    assert _wait(api, job["id"])["state"] == "done" and heard[0]["peak"] == 0
+
+
+def test_listen_detects_the_language_when_not_set(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    with dubs._editing(dub["id"]) as data:
+        data["source"]["language"] = None
+    heard = []
+    _listener(monkeypatch, heard)
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/source/o1/listen", {})
+    assert _wait(api, job["id"])["state"] == "done" and heard[0]["language"] is None
