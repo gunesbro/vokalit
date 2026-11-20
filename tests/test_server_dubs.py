@@ -443,3 +443,22 @@ def test_voices_volume_option(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     status, body, _ = api("PATCH", f"/api/dubs/{dub['id']}", {"voices_volume": 0.3})
     assert status == 200 and body["voices_volume"] == 0.3
+
+
+def test_a_cancel_between_separating_and_listening_stops_before_whisper(api, tmp_path, monkeypatch):
+    import server
+    real_keep = dubs.keep_stems
+
+    def keep_then_cancel(dub_id):  # the cancel lands after the separation, before Whisper starts
+        real_keep(dub_id)
+        next(j for j in server._jobs.values() if j["kind"] == "transcribe" and j["state"] == "running")["cancelled"] = True
+
+    monkeypatch.setattr(dubs, "keep_stems", keep_then_cancel)
+    HEARD.clear()
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "separate", _separator([]))
+    monkeypatch.setattr(models, "transcribe_segments", lambda audio, language: HEARD.append(audio) or {"language": "tr", "segments": SEGMENTS})
+    _, dub, _ = api("POST", "/api/dubs?name=T&ext=wav", raw=b"x", content_type="audio/wav")
+    api("POST", f"/api/dubs/{dub['id']}/audio", raw=make_wav(tmp_path / "a.wav", 2).read_bytes(), content_type="audio/wav")
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/transcribe", {})
+    assert _wait(api, job["id"])["state"] == "cancelled" and HEARD == []

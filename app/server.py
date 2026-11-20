@@ -1089,6 +1089,8 @@ def transcribe_dub(req, did):
                 raise
             except Exception as error:  # e.g. out of GPU memory: the sentences can still be found in the full mix
                 notice = f"The voices could not be separated ({error}); the full mix was used."
+        if job.get("cancelled"):  # cancelled between separating and listening: nothing was being stopped
+            raise Cancelled()
         audio = dubs.voices_path(did) if dubs.has_stems(did) else dubs.audio_path(did)
         job["progress"] = "Finding the sentences\u2026"
         job["model"] = "whisper"  # what cancelling stops

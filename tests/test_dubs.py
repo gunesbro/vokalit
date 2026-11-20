@@ -1,6 +1,7 @@
 """Dubbing: an audio or video file's sentences spoken again in another language, in their own voices."""
 import os
 
+import numpy as np
 import pytest
 
 os.environ.setdefault("VOKALIT_UV", "uv")
@@ -650,3 +651,24 @@ def test_voices_volume_starts_off_and_is_checked(tmp_workspace, tmp_path):
     assert dubs.load_dub(dub)["voices_volume"] == 0.0
     with pytest.raises(ws.WorkspaceError, match="voices"):
         dubs.set_options(dub, voices_volume=1.5)
+
+
+def test_separating_again_replaces_both_stems_or_neither(tmp_workspace, tmp_path, monkeypatch):
+    """A file in use (Windows) can refuse the second rename: the old pair stays, never new voices with an old background."""
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    _stems(dub, 1000, 2000)
+    for temp, value in zip(dubs.stems_temp(dub), (3000, 4000)):
+        rate, audio = dubs._read(dubs.audio_path(dub))
+        dubs._write(temp, rate, np.full(len(audio), value))
+    real = os.replace
+
+    def busy(source, target):  # the new background cannot be put in place
+        if str(source).endswith("background.part.wav"):
+            raise PermissionError("in use")
+        real(source, target)
+
+    monkeypatch.setattr(dubs.os, "replace", busy)
+    with pytest.raises(PermissionError):
+        dubs.keep_stems(dub)
+    assert set(dubs._read(dubs.voices_path(dub))[1].tolist()) == {1000}
+    assert set(dubs._read(dubs.background_path(dub))[1].tolist()) == {2000}

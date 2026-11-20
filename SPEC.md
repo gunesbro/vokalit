@@ -38,16 +38,18 @@ file. Everything is done by clicking in a desktop window.
     `suggestions` as buttons that fill it). `models.clean_settings` checks them; text loses parentheses and extra
     whitespace. A line override equal to the session's value is not stored.
   - **Dub voice separation:** with the tool installed, transcribing a dub first separates its sound
-  (`voices.wav`, `background.wav` next to `audio.wav`, written as `*.part.wav` and kept only when both are done; a
-  failure goes on with the full mix and says so); Whisper hears the voices, references are cut from them, and the
-  export and preview play the background in full and the original voices at `voices_volume` (default 0, "Original
-  voices"; `original_volume`, "Original", applies without stems). The More menu has "Separate voices (again)" and "Use
-  the full mix" (deletes the stems). The timeline waveform is the voices'.
-- **Playback volume:** a speaker button at the bottom of the rail opens a slider (0-100 %, squared, kept between runs)
-  and Mute; every sound the app plays follows it (players, Studio playback, the Dub preview), never exported or
-  generated files (`volume.js`). It and the Dub panes' sizes are kept by the server (`GET`/`PATCH /api/preferences`,
-  `.local/webview/preferences.json`): the page's own storage belongs to its address, whose port changes every launch.
-- **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
+    (`voices.wav`, `background.wav` next to `audio.wav`, written as `*.part.wav` and kept only when both are done,
+    replacing a previous pair both or neither; a failure goes on with the full mix and says so); Whisper hears the
+    voices, references are cut from them, and the export and preview play the background in full and the original
+    voices at `voices_volume` (default 0, "Original voices"; `original_volume`, "Original", applies without stems).
+    The More menu has "Separate voices (again)" and "Use the full mix" (deletes the stems). The timeline waveform is
+    the voices'.
+  - **Playback volume:** a speaker button at the bottom of the rail opens a slider (0-100 %, squared, kept between
+    runs) and Mute; every sound the app plays follows it (players, Studio playback, the Dub preview), never exported
+    or generated files (`volume.js`). It and the Dub panes' sizes are kept by the server (`GET`/`PATCH
+    /api/preferences`, `.local/webview/preferences.json`): the page's own storage belongs to its address, whose port
+    changes every launch.
+  - **Characters:** a library of reusable voices, each with several labelled samples (recorded or uploaded, trimmed
     before saving), or designed from a description by OmniVoice (its attributes) or VoxCPM2 (free text).
     Session-only characters can be saved to the library.
   - **Models:** install / remove with size, GPU memory (`vram_gb`), location and license shown first; progress and a
@@ -281,7 +283,7 @@ All interface text is English. The visual design is the design canvas; behaviour
   timing, model and settings (one dub track per language; old dubs migrate on load). Layout: top bar (name, source
   language -> language tabs, model, settings, progress "translated / voiced / too long", Undo/Redo, Generate missing, Export, Transcribe again);
   a compact table (#, time, original, translation edited in place, status), filters with counts (All, Untranslated,
-  No take, Too long), "Copy for translation" (numbered, each line with the original's speaking time and the most its
+  No take, Too long, Too short), "Copy for translation" (numbered, each line with the original's speaking time and the most its
   translation may take, until the next sentence: "[2.8 s, at most 3.4 s]"; an instruction naming the target language
   and asking for translations about as long as the original, never longer than the most) and "Paste
   translations" (placed by number, or in order, a copied-back time dropped; summary of found and missing; one request);
@@ -310,6 +312,10 @@ All interface text is English. The visual design is the design canvas; behaviour
   choice, deleted sentences (their take files stay until the dub is deleted), generations (the previous takes are
   selected again, in one request), fits (likewise), model, language, settings, volume, name. Transcribing again is confirmed and not undoable; so is "Delete all takes of <language>" (in the menu: every take of
   the language shown, files included; sentences and translations stay; that language's take steps leave the undo list).
+  With the separation tool the menu also has "Separate voices (again)" (a job, cancellable; Whisper is skipped when
+  it is cancelled before listening) and "Use the full mix…" (confirmed; deletes the stems); the volume slider then
+  reads "Original voices" (the background always plays in full), otherwise "Original". The rail's speaker button
+  sets the master playback volume.
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not

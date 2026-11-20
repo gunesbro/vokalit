@@ -60,9 +60,12 @@ def separate(model, device, audio, voices, background):
     # Normalized as Demucs' own command does; the stems are scaled back.
     scale = mix.mean(0).std() + 1e-8
     shift = mix.mean(0).mean()
-    with torch.no_grad():  # long sounds go through in overlapping segments, so memory stays bounded on the GPU
-        sources = apply_model(model, ((mix - shift) / scale)[None], split=True, overlap=0.25, device=device)[0]
-    sources = sources.cpu() * scale
+    # Long sounds go through in overlapping segments, so GPU memory stays bounded. shifts=0: no extra randomly shifted
+    # pass (Demucs' default makes another full-length copy in RAM, about 2 GB on 20 minutes) and the same result each
+    # time.
+    with torch.no_grad():
+        sources = apply_model(model, ((mix - shift) / scale)[None], shifts=0, split=True, overlap=0.25, device=device)[0]
+    sources = sources.cpu().mul_(scale)  # in place: the full output is the largest thing in memory
     vocals = model.sources.index("vocals")
     stems = {voices: sources[vocals].mean(0), background: (sources.sum(0) - sources[vocals]).mean(0)}
     for path, stem in stems.items():

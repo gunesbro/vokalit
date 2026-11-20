@@ -439,6 +439,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     // The generated sentences' takes before (in the job's language), for undoing the generation.
     const generating = tracks().find((t) => t.language === language)?.clips || [];
     const wanted = new Set(ids);
+    const hadStems = dub.stems; // a separation that replaces stems must reload them; a first one flips the flag
     const before = Object.fromEntries(generating.filter((c) => wanted.has(c.id)).map((c) => [c.id, c.selected]));
     job = { id: started.id, kind, clips: new Set(ids), progress: started.progress || "" };
     // Also shown when the screen comes back to a transcription that is still running.
@@ -455,7 +456,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
       if (stopped) return; // the screen was left; the screen open now follows the job itself
       apply(result);
       if (kind === "separate") {
-        play.forgetStems(); // "Separate voices again" keeps the flag but replaces the files
+        if (hadStems) play.forgetStems(); // separated again: same flag, new files (a first separation flips the flag)
         setMessage(message, "Separated the voices: references and the export use them now.");
       }
       if (kind === "transcribe" && !dub.notice) {
@@ -1270,7 +1271,8 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
       },
       changed() {
         // Take names repeat after transcribing again (takes/d1-1.wav): decode takes afresh; the original's files stay.
-        const kept = new Set([fileUrl("audio.wav"), fileUrl("voices.wav"), backgroundUrl]);
+        // Only what plays now: with stems the voices and background, without them the whole original.
+        const kept = new Set(dub.stems ? [fileUrl("voices.wav"), backgroundUrl] : [fileUrl("audio.wav")]);
         for (const url of [...buffers.keys()]) if (!kept.has(url)) buffers.delete(url);
         if (dub.stems !== stemsSeen) this.forgetStems(false); // separated, or back to the full mix
         showVolume();

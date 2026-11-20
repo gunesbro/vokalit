@@ -80,8 +80,20 @@ def stems_temp(dub_id: str) -> tuple[Path, Path]:
 
 
 def keep_stems(dub_id: str) -> None:
-    for temp, path in zip(stems_temp(dub_id), (voices_path(dub_id), background_path(dub_id))):
-        os.replace(temp, path)
+    """Both new stems in place, or (a file in use can refuse a rename on Windows) the previous pair back."""
+    pairs = list(zip(stems_temp(dub_id), (voices_path(dub_id), background_path(dub_id))))
+    old = [(path, path.with_name(path.stem + ".old.wav")) for _, path in pairs if path.exists()]
+    for path, aside in old:
+        os.replace(path, aside)
+    try:
+        for temp, path in pairs:
+            os.replace(temp, path)
+    except OSError:
+        for path, aside in old:
+            os.replace(aside, path)
+        raise
+    for _, aside in old:
+        aside.unlink(missing_ok=True)
 
 
 def has_stems(dub_id: str) -> bool:
