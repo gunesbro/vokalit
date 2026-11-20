@@ -1006,3 +1006,70 @@ def test_rename_refuses_an_empty_name(tmp_workspace, tmp_path):
     dubs.set_found_speakers(dub, [0, 1])
     with pytest.raises(dubs.ws.WorkspaceError, match="needs a name"):
         dubs.rename_speaker(dub, "s1", "  ")
+
+
+def _talk(tmp_path, seconds, sentences):
+    """A dub of `seconds` whose sentences are (start, end, speaker label or None), texts T1, T2, ..."""
+    dub = dubs.create_dub("Talk", b"x", "mp3")
+    dubs.set_source_audio(dub, make_wav(tmp_path / "talk.wav", seconds).read_bytes())
+    dubs.set_transcript(dub, "tr", [{"start": a, "end": b, "text": f"T{n}"} for n, (a, b, _) in enumerate(sentences, 1)])
+    dubs.set_found_speakers(dub, [label for _, _, label in sentences])
+    return dub
+
+
+def _reference(dub, clip_id):
+    path, text = dubs.cut_reference(dub, clip_id)
+    rate, samples = dubs._read(path)
+    return round(len(samples) / rate, 2), text
+
+
+def _joined(*seconds):
+    """How long a reference joined from sentences of these lengths is: each padded, with a gap between them."""
+    return round(sum(seconds) + len(seconds) * 2 * dubs.REFERENCE_PADDING + (len(seconds) - 1) * dubs.REFERENCE_GAP, 2)
+
+
+def test_reference_adds_the_nearest_same_speaker_sentences(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(16.0, 19.0, 0), (20.0, 22.0, 0), (22.5, 24.0, 1), (32.0, 35.0, 0), (62.0, 65.0, 0)])
+    seconds, text = _reference(dub, "d2")
+    assert text == "T1 T2 T4"  # 1 s before, itself, 10 s after; the other speaker's and the far one are not used
+    assert abs(seconds - _joined(3, 2, 3)) < 0.01
+
+
+def test_reference_never_passes_ten_seconds(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(14.0, 19.0, 0), (20.0, 22.0, 0), (27.0, 31.0, 0), (42.0, 43.0, 0)])
+    seconds, text = _reference(dub, "d2")
+    assert text == "T1 T2 T4" and seconds <= dubs.REFERENCE_MAX  # the 4 s one would pass 10 s: skipped
+
+
+def test_reference_stays_within_the_window(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 100, [(20.0, 22.0, 0), (92.0, 95.0, 0)])
+    assert _reference(dub, "d1") == (_joined(2), "T1")
+
+
+def test_reference_skips_kept_and_very_short_sentences(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(16.0, 19.0, 0), (20.0, 22.0, 0), (23.0, 23.4, 0)])
+    dubs.set_keep_original(dub, "o1", True)
+    assert _reference(dub, "d2")[1] == "T2"
+
+
+def test_a_long_or_unknown_base_is_used_alone(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(10.0, 18.5, 0), (19.0, 22.0, 0), (30.0, 32.0, None), (33.0, 36.0, 0)])
+    assert _reference(dub, "d1")[1] == "T1"
+    assert _reference(dub, "d3")[1] == "T3"
+
+
+def test_reference_comes_from_the_voice_from_sentence(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(16.0, 19.0, 1), (20.0, 22.0, 0), (23.0, 25.0, 1), (26.0, 27.0, 0)])
+    dubs.update_dub_clip(dub, "d2", voice_from="o3")
+    assert _reference(dub, "d2")[1] == "T1 T3"
+
+
+def test_reference_reads_the_voices_stem(tmp_workspace, tmp_path):
+    import numpy as np
+    dub = _talk(tmp_path, 70, [(16.0, 19.0, 0), (20.0, 22.0, 0)])
+    rate, audio = dubs._read(dubs.audio_path(dub))
+    dubs._write(dubs.voices_path(dub), rate, audio)
+    dubs._write(dubs.background_path(dub), rate, np.zeros(len(audio)))
+    dubs._write(dubs.audio_path(dub), rate, np.zeros(len(audio)))  # only the voices have sound
+    path, _ = dubs.cut_reference(dub, "d2")
+    assert abs(dubs._read(path)[1].astype(int)).max() > 0

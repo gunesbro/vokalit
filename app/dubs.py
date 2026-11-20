@@ -21,6 +21,11 @@ SOURCE_TYPES = {"wav", "mp3", "m4a", "ogg", "flac"}
 VIDEO_TYPES = {"mp4", "webm"}
 DEFAULT_ORIGINAL_VOLUME = 0.15
 REFERENCE_PADDING = 0.15  # seconds kept around a sentence cut out as a voice reference
+REFERENCE_TARGET = 8.0  # seconds: a reference grows with the same speaker's nearby sentences until this long
+REFERENCE_MAX = 10.0  # and never longer (the models clone best from 3-10 s)
+REFERENCE_GAP = 0.25  # seconds of silence between the joined sentences
+REFERENCE_WINDOW = 60.0  # seconds: only sentences this close are joined, so the moment's mood carries
+MIN_REFERENCE_PIECE = 0.5  # seconds: shorter sentences add little and are often misheard
 KEPT_FADE = 0.05  # seconds to fade the original up and down around a sentence that keeps it
 MAX_SPEEDUP = 1.25  # a take is sped up at most this much to fit; beyond it speech stops sounding natural
 FIT_GAP = 0.05  # seconds left free before the next sentence when a take is fitted
@@ -695,18 +700,46 @@ def match_level(dub_id: str, clip_id: str, take: Path, language: str | None = No
     return round(float(gain), 2)
 
 
+def _reference_pieces(data: dict, base: dict) -> list[dict]:
+    """The sentences a reference is made of, in time order: `base`, then (when its speaker is known) the same speaker's
+    sentences nearest in time, within REFERENCE_WINDOW, until REFERENCE_TARGET seconds, never past REFERENCE_MAX. Never
+    another speaker's: in a dialogue the neighbours are often the other person."""
+    length = lambda s: s["end"] - s["start"] + 2 * REFERENCE_PADDING  # noqa: E731
+    pieces, total = [base], length(base)
+    speaker = base.get("speaker")
+    if speaker and total < REFERENCE_TARGET:
+        distance = lambda s: max(0.0, s["start"] - base["end"], base["start"] - s["end"])  # noqa: E731
+        kept = {s["id"] for s in _kept(data)}
+        nearby = sorted((s for s in _source_clips(data) if s.get("speaker") == speaker and s["id"] != base["id"]
+                         and s["id"] not in kept and s["end"] - s["start"] >= MIN_REFERENCE_PIECE
+                         and distance(s) <= REFERENCE_WINDOW), key=distance)
+        for source in nearby:
+            if total >= REFERENCE_TARGET:
+                break
+            if total + REFERENCE_GAP + length(source) <= REFERENCE_MAX:
+                pieces.append(source)
+                total += REFERENCE_GAP + length(source)
+    return sorted(pieces, key=lambda s: s["start"])
+
+
 def cut_reference(dub_id: str, clip_id: str, language: str | None = None) -> tuple[Path, str]:
-    """The voice reference for a dub clip: only the original audio of its "voice from" sentence (never neighbours,
-    which in a dialogue are often the other speaker), with a little padding; and that sentence's text."""
+    """The voice reference for a dub clip: its "voice from" sentence, joined with the same speaker's nearby sentences
+    (_reference_pieces), each with a little padding and a short silence between; and their text, in the same order."""
     data = load_dub(dub_id)
-    source = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["voice_from"])
-    rate, samples = _read_span(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id),  # clean speech
-                               source["start"] - REFERENCE_PADDING, source["end"] + REFERENCE_PADDING)  # when separated
+    base = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["voice_from"])
+    sound = voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id)  # clean speech when separated
+    parts, rate = [], None
+    pieces = _reference_pieces(data, base)
+    for n, source in enumerate(pieces):
+        rate, samples = _read_span(sound, source["start"] - REFERENCE_PADDING, source["end"] + REFERENCE_PADDING)
+        if n:
+            parts.append(np.zeros(round(REFERENCE_GAP * rate), dtype=samples.dtype))
+        parts.append(samples)
     folder = dub_dir(dub_id) / "refs"
     folder.mkdir(exist_ok=True)
-    path = folder / f"{source['id']}.wav"
-    _write(path, rate, samples)
-    return path, source["text"]
+    path = folder / f"{base['id']}.wav"
+    _write(path, rate, np.concatenate(parts))
+    return path, " ".join(s["text"] for s in pieces if s["text"])
 
 
 def fit_take(dub_id: str, clip_id: str, language: str | None = None) -> float:
