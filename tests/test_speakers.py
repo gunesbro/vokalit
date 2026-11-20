@@ -69,3 +69,32 @@ def test_many_spans_cluster_a_sample_and_label_all(grouping, monkeypatch):
     directions = [i % 2 for i in range(2500)]
     labels = grouping.group([_voice(d, rng) for d in directions], [2.0] * 2500)
     assert set(labels) == {0, 1} and all(label == d for label, d in zip(labels, directions))
+
+
+def test_speakers_is_a_tool():
+    tool = models.TOOLS["speakers"]
+    assert "speakers" not in models.MODELS
+    assert tool["title"] == "Speaker finder (SpeechBrain ECAPA)"
+    steps = [args for _, args in tool["pip_steps"]]
+    assert models.TORCH_CUDA in steps and any("speechbrain==1.1.0" in args for args in steps)
+    assert "Apache" in tool["license"] and "Hugging Face" in tool["downloads"]
+
+
+def test_find_speakers_needs_the_tool(monkeypatch):
+    monkeypatch.setattr(models, "is_installed", lambda name: False)
+    with pytest.raises(RuntimeError, match="speaker finder is not installed"):
+        models.find_speakers("a.wav", [[0.0, 1.0]])
+
+
+def test_find_speakers_sends_one_request(monkeypatch):
+    sent = []
+    monkeypatch.setattr(models, "is_installed", lambda name: True)
+    monkeypatch.setattr(models, "_request", lambda name, message: sent.append((name, message)) or {"ok": True, "labels": [0]})
+    assert models.find_speakers("a.wav", [[0.0, 1.0]]) == [0]
+    assert sent == [("speakers", {"task": "speakers", "audio": "a.wav", "spans": [[0.0, 1.0]], "count": None})]
+
+
+def test_the_worker_uses_the_installed_model_when_run_by_hand(monkeypatch):
+    monkeypatch.delenv("HF_HOME", raising=False)
+    worker = _load("worker")
+    assert worker.cache().as_posix().endswith(".local/speakers/cache/ecapa")

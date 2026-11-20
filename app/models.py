@@ -241,6 +241,19 @@ TOOLS = {
         # PyTorch (the shared CUDA build) runs it on the GPU when there is one, else on the CPU.
         "pip_steps": [("PyTorch", TORCH_CUDA), ("Demucs", ["demucs==4.0.1", "soundfile"])],
     },
+    "speakers": {
+        "title": "Speaker finder (SpeechBrain ECAPA)",
+        "summary": "Finds who says each sentence of a dub, so every sentence is cloned from its own speaker's nearby "
+                   "sentences: a longer, steadier voice sample.",
+        "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb",
+        "disk_gb": 5.2,  # estimate: PyTorch (5.0, shared with the voice models) and a small model
+        "vram_gb": 0.5,  # estimate: one short sentence at a time
+        "downloads": "PyPI, download.pytorch.org (PyTorch) and Hugging Face (the model)",
+        "license": "Code and model Apache-2.0 (SpeechBrain, spkrec-ecapa-voxceleb); the model is downloaded to this "
+                   "computer by the install, never shipped with Vokalit.",
+        # PyTorch (the shared CUDA build) runs it on the GPU when there is one, else on the CPU.
+        "pip_steps": [("PyTorch", TORCH_CUDA), ("SpeechBrain", ["speechbrain==1.1.0", "soundfile"])],
+    },
 }
 
 
@@ -873,6 +886,14 @@ def separate(audio, voices, background):
     if not is_installed("demucs"):
         raise RuntimeError("Voice separation is not installed. Install it in Models.")
     _request("demucs", {"task": "separate", "audio": audio, "voices": voices, "background": background})
+
+
+def find_speakers(audio, spans, count=None):
+    """Who says each span ([start, end] seconds) of the WAV `audio`: speaker numbers by first appearance, None for a
+    span without sound. `count`: how many speakers there are, or None to guess. On this computer (SpeechBrain ECAPA)."""
+    if not is_installed("speakers"):
+        raise RuntimeError("The speaker finder is not installed. Install it in Models.")
+    return _request("speakers", {"task": "speakers", "audio": audio, "spans": spans, "count": count})["labels"]
 
 
 def transcribe_segments(audio, language):
