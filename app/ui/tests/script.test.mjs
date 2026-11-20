@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activeClip, touchesFiles, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
+import { activeClip, dragRange, touchesFiles, clampSize, clipAt, clipFilter, inWindow, visibleRows, createHistory, followWindow, onlyModel, volumeRamps } from "../script.js";
 import { clampStart, clipsToPlay, overlapRanges, parseTranslations, pasteTranslations, timeToX, transcriptForTranslation,
   xToTime } from "../script.js";
 import { descriptionGroups, designLanguage, designText, filterOptions, formatTime, insertTag, isCut, moveLine, parsePause,
@@ -389,4 +389,11 @@ test("touchesFiles finds steps that refer to a deleted take", () => {
   assert.equal(touchesFiles({ takes: ["a"] }, new Set(["b"])), false);
   assert.equal(touchesFiles({ takes: true }, new Set(["b"])), false);
   assert.equal(touchesFiles({}, new Set(["b"])), false);
+});
+
+test("dragRange turns a drag into seconds and a click into nothing", () => {
+  assert.equal(dragRange(100, 103, 10, 60), null);
+  assert.deepEqual(dragRange(100, 150, 10, 60), { start: 10, end: 15 });
+  assert.deepEqual(dragRange(150, 100, 10, 60), { start: 10, end: 15 });
+  assert.deepEqual(dragRange(590, 700, 10, 60), { start: 59, end: 60 });
 });

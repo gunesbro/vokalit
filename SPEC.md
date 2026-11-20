@@ -322,6 +322,16 @@ All interface text is English. The visual design is the design canvas; behaviour
   it is cancelled before listening) and "Use the full mix…" (confirmed; deletes the stems); the volume slider then
   reads "Original voices" (the background always plays in full), otherwise "Original". The rail's speaker button
   sets the master playback volume.
+  Sentences can be added by hand: a drag on the Original lane marks a range (`.tl-range`; a click still seeks; Esc
+  clears it), "Add sentence m:ss.s–m:ss.s" in the timeline's tools adds it (`POST /source`, in time order, an
+  empty clip at its start in every language; ids from the growing counter `last_sentence`, so undo's restore never
+  finds its id taken; undoable, redo restores it), then Whisper listens (`POST /source/<id>/listen`, a job on that
+  span only, from the voices when separated; it saves nothing: the window puts the text in as an undoable edit if the
+  Original was not changed meanwhile, else shows "Whisper heard: …"). The panel has Listen and Start/End fields
+  (at least 0.2 s, inside the sound; a new start moves the sentence's clips by as much in every language; the order
+  follows the times; undoable). Takes are deleted with a trash button under each (inline confirm) or "Delete takes N"
+  for the tab's sentences (confirmed): not undoable, files removed, a deleted selected take gives way to the newest
+  left, undo steps that select a deleted take are dropped (take steps carry their files); not while the dub works.
 - **Characters:** list; editable name; "used in" sessions; delete (confirmed, lists sessions); samples table
   (★ default, play, label, waveform, length/source, delete); add a sample by recording (microphone choice, timer,
   level, 10 s hint) or upload, then trim and "Add sample"; or "Design voice": model (designable models that are not

@@ -2,15 +2,16 @@
 // playhead, zoom, a waveform under the first lane, and dragging clips in time (Dub). Generic, so trimming or more
 // lanes can be added later: every position goes through timeToX/xToTime with one scale.
 import { el } from "./app.js";
-import { clampStart, followWindow, inWindow, overlapRanges, timeToX, xToTime } from "./script.js";
+import { clampStart, dragRange, followWindow, inWindow, overlapRanges, timeToX, xToTime } from "./script.js";
 
 const MIN_WINDOW = 5; // seconds visible at the closest zoom
 const MAX_WIDTH = 10_000_000; // px: the scroll width stays under the browser's limit (~16M) on very long files
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-// lanes: [{id, label, draggable, clips: [{id, start, end, state, title}]}]; state "fits" | "long" | "missing" | "source".
+// lanes: [{id, label, draggable, rangeable, clips: [{id, start, end, state, title}]}]; state "fits" | "long" | "missing" |
+// "source". On a `rangeable` lane a drag marks a time range (onRange); a click still seeks.
 export function timeline({ duration, window: shown = 30, lanes = [], onSeek = () => {}, onSelect = () => {},
-  onMove = () => {} }) {
+  onMove = () => {}, onRange = () => {} }) {
   const total = Math.max(duration, 0.001);
   let width = Math.min(shown, total); // seconds visible
   let current = [];
@@ -19,6 +20,7 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
   let time = 0;
   let wave = null; // {values, perSecond}
   let scale = 1; // px per second
+  let marked = null; // {lane, start, end}: a range marked by dragging
 
   const labels = el("div", { class: "tl-labels" });
   const content = el("div", { class: "tl-content" });
@@ -26,13 +28,14 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
   const canvas = el("canvas", { class: "tl-wave", "aria-hidden": "true" });
   const playhead = el("div", { class: "tl-playhead", "aria-hidden": "true" });
   const range = el("span", { class: "faint small num" });
+  const action = el("span", { class: "row tl-action" }); // what the dub offers for a marked range
   const zoomOut = el("button", { type: "button", class: "btn btn-ghost btn-small", title: "Show more time",
     "aria-label": "Zoom out", onclick: () => zoom(2) }, "\u2212");
   const zoomIn = el("button", { type: "button", class: "btn btn-ghost btn-small", title: "Show less time",
     "aria-label": "Zoom in", onclick: () => zoom(0.5) }, "+");
   const element = el("div", { class: "timeline" },
     el("div", { class: "tl-frame" }, labels, el("div", { class: "tl-view" }, canvas, scroller)),
-    el("div", { class: "row tl-tools" }, range, el("div", { class: "spacer" }), zoomOut, zoomIn));
+    el("div", { class: "row tl-tools" }, range, action, el("div", { class: "spacer" }), zoomOut, zoomIn));
 
   const visibleStart = () => scroller.scrollLeft / scale;
   const reveal = (t) => { scroller.scrollLeft = timeToX(followWindow(visibleStart(), width, t, total), scale); };
@@ -63,7 +66,27 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
       const row = el("div", { class: "tl-lane", "data-lane": lane.id });
       row.addEventListener("pointerdown", (e) => {
         if (e.target !== row) return;
-        onSeek(Math.min(total, Math.max(0, xToTime(e.offsetX, scale))));
+        const from = e.offsetX;
+        if (!lane.rangeable) return void onSeek(Math.min(total, Math.max(0, xToTime(from, scale))));
+        const origin = e.clientX;
+        try { row.setPointerCapture(e.pointerId); } catch { /* a synthetic event has no pointer to capture */ }
+        const move = (m) => {
+          const dragged = dragRange(from, from + m.clientX - origin, scale, total);
+          if (dragged) mark({ lane: lane.id, ...dragged });
+        };
+        const up = (u) => {
+          row.removeEventListener("pointermove", move);
+          row.removeEventListener("pointerup", up);
+          const dragged = dragRange(from, from + u.clientX - origin, scale, total);
+          if (!dragged) {
+            clearRange();
+            return void onSeek(Math.min(total, Math.max(0, xToTime(from, scale))));
+          }
+          mark({ lane: lane.id, ...dragged });
+          onRange(dragged);
+        };
+        row.addEventListener("pointermove", move);
+        row.addEventListener("pointerup", up);
       });
       return row;
     }), playhead);
@@ -84,6 +107,25 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
           width: `${Math.max(2, timeToX(overlap.end - overlap.start, scale))}px` } }));
       rows[i].replaceChildren(...nodes, ...inWindow(lane.sorted, from, to, lane.longest).map((clip) => clipNode(lane, clip)));
     });
+    drawMark();
+  }
+
+  // The marked range, redrawn with the clips (they replace the lane's children).
+  function drawMark() {
+    content.querySelector(".tl-range")?.remove();
+    const row = marked && content.querySelector(`.tl-lane[data-lane="${marked.lane}"]`);
+    if (!row) return;
+    row.append(el("div", { class: "tl-range", style: { left: `${timeToX(marked.start, scale)}px`,
+      width: `${Math.max(2, timeToX(marked.end - marked.start, scale))}px` } }));
+  }
+
+  function mark(range) { marked = range; drawMark(); }
+
+  function clearRange() {
+    if (!marked) return;
+    marked = null;
+    drawMark();
+    action.replaceChildren();
   }
 
   // Scrolled near the edge of what is drawn: draw around the view again.
@@ -167,6 +209,10 @@ export function timeline({ duration, window: shown = 30, lanes = [], onSeek = ()
   return {
     element,
     setLanes(next) { current = prepare(next); draw(); },
+    clearRange,
+    hasRange: () => Boolean(marked),
+    // What the marked range offers, in the tools row ("" for nothing).
+    setAction(node) { action.replaceChildren(node || ""); },
     setWave(values, perSecond) { wave = { values, perSecond }; paint(); },
     // `follow` keeps the playhead in view (while playing, or after a seek).
     setTime(t, follow = true) {

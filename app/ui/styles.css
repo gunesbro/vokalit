@@ -559,6 +559,9 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
   pointer-events: none; z-index: 3; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); pointer-events: none; z-index: 4; }
 .tl-tools { gap: 4px; padding-left: 64px; }
+.tl-range { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 30%, transparent);
+  border: 1px solid var(--accent); border-radius: 3px; pointer-events: none; z-index: 3; }
+.tl-action { gap: 4px; }
 
 /* Dub: a subtitle-editor layout (table | video and selected sentence, timeline below) */
 .dub-head { flex-wrap: nowrap; gap: 8px; }
@@ -622,4 +625,6 @@ pre.log { margin: 8px 0 0; padding: 12px; border-radius: 6px; background: var(--
 .dub-line.kept .dub-orig { font-style: italic; }
 .dub-line.kept .dub-tr { opacity: .45; }
 .dub-keep { gap: 6px; }
+.dub-times { gap: 10px; }
+.dub-time { width: 84px; }
 .tl-clip.kept { background: repeating-linear-gradient(135deg, var(--accent-line) 0 4px, transparent 4px 8px); }

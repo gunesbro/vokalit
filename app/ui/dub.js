@@ -250,7 +250,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
   const stage = el("div", { class: "dub-stage" });
   const inspector = el("div", { class: "dub-inspector" });
   const play = previewPlayer();
-  const lanes = timeline({ duration: dub.source.duration || 1, onSeek: (t) => play.seek(t),
+  const lanes = timeline({ duration: dub.source.duration || 1, onSeek: (t) => play.seek(t), onRange: offerSentence,
     onSelect: (laneId, clipId) => choose(laneId === "dub" ? clipId : clips().find((c) => c.source_clip === clipId)?.id),
     onMove: (clipId, start) => {
       const before = clips().find((c) => c.id === clipId)?.start;
@@ -419,6 +419,94 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
       () => api("PATCH", path(`/source/${source.id}`), { keep_original: !keep }));
   }
 
+  const tenths = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+
+  // A range marked on the Original lane: a sentence Whisper missed can be added there.
+  function offerSentence(range) {
+    lanes.setAction(el("button", { class: "btn btn-small", disabled: Boolean(job), title: "Add a sentence over the "
+      + "marked part (Esc clears the mark)", onclick: () => addSentence(range) }, `Add sentence ${tenths(range.start)}\u2013${tenths(range.end)}`));
+  }
+
+  // Added in time order, in every language; undo deletes it, redo puts the same sentence back. Whisper then writes what
+  // it hears there, when installed.
+  async function addSentence({ start, end }) {
+    lanes.clearRange();
+    let added = null;
+    let again = null; // what redo puts back
+    const run = async () => {
+      const result = again ? await api("POST", path("/source/restore"), again)
+        : await api("POST", path("/source"), { start, end });
+      added ??= result.added;
+      if (!again) {
+        const index = result.tracks[0].clips.findIndex((s) => s.id === added);
+        again = { source: result.tracks[0].clips[index], index, voices: {},
+          clips: Object.fromEntries(result.tracks.slice(1).map((t) => [t.language, t.clips.find((c) => c.source_clip === added)])) };
+      }
+      return result;
+    };
+    await act("adding a sentence", run, () => api("DELETE", path(`/source/${added}`)));
+    if (!added) return;
+    const clip = clips().find((c) => c.source_clip === added);
+    if (clip) choose(clip.id);
+    if (whisper) listen(added);
+    else setMessage(message, "Added the sentence: write what is said. Install Whisper on the Models screen to have it written.");
+  }
+
+  // Whisper writes what is said in one sentence; heardText puts it in.
+  const listenedFrom = new Map(); // sentence id -> its text when listening started
+  async function listen(sourceId) {
+    const source = sources().find((s) => s.id === sourceId);
+    if (!source || job) return;
+    listenedFrom.set(sourceId, source.text);
+    try {
+      follow(await api("POST", path(`/source/${sourceId}/listen`), {}), "listen", [sourceId]);
+    } catch (error) { fail(error); }
+  }
+
+  // Put in as an edit undo can take back, unless the text changed while Whisper listened (or is being typed): then
+  // it is only shown, so nothing typed is lost.
+  function heardText(sourceId, heard) {
+    const source = sources().find((s) => s.id === sourceId);
+    const before = listenedFrom.get(sourceId);
+    listenedFrom.delete(sourceId);
+    if (!source) return;
+    const number = sources().indexOf(source) + 1;
+    if (!heard) return setMessage(message, `Whisper heard no speech in sentence ${number}.`, "warn");
+    const box = inspector.querySelector(`[data-source="${sourceId}"]`);
+    const typing = box && document.activeElement === box && box.value !== box.dataset.saved;
+    if (before === undefined || source.text !== before || typing) {
+      return setMessage(message, `Whisper heard: \u201c${heard}\u201d`);
+    }
+    if (heard === before) return setMessage(message, `Whisper heard the same text in sentence ${number}.`);
+    act(`text of sentence ${number}`, () => api("PATCH", path(`/source/${sourceId}`), { text: heard }),
+      () => api("PATCH", path(`/source/${sourceId}`), { text: before }))
+      .then(() => setMessage(message, `Whisper wrote sentence ${number}; correct it if it misheard.`));
+  }
+
+  // Start or end of a sentence, in seconds; its clips move with its start, and the order follows the times.
+  function retime(source, key, value) {
+    const before = { start: source.start, end: source.end };
+    const number = sources().indexOf(source) + 1;
+    if (!Number.isFinite(value) || value === before[key]) return;
+    act(`times of sentence ${number}`, () => api("PATCH", path(`/source/${source.id}`), { [key]: value }),
+      () => api("PATCH", path(`/source/${source.id}`), before));
+  }
+
+  function timesRow(source) {
+    const field = (key, label) => el("label", { class: "row small muted" }, label,
+      el("input", { type: "number", class: "input dub-time", step: 0.1, min: 0, max: dub.source.duration || undefined,
+        value: source[key].toFixed(2), "aria-label": `${label} of the sentence, in seconds`,
+        onchange: (e) => retime(source, key, Math.round(Number(e.target.value) * 1000) / 1000) }));
+    return el("div", { class: "row dub-times" }, field("start", "Start"), field("end", "End"),
+      el("span", { class: "faint small" }, "s"));
+  }
+
+  function listenButton(source) {
+    return el("button", { class: "btn btn-ghost btn-small", disabled: Boolean(job) || !whisper,
+      title: whisper ? "Whisper writes what is said here (an edit you can undo)" : "Install Whisper on the Models screen to listen",
+      onclick: () => listen(source.id) }, job?.kind === "listen" && job.clips.has(source.id) ? "Listening\u2026" : "Listen");
+  }
+
   function deleteSentence(clip) {
     const index = clips().indexOf(clip);
     const source = sourceOf(clip);
@@ -445,6 +533,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     // Also shown when the screen comes back to a transcription that is still running.
     if (kind === "transcribe") setMessage(message, listening());
     if (kind === "separate") setMessage(message, SEPARATING);
+    if (kind === "listen") setMessage(message, `Listening to sentence ${sources().findIndex((s) => s.id === ids[0]) + 1}\u2026`);
     draw();
     try {
       const result = await waitForJob(started.id, (update) => {
@@ -464,6 +553,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
           + "\u201cPaste translations\u201d, or type them in the table.");
       }
       if (kind === "generate" || kind === "fit") recordSelection(before, language, kind);
+      if (kind === "listen") heardText(ids[0], result.heard);
     } catch (error) {
       if (stopped) return;
       if (error.cancelled) setMessage(message, "Cancelled.");
@@ -846,7 +936,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     const source = sourceOf(clip);
     const clipFit = fit()[clip.id] || { state: "missing" };
     const original = el("textarea", { class: "textarea", rows: 2, value: source.text, "data-saved": source.text,
-      "data-key": `orig-${clip.id}`, "aria-label": `Original of sentence ${number}`,
+      "data-key": `orig-${clip.id}`, "data-source": source.id, "aria-label": `Original of sentence ${number}`,
       title: "What is said. It is also the transcript of the voice sample, so correct it if Whisper misheard.",
       onblur: () => original.value !== original.dataset.saved && editOriginal(clip, original.value) });
     const translation = el("textarea", { class: "textarea", rows: 3, value: clip.translation, "data-saved": clip.translation,
@@ -895,7 +985,8 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
         el("div", { class: "row" }, el("strong", {}, `Sentence ${number}`),
           el("span", { class: "faint small num" }, `${formatTime(source.start)}\u2013${formatTime(source.end)}`),
           el("div", { class: "spacer" }), el("span", { class: "faint small" }, "\u266a Original")),
-        el("label", { class: "field-label" }, "Original"), original, keep,
+        el("div", { class: "row" }, el("label", { class: "field-label" }, "Original"), el("div", { class: "spacer" }),
+          listenButton(source)), original, timesRow(source), keep,
         el("p", { class: "faint small" }, "The original plays here at full volume, in every language."),
         el("div", { class: "row" }, el("div", { class: "spacer" }), remove));
       return;
@@ -916,7 +1007,8 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
               title: "Use the take as it was generated, before it was stretched" }, "Use the original"))
           : clipFit.state === "fits" ? el("span", { class: "ok small" }, "Fits") : el("span", { class: "faint small" }, "No take yet")),
       cannotFit(clipFit) ? el("div", { class: "faint small" }, cannotFit(clipFit)) : "", // on its own line: it can be long
-      el("label", { class: "field-label" }, "Original"), original, keep,
+      el("div", { class: "row" }, el("label", { class: "field-label" }, "Original"), el("div", { class: "spacer" }),
+        listenButton(source)), original, timesRow(source), keep,
       el("label", { class: "field-label" }, "Translation"), translation,
       el("div", { class: "row" }, el("label", { class: "row small muted" }, "Voice", voice)),
       takes.length ? el("div", { class: "dub-takes" }, takes) : el("p", { class: "faint small" }, "No takes yet."),
@@ -930,7 +1022,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
 
   function drawLanes() {
     lanes.setLanes([
-      { id: "original", label: "Original", draggable: false,
+      { id: "original", label: "Original", draggable: false, rangeable: true,
         clips: sources().map((c) => ({ id: c.id, start: c.start, end: c.end, state: "source", title: c.text })) },
       { id: "dub", label: "Dub", draggable: true, clips: clips().map((c) => ({ id: c.id, start: c.start,
         end: c.start + lengthOf(c), state: fit()[c.id]?.state || "missing", title: c.translation || "No translation yet" })) },
@@ -1357,6 +1449,7 @@ function openDub(main, initial, { models, whisper, demucs, formats, refreshList 
     if (mod && !inText && e.key.toLowerCase() === "z") { e.preventDefault(); step(e.shiftKey ? "redo" : "undo"); return; }
     if (mod && !inText && e.key.toLowerCase() === "y") { e.preventDefault(); step("redo"); return; }
     if (inText || (onControl && (e.code === "Space" || e.key === "Enter"))) return;
+    if (e.key === "Escape" && lanes.hasRange()) { lanes.clearRange(); return; }
     const visible = clipFilter(clips(), fit(), filter);
     if (e.code === "Space") { e.preventDefault(); play.toggle(); }
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") {

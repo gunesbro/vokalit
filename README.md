@@ -57,7 +57,10 @@ English script. Unmute the player to listen.
   own translations, takes, timing and model. Music or singing that Whisper wrote down can be marked *Keep the original here* (K): the original
   plays there at full volume in every language, and nothing is translated or generated. With **Voice separation**
   (Demucs, on the Models screen) the speech is separated from the music and effects first: voices are copied from
-  clean speech, and the music stays at full level under the dub. Every change can be undone
+  clean speech, and the music stays at full level under the dub. A part Whisper missed can be added: drag over it
+  on the Original lane of the timeline and press *Add sentence*; Whisper writes what it hears there (*Listen* does it
+  again for any sentence), and you correct it. Start and end times can be typed in. Takes can be deleted one by one,
+  or all of a tab's sentences with *Delete takes*. Every change can be undone
   (Ctrl+Z). The mix is exported as one audio file. The screen stays quick with tens of thousands of sentences; the
   file itself is best kept to about 20 minutes, as the window decodes its sound.
 - **Languages** — per session or per line, limited to what the selected models support; a search box finds a

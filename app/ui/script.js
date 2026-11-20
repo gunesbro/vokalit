@@ -240,6 +240,14 @@ export function createHistory(limit = 100) {
   };
 }
 
+// A drag on the timeline as a time range in seconds (ordered, inside the file), or null for a click: a movement under
+// `threshold` px.
+export function dragRange(fromX, toX, scale, total, threshold = 4) {
+  if (Math.abs(toX - fromX) < threshold) return null;
+  const at = (x) => Math.min(total, Math.max(0, x / scale));
+  return { start: at(Math.min(fromX, toX)), end: at(Math.max(fromX, toX)) };
+}
+
 // Whether an undo step selects one of `files` (deleted takes): such a step could only fail now. Steps that select
 // takes list the files they refer to.
 export function touchesFiles(step, files) {
