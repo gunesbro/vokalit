@@ -1493,6 +1493,17 @@ def export_dub(req, did):
     return {"path": out.relative_to(ws.workspace_root()).as_posix()}
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/export-video")
+def export_dub_video(req, did):
+    """The dub's video with the dub as its sound (?language), or {every_language}: each language its own audio track,
+    then the original. Needs the video export tool (FFmpeg)."""
+    data = _dub_or_404(did)
+    code = _dub_language(req, data)
+    out = dubs.export_video(did, code, bool(req["json"].get("every_language")), models.ffmpeg_path(),
+                            {c: models.LANGUAGE_NAMES.get(c, c) for c in dubs.languages(data)})
+    return {"path": out.relative_to(ws.workspace_root()).as_posix()}
+
+
 # --- HTTP ---------------------------------------------------------------------------------------
 
 

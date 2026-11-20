@@ -9,6 +9,7 @@ import pytest
 
 os.environ.setdefault("VOKALIT_UV", "uv")
 import models  # noqa: E402
+from test_server import api  # noqa: E402,F401  (the api fixture)
 
 
 def test_ffmpeg_is_a_tool():
@@ -137,3 +138,22 @@ def test_export_video_failure_leaves_nothing(video_dub):
     folder = dubs.dub_dir(dub) / "exports"
     assert not folder.exists() or list(folder.iterdir()) == []
     assert not list(dubs.dub_dir(dub).glob("*.wav.tmp*")) and not list(dubs.dub_dir(dub).glob("video-*.wav"))
+
+
+@needs_ffmpeg
+def test_export_video_route(api, video_dub, monkeypatch):
+    dub = video_dub(languages=("en", "de"))
+    monkeypatch.setattr(models, "ffmpeg_path", lambda: FFMPEG)
+    status, body, _ = api("POST", f"/api/dubs/{dub}/export-video?language=en", {"every_language": True})
+    assert status == 200 and body["path"].endswith(".mp4") and "-all-" in body["path"]
+    import workspace as ws
+    audio = [s for s in _streams(ws.workspace_root() / body["path"]) if s[0] == "audio"]
+    assert [s[3] for s in audio] == ["English", "German", "Original"]
+
+
+def test_export_video_route_needs_the_tool(api, tmp_workspace, monkeypatch):
+    import dubs
+    dub = dubs.create_dub("Talk", b"x", "mp4")
+    monkeypatch.setattr(models, "ffmpeg_path", lambda: None)
+    status, body, _ = api("POST", f"/api/dubs/{dub}/export-video", {})
+    assert status == 400 and "Install Video export (FFmpeg)" in body["error"]
