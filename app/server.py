@@ -1106,8 +1106,75 @@ def transcribe_dub(req, did):
             raise Cancelled()
         dubs.set_transcript(did, heard["language"], heard["segments"])
         notices = [notice, None if heard["segments"] else "No speech was found in this file."]
+        if heard["segments"] and models.is_installed("speakers"):
+            if job.get("cancelled"):  # cancelled between listening and finding the speakers
+                raise Cancelled()
+            try:
+                _find_speakers(job, did)
+            except Cancelled:
+                raise
+            except Exception as error:  # e.g. out of GPU memory: the sentences are there, without speakers
+                notices.append(f"The speakers could not be found ({error}).")
         return _dub_view(did, " ".join(n for n in notices if n) or None)
     return _start_dub_job(did, work, "transcribe")
+
+
+def _find_speakers(job, did, count=None):
+    """Finds who says each sentence (from the voices when separated) and saves it; nothing is saved when it fails or
+    is cancelled. Returns how many speakers were found."""
+    data = dubs.load_dub(did)
+    audio = dubs.voices_path(did) if dubs.has_stems(did) else dubs.audio_path(did)
+    job["progress"] = "Finding the speakers\u2026"
+    job["model"] = "speakers"  # what cancelling stops
+    try:
+        labels = models.find_speakers(str(audio), [[s["start"], s["end"]] for s in dubs._source_clips(data)], count)
+    except Exception:
+        if job.get("cancelled"):
+            raise Cancelled() from None
+        raise
+    finally:
+        job["model"] = None
+    if job.get("cancelled"):
+        raise Cancelled()
+    return dubs.set_found_speakers(did, labels)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/speakers")
+def find_dub_speakers(req, did):
+    """Finds who says each sentence again ({count}: how many speakers, or none to guess), as a job. Replaces the
+    speakers and the corrections; the window can put them back (PUT)."""
+    _dub_or_404(did)
+    if not models.is_installed("speakers"):
+        raise ws.WorkspaceError("Install the speaker finder on the Models screen.")
+    count = req["json"].get("count")
+    count = int(count) if count not in (None, "") else None
+
+    def work(job):
+        found = _find_speakers(job, did, count)
+        return _dub_view(did, f"Found {found} speaker{'' if found == 1 else 's'}.")
+    return _start_dub_job(did, work, "speakers")
+
+
+@route("PUT", "/api/dubs/(?P<did>[0-9-]+)/speakers")
+def restore_dub_speakers(req, did):
+    """Puts the speakers and who says what back ({speakers, assignments}): undo of a merge or of finding them again."""
+    _dub_or_404(did)
+    dubs.restore_speakers(did, req["json"])
+    return _dub_view(did)
+
+
+@route("PATCH", "/api/dubs/(?P<did>[0-9-]+)/speakers/(?P<sid>s[0-9]+)")
+def rename_dub_speaker(req, did, sid):
+    _dub_or_404(did)
+    dubs.rename_speaker(did, sid, str(req["json"].get("name") or ""))
+    return _dub_view(did)
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/speakers/(?P<sid>s[0-9]+)/merge")
+def merge_dub_speaker(req, did, sid):
+    _dub_or_404(did)
+    dubs.merge_speakers(did, sid, str(req["json"].get("into") or ""))
+    return _dub_view(did)
 
 
 def _separate(job, did):
@@ -1166,6 +1233,9 @@ def update_dub_source(req, did, oid):
                                 end=float(body["end"]) if "end" in body else None)
     if "keep_original" in body:
         dubs.set_keep_original(did, oid, bool(body["keep_original"]))
+    if "speaker" in body:  # an id, "new" or null (unknown); the view says which id it got
+        speaker = dubs.set_speaker(did, oid, None if body["speaker"] is None else str(body["speaker"]))
+        return {**_dub_view(did), "speaker": speaker}
     return _dub_view(did)
 
 

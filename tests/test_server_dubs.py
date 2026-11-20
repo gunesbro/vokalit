@@ -19,12 +19,16 @@ SEGMENTS = [{"start": 0.5, "end": 3.0, "text": "Merhaba."}, {"start": 4.0, "end"
 HEARD = []  # what the fake Whisper listened to
 
 
-def _transcribed(api, tmp_path, monkeypatch, segments=SEGMENTS, separate=None):
-    """A dub with sound and sentences. Voice separation is not installed unless `separate` (a fake) is given."""
+def _transcribed(api, tmp_path, monkeypatch, segments=SEGMENTS, separate=None, speakers=None):
+    """A dub with sound and sentences. Voice separation and the speaker finder are not installed unless `separate`
+    and `speakers` (fakes) are given."""
     HEARD.clear()
-    monkeypatch.setattr(models, "is_installed", lambda name: separate is not None or name != "demucs")
+    fakes = {"demucs": separate, "speakers": speakers}
+    monkeypatch.setattr(models, "is_installed", lambda name: fakes[name] is not None if name in fakes else True)
     if separate is not None:
         monkeypatch.setattr(models, "separate", separate)
+    if speakers is not None:
+        monkeypatch.setattr(models, "find_speakers", speakers)
     monkeypatch.setattr(models, "transcribe_segments",
                         lambda audio, language: HEARD.append(audio) or {"language": "tr", "segments": segments})
     status, dub, _ = api("POST", "/api/dubs?name=Talk&ext=mp4", raw=b"video-bytes", content_type="video/mp4")
@@ -696,3 +700,86 @@ def test_listen_detects_the_language_when_not_set(api, tmp_path, monkeypatch):
     _listener(monkeypatch, heard)
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/source/o1/listen", {})
     assert _wait(api, job["id"])["state"] == "done" and heard[0]["language"] is None
+
+
+def _finder(calls, labels=(0, 1)):
+    """A fake speaker finder: records what it was asked, answers `labels` (cycled over the sentences)."""
+    def find(audio, spans, count=None):
+        calls.append({"audio": audio, "spans": spans, "count": count})
+        return [labels[i % len(labels)] for i in range(len(spans))]
+    return find
+
+
+def _state(did):
+    return dubs.speakers_state(dubs.load_dub(did))
+
+
+def test_transcribe_finds_the_speakers_when_it_can(api, tmp_path, monkeypatch):
+    calls = []
+    dub = _transcribed(api, tmp_path, monkeypatch, speakers=_finder(calls))
+    assert [s["speaker"] for s in dub["tracks"][0]["clips"]] == ["s1", "s2"]
+    assert calls[0]["spans"] == [[0.5, 3.0], [4.0, 9.0]] and calls[0]["count"] is None
+    assert calls[0]["audio"] == str(dubs.audio_path(dub["id"]))
+
+
+def test_transcribe_without_the_speaker_finder_has_no_speakers(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    assert dub["speakers"] == [] and all("speaker" not in s for s in dub["tracks"][0]["clips"])
+
+
+def test_transcribe_goes_on_when_speakers_fail(api, tmp_path, monkeypatch):
+    def broken(audio, spans, count=None):
+        raise RuntimeError("out of memory")
+    dub = _transcribed(api, tmp_path, monkeypatch, speakers=broken)
+    assert dub["speakers"] == [] and "The speakers could not be found (out of memory)." in dub["notice"]
+    assert len(dub["tracks"][0]["clips"]) == 2
+
+
+def test_finding_speakers_again_with_a_count(api, tmp_path, monkeypatch):
+    calls = []
+    dub = _transcribed(api, tmp_path, monkeypatch, speakers=_finder(calls))
+    monkeypatch.setattr(models, "find_speakers", _finder(calls, labels=(0,)))
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/speakers", {"count": 3})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done" and calls[-1]["count"] == 3
+    assert done["result"]["notice"] == "Found 1 speaker." and _state(dub["id"])["assignments"] == {"o1": "s3", "o2": "s3"}
+
+
+def test_finding_speakers_needs_the_tool(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/speakers", {})
+    assert status == 400 and "speaker finder" in body["error"]
+
+
+def test_cancelling_finding_speakers_keeps_them(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch, speakers=_finder([]))
+    before = _state(dub["id"])
+    release = threading.Event()
+
+    def slow(audio, spans, count=None):
+        release.wait(5)
+        raise RuntimeError("The model process stopped unexpectedly.")
+
+    monkeypatch.setattr(models, "find_speakers", slow)
+    monkeypatch.setattr(models, "cancel", lambda name, owner: release.set() or True)
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/speakers", {})
+    for _ in range(100):
+        if server_job(job["id"]).get("model"):
+            break
+        time.sleep(0.02)
+    api("POST", f"/api/jobs/{job['id']}/cancel", {})
+    assert _wait(api, job["id"])["state"] == "cancelled" and _state(dub["id"]) == before
+
+
+def test_speaker_routes_edit_and_restore(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch, speakers=_finder([]))
+    did = dub["id"]
+    before = _state(did)
+    status, body, _ = api("PATCH", f"/api/dubs/{did}/source/o2", {"speaker": "new"})
+    assert status == 200 and body["speaker"] == "s3" and body["tracks"][0]["clips"][1]["speaker"] == "s3"
+    assert api("PATCH", f"/api/dubs/{did}/speakers/s1", {"name": "Ali"})[1]["speakers"][0]["name"] == "Ali"
+    status, body, _ = api("POST", f"/api/dubs/{did}/speakers/s3/merge", {"into": "s1"})
+    assert status == 200 and [s["speaker"] for s in body["tracks"][0]["clips"]] == ["s1", "s1"]
+    status, body, _ = api("PUT", f"/api/dubs/{did}/speakers", before)
+    assert status == 200 and _state(did) == before
+    assert api("PATCH", f"/api/dubs/{did}/source/o1", {"speaker": None})[1]["tracks"][0]["clips"][0].get("speaker") is None
