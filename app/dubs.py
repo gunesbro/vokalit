@@ -301,15 +301,17 @@ def _new_speaker(data: dict, name: str) -> dict:
     return speaker
 
 
-def set_found_speakers(dub_id: str, labels: list) -> int:
-    """Who says each sentence, as the speaker finder grouped them (labels in sentence order, None: unknown). Replaces
-    the speakers, named "Speaker 1..n", and every sentence's speaker. Returns how many speakers there are."""
+def set_found_speakers(dub_id: str, labels: dict) -> int:
+    """Who says each sentence, as the speaker finder grouped them ({sentence id: label}, None: unknown); by id, so a
+    sentence deleted or moved while it searched cannot pass its speaker to a neighbour (one added meanwhile stays
+    unknown). Replaces the speakers, named "Speaker 1..n", and every sentence's speaker. Returns how many there are."""
     with _editing(dub_id) as data:
         data["speakers"] = []
         # Label k is "Speaker k+1" (the finder numbers them by first appearance).
         ids = {label: _new_speaker(data, f"Speaker {label + 1}")["id"]
-               for label in sorted({label for label in labels if label is not None})}
-        for source, label in zip(_source_clips(data), labels):
+               for label in sorted({label for label in labels.values() if label is not None})}
+        for source in _source_clips(data):
+            label = labels.get(source["id"])
             if label is None:
                 source.pop("speaker", None)
             else:
@@ -711,7 +713,8 @@ def _reference_pieces(data: dict, base: dict) -> list[dict]:
         distance = lambda s: max(0.0, s["start"] - base["end"], base["start"] - s["end"])  # noqa: E731
         kept = {s["id"] for s in _kept(data)}
         nearby = sorted((s for s in _source_clips(data) if s.get("speaker") == speaker and s["id"] != base["id"]
-                         and s["id"] not in kept and s["end"] - s["start"] >= MIN_REFERENCE_PIECE
+                         and s["id"] not in kept and s["text"].strip()  # its words go in the reference's text
+                         and s["end"] - s["start"] >= MIN_REFERENCE_PIECE
                          and distance(s) <= REFERENCE_WINDOW), key=distance)
         for source in nearby:
             if total >= REFERENCE_TARGET:
@@ -728,10 +731,19 @@ def cut_reference(dub_id: str, clip_id: str, language: str | None = None) -> tup
     data = load_dub(dub_id)
     base = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["voice_from"])
     sound = voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id)  # clean speech when separated
-    parts, rate = [], None
     pieces = _reference_pieces(data, base)
-    for n, source in enumerate(pieces):
-        rate, samples = _read_span(sound, source["start"] - REFERENCE_PADDING, source["end"] + REFERENCE_PADDING)
+    # Sentences whose padded spans touch are one stretch of speech: read once, so nothing is heard twice and no
+    # silence cuts a word the text runs straight through.
+    stretches = []
+    for source in pieces:
+        start, end = source["start"] - REFERENCE_PADDING, source["end"] + REFERENCE_PADDING
+        if stretches and start <= stretches[-1][1]:
+            stretches[-1][1] = max(stretches[-1][1], end)
+        else:
+            stretches.append([start, end])
+    parts, rate = [], None
+    for n, (start, end) in enumerate(stretches):
+        rate, samples = _read_span(sound, start, end)
         if n:
             parts.append(np.zeros(round(REFERENCE_GAP * rate), dtype=samples.dtype))
         parts.append(samples)

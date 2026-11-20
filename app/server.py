@@ -1127,7 +1127,8 @@ def _find_speakers(job, did, count=None):
     job["progress"] = "Finding the speakers\u2026"
     job["model"] = "speakers"  # what cancelling stops
     try:
-        labels = models.find_speakers(str(audio), [[s["start"], s["end"]] for s in dubs._source_clips(data)], count)
+        sources = dubs._source_clips(data)
+        labels = models.find_speakers(str(audio), [[s["start"], s["end"]] for s in sources], count)
     except Exception:
         if job.get("cancelled"):
             raise Cancelled() from None
@@ -1136,7 +1137,7 @@ def _find_speakers(job, did, count=None):
         job["model"] = None
     if job.get("cancelled"):
         raise Cancelled()
-    return dubs.set_found_speakers(did, labels)
+    return dubs.set_found_speakers(did, {s["id"]: label for s, label in zip(sources, labels)})
 
 
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/speakers")
@@ -1147,7 +1148,15 @@ def find_dub_speakers(req, did):
     if not models.is_installed("speakers"):
         raise ws.WorkspaceError("Install the speaker finder on the Models screen.")
     count = req["json"].get("count")
-    count = int(count) if count not in (None, "") else None
+    if count not in (None, ""):
+        try:
+            count = int(count)
+        except (TypeError, ValueError):
+            count = 0
+        if not 1 <= count <= 20:
+            raise ws.WorkspaceError("Choose between 1 and 20 speakers, or leave it empty to guess.")
+    else:
+        count = None
 
     def work(job):
         found = _find_speakers(job, did, count)

@@ -98,3 +98,9 @@ def test_the_worker_uses_the_installed_model_when_run_by_hand(monkeypatch):
     monkeypatch.delenv("HF_HOME", raising=False)
     worker = _load("worker")
     assert worker.cache().as_posix().endswith(".local/speakers/cache/ecapa")
+
+
+def test_a_broken_embedding_is_treated_as_no_sound(grouping):
+    rng = np.random.default_rng(7)
+    embeddings = [_voice(0, rng), np.full(8, np.nan), np.zeros(8), _voice(1, rng)]
+    assert grouping.group(embeddings, [2.0] * 4) == [0, None, None, 1]

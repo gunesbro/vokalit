@@ -8,11 +8,19 @@ THRESHOLD = 0.6  # cosine distance at which groups stop merging when the number 
 MAX_CLUSTERED = 2000  # clustering needs every pairwise distance: past this, a sample is clustered and the rest join
 
 
+def _unit(embedding):
+    """The embedding scaled to length 1; None when there is none, or it is broken (not finite, or zero)."""
+    if embedding is None:
+        return None
+    vector = np.asarray(embedding, dtype=np.float64)
+    norm = np.linalg.norm(vector)
+    return vector / norm if np.isfinite(norm) and norm > 1e-9 else None
+
+
 def group(embeddings, durations, count=None):
     """Speaker numbers (0, 1, ... by first appearance) for each span; None for a span without sound (no embedding).
     `count`: how many speakers there are, or None to decide by THRESHOLD."""
-    vectors = [None if e is None else np.asarray(e, dtype=np.float64) / max(np.linalg.norm(e), 1e-12)
-               for e in embeddings]
+    vectors = [_unit(e) for e in embeddings]
     long = [i for i, v in enumerate(vectors) if v is not None and durations[i] >= MIN_SPAN]
     if len(long) > MAX_CLUSTERED:  # the longest span of each of MAX_CLUSTERED stretches of the file
         long = [max(chunk, key=lambda i: durations[i]) for chunk in np.array_split(long, MAX_CLUSTERED)]

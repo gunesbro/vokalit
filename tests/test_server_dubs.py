@@ -783,3 +783,23 @@ def test_speaker_routes_edit_and_restore(api, tmp_path, monkeypatch):
     status, body, _ = api("PUT", f"/api/dubs/{did}/speakers", before)
     assert status == 200 and _state(did) == before
     assert api("PATCH", f"/api/dubs/{did}/source/o1", {"speaker": None})[1]["tracks"][0]["clips"][0].get("speaker") is None
+
+
+def test_speakers_found_while_a_sentence_is_deleted_stay_with_their_sentences(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch, speakers=_finder([]))
+
+    def deleting(audio, spans, count=None):
+        dubs.delete_source_clip(dub["id"], "o1")  # the user deletes sentence 1 while the search runs
+        return [0, 1]
+
+    monkeypatch.setattr(models, "find_speakers", deleting)
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/speakers", {})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert _state(dub["id"])["assignments"] == {"o2": "s4"}  # o2 was found as the second speaker (s3, s4)
+
+
+def test_a_speaker_count_must_be_sensible(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch, speakers=_finder([]))
+    for count in (-2, 0, 21, "abc"):
+        status, body, _ = api("POST", f"/api/dubs/{dub['id']}/speakers", {"count": count})
+        assert status == 400 and "between 1 and 20" in body["error"], (count, body)

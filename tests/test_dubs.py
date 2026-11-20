@@ -942,7 +942,7 @@ def _speakers(dub):
 
 def test_found_speakers_are_named_and_assigned(tmp_workspace, tmp_path):
     dub = _dub_with_audio(tmp_path, seconds=12)
-    assert dubs.set_found_speakers(dub, [1, 0]) == 2
+    assert dubs.set_found_speakers(dub, {"o1": 1, "o2": 0}) == 2
     speakers, assigned = _speakers(dub)
     assert speakers == [{"id": "s1", "name": "Speaker 1"}, {"id": "s2", "name": "Speaker 2"}]
     assert assigned == ["s2", "s1"]
@@ -950,14 +950,14 @@ def test_found_speakers_are_named_and_assigned(tmp_workspace, tmp_path):
 
 def test_finding_again_never_reuses_ids(tmp_workspace, tmp_path):
     dub = _dub_with_audio(tmp_path, seconds=12)
-    dubs.set_found_speakers(dub, [0, 1])
-    dubs.set_found_speakers(dub, [0, 0])
+    dubs.set_found_speakers(dub, {"o1": 0, "o2": 1})
+    dubs.set_found_speakers(dub, {"o1": 0, "o2": 0})
     assert _speakers(dub) == ([{"id": "s3", "name": "Speaker 1"}], ["s3", "s3"])
 
 
 def test_new_speaker_takes_the_lowest_free_name(tmp_workspace, tmp_path):
     dub = _dub_with_audio(tmp_path, seconds=12)
-    dubs.set_found_speakers(dub, [0, 1])
+    dubs.set_found_speakers(dub, {"o1": 0, "o2": 1})
     dubs.rename_speaker(dub, "s1", "  Ali ")
     new = dubs.set_speaker(dub, "o2", "new")
     speakers, assigned = _speakers(dub)
@@ -970,7 +970,7 @@ def test_new_speaker_takes_the_lowest_free_name(tmp_workspace, tmp_path):
 
 def test_merge_and_restore(tmp_workspace, tmp_path):
     dub = _dub_with_audio(tmp_path, seconds=12)
-    dubs.set_found_speakers(dub, [0, 1])
+    dubs.set_found_speakers(dub, {"o1": 0, "o2": 1})
     before = dubs.speakers_state(dubs.load_dub(dub))
     assert before == {"speakers": [{"id": "s1", "name": "Speaker 1"}, {"id": "s2", "name": "Speaker 2"}],
                       "assignments": {"o1": "s1", "o2": "s2"}}
@@ -985,7 +985,7 @@ def test_merge_and_restore(tmp_workspace, tmp_path):
 
 def test_restored_sentence_drops_a_merged_speaker(tmp_workspace, tmp_path):
     dub = _dub_with_audio(tmp_path, seconds=12)
-    dubs.set_found_speakers(dub, [0, 1])
+    dubs.set_found_speakers(dub, {"o1": 0, "o2": 1})
     data = dubs.load_dub(dub)
     source, clip = data["tracks"][0]["clips"][1], data["tracks"][1]["clips"][1]
     dubs.delete_source_clip(dub, "o2")
@@ -996,14 +996,14 @@ def test_restored_sentence_drops_a_merged_speaker(tmp_workspace, tmp_path):
 
 def test_transcribing_again_clears_speakers(tmp_workspace, tmp_path):
     dub = _dub_with_audio(tmp_path, seconds=12)
-    dubs.set_found_speakers(dub, [0, 1])
+    dubs.set_found_speakers(dub, {"o1": 0, "o2": 1})
     dubs.set_transcript(dub, "tr", SEGMENTS)
     assert _speakers(dub) == ([], [None, None])
 
 
 def test_rename_refuses_an_empty_name(tmp_workspace, tmp_path):
     dub = _dub_with_audio(tmp_path, seconds=12)
-    dubs.set_found_speakers(dub, [0, 1])
+    dubs.set_found_speakers(dub, {"o1": 0, "o2": 1})
     with pytest.raises(dubs.ws.WorkspaceError, match="needs a name"):
         dubs.rename_speaker(dub, "s1", "  ")
 
@@ -1013,7 +1013,7 @@ def _talk(tmp_path, seconds, sentences):
     dub = dubs.create_dub("Talk", b"x", "mp3")
     dubs.set_source_audio(dub, make_wav(tmp_path / "talk.wav", seconds).read_bytes())
     dubs.set_transcript(dub, "tr", [{"start": a, "end": b, "text": f"T{n}"} for n, (a, b, _) in enumerate(sentences, 1)])
-    dubs.set_found_speakers(dub, [label for _, _, label in sentences])
+    dubs.set_found_speakers(dub, {f"o{n}": label for n, (_, _, label) in enumerate(sentences, 1)})
     return dub
 
 
@@ -1073,3 +1073,24 @@ def test_reference_reads_the_voices_stem(tmp_workspace, tmp_path):
     dubs._write(dubs.audio_path(dub), rate, np.zeros(len(audio)))  # only the voices have sound
     path, _ = dubs.cut_reference(dub, "d2")
     assert abs(dubs._read(path)[1].astype(int)).max() > 0
+
+
+def test_found_speakers_go_by_sentence_not_by_place(tmp_workspace, tmp_path):
+    """Sentences deleted or reordered while the speakers were being found keep the right speaker."""
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    added = dubs.add_source_clip(dub, 10.0, 11.0)  # not in the search: stays unknown
+    dubs.set_found_speakers(dub, {"o2": 0, "gone": 1, "o1": 1})
+    assert _speakers(dub)[1] == ["s2", "s1", None] and added == "o3"
+
+
+def test_touching_sentences_are_read_once(tmp_workspace, tmp_path):
+    """Two sentences that touch are one stretch of speech: read once, no repeated padding, no gap between them."""
+    dub = _talk(tmp_path, 70, [(20.0, 23.0, 0), (23.0, 26.0, 0)])
+    seconds, text = _reference(dub, "d1")
+    assert text == "T1 T2" and abs(seconds - (6 + 2 * dubs.REFERENCE_PADDING)) < 0.01
+
+
+def test_reference_skips_sentences_without_text(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(16.0, 19.0, 0), (20.0, 22.0, 0)])
+    dubs.update_source_clip(dub, "o1", text="")
+    assert _reference(dub, "d2") == (_joined(2), "T2")
