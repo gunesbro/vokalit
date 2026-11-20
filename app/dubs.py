@@ -173,6 +173,7 @@ def _migrate(data: dict) -> dict:
     """Dubs from before several languages: the single dub track takes the dub's target language, model and settings.
     Dubs from before voice separation start with the original voices off once separated."""
     data.setdefault("voices_volume", 0.0)
+    data.setdefault("speakers", [])
     for track in data["tracks"][1:]:
         if "language" not in track:
             language = data.pop("target_language", "en")
@@ -274,6 +275,7 @@ def set_transcript(dub_id: str, language: str, segments: list[dict]) -> None:
         data["tracks"] = [{"id": "original", "kind": "source", "clips": sources}] + [
             _language_track(t["language"], t.get("model"), t.get("settings"), sources) for t in data["tracks"][1:]]
         data["last_sentence"] = len(sources)
+        data["speakers"] = []  # new sentences: who says them is found again
 
 
 def _next_sentence(data: dict) -> int:
@@ -284,6 +286,91 @@ def _next_sentence(data: dict) -> int:
         data["last_sentence"] = max(numbers, default=0)
     data["last_sentence"] += 1
     return data["last_sentence"]
+
+
+def _new_speaker(data: dict, name: str) -> dict:
+    """A speaker with an id never used before in this dub (s<n>), so an undo step never points at someone else."""
+    data["last_speaker"] = max([data.get("last_speaker", 0)] + [int(s["id"][1:]) for s in data["speakers"]]) + 1
+    speaker = {"id": f"s{data['last_speaker']}", "name": name}
+    data["speakers"].append(speaker)
+    return speaker
+
+
+def set_found_speakers(dub_id: str, labels: list) -> int:
+    """Who says each sentence, as the speaker finder grouped them (labels in sentence order, None: unknown). Replaces
+    the speakers, named "Speaker 1..n", and every sentence's speaker. Returns how many speakers there are."""
+    with _editing(dub_id) as data:
+        data["speakers"] = []
+        # Label k is "Speaker k+1" (the finder numbers them by first appearance).
+        ids = {label: _new_speaker(data, f"Speaker {label + 1}")["id"]
+               for label in sorted({label for label in labels if label is not None})}
+        for source, label in zip(_source_clips(data), labels):
+            if label is None:
+                source.pop("speaker", None)
+            else:
+                source["speaker"] = ids[label]
+        return len(ids)
+
+
+def set_speaker(dub_id: str, source_id: str, speaker: str | None) -> str | None:
+    """A sentence's speaker: an id, "new" (a new speaker, named the lowest free "Speaker n"), or None (unknown).
+    Returns the speaker's id."""
+    with _editing(dub_id) as data:
+        source = _find(_source_clips(data), source_id)
+        if speaker == "new":
+            names = {s["name"] for s in data["speakers"]}
+            speaker = _new_speaker(data, next(f"Speaker {n}" for n in range(1, len(names) + 2)
+                                              if f"Speaker {n}" not in names))["id"]
+        elif speaker is not None and not any(s["id"] == speaker for s in data["speakers"]):
+            raise ws.WorkspaceError("This speaker no longer exists.")
+        if speaker is None:
+            source.pop("speaker", None)
+        else:
+            source["speaker"] = speaker
+        return speaker
+
+
+def speakers_state(data: dict) -> dict:
+    """The speakers and who says each sentence: what undoing a merge or a new search puts back."""
+    return {"speakers": [dict(s) for s in data["speakers"]],
+            "assignments": {s["id"]: s["speaker"] for s in _source_clips(data) if s.get("speaker")}}
+
+
+def restore_speakers(dub_id: str, state: dict) -> None:
+    """Puts speakers_state back (sentences no longer there are skipped; speakers not in the list are dropped)."""
+    with _editing(dub_id) as data:
+        data["speakers"] = [{"id": str(s["id"]), "name": str(s["name"])} for s in state.get("speakers") or []]
+        data["last_speaker"] = max([data.get("last_speaker", 0)] + [int(s["id"][1:]) for s in data["speakers"]])
+        known = {s["id"] for s in data["speakers"]}
+        assignments = state.get("assignments") or {}
+        for source in _source_clips(data):
+            speaker = assignments.get(source["id"])
+            if speaker in known:
+                source["speaker"] = speaker
+            else:
+                source.pop("speaker", None)
+
+
+def rename_speaker(dub_id: str, speaker_id: str, name: str) -> None:
+    if not name.strip():
+        raise ws.WorkspaceError("A speaker needs a name.")
+    with _editing(dub_id) as data:
+        speaker = next((s for s in data["speakers"] if s["id"] == speaker_id), None)
+        if speaker is None:
+            raise ws.WorkspaceError("This speaker no longer exists.")
+        speaker["name"] = name.strip()
+
+
+def merge_speakers(dub_id: str, speaker_id: str, into_id: str) -> None:
+    """One person found as two: every sentence of `speaker_id` goes to `into_id`, and `speaker_id` is removed."""
+    with _editing(dub_id) as data:
+        ids = {s["id"] for s in data["speakers"]}
+        if speaker_id == into_id or speaker_id not in ids or into_id not in ids:
+            raise ws.WorkspaceError("Choose another speaker to merge into.")
+        for source in _source_clips(data):
+            if source.get("speaker") == speaker_id:
+                source["speaker"] = into_id
+        data["speakers"] = [s for s in data["speakers"] if s["id"] != speaker_id]
 
 
 def _check_times(data: dict, start: float, end: float) -> None:
@@ -404,6 +491,8 @@ def restore_sentence(dub_id: str, source: dict, clips: dict[str, dict], index: i
         if any(c["id"] == source["id"] for c in _source_clips(data)):
             raise ws.WorkspaceError("This sentence is already there.")
         place = max(0, min(int(index), len(_source_clips(data))))
+        if source.get("speaker") not in {s["id"] for s in data["speakers"]}:  # merged away meanwhile
+            source = {k: v for k, v in source.items() if k != "speaker"}
         _source_clips(data).insert(place, source)
         known = {c["id"] for c in _source_clips(data)}
         for track in data["tracks"][1:]:

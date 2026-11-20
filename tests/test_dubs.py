@@ -933,3 +933,76 @@ def test_delete_takes_goes_on_when_a_file_is_busy(tmp_workspace, tmp_path, monke
     assert dubs.delete_takes(dub, {"d1": None}) == 3
     assert dubs.load_dub(dub)["tracks"][1]["clips"][0]["takes"] == []
     assert not (dubs.dub_dir(dub) / files[1]).exists() and not (dubs.dub_dir(dub) / files[2]).exists()
+
+
+def _speakers(dub):
+    data = dubs.load_dub(dub)
+    return data["speakers"], [s.get("speaker") for s in data["tracks"][0]["clips"]]
+
+
+def test_found_speakers_are_named_and_assigned(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    assert dubs.set_found_speakers(dub, [1, 0]) == 2
+    speakers, assigned = _speakers(dub)
+    assert speakers == [{"id": "s1", "name": "Speaker 1"}, {"id": "s2", "name": "Speaker 2"}]
+    assert assigned == ["s2", "s1"]
+
+
+def test_finding_again_never_reuses_ids(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.set_found_speakers(dub, [0, 1])
+    dubs.set_found_speakers(dub, [0, 0])
+    assert _speakers(dub) == ([{"id": "s3", "name": "Speaker 1"}], ["s3", "s3"])
+
+
+def test_new_speaker_takes_the_lowest_free_name(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.set_found_speakers(dub, [0, 1])
+    dubs.rename_speaker(dub, "s1", "  Ali ")
+    new = dubs.set_speaker(dub, "o2", "new")
+    speakers, assigned = _speakers(dub)
+    assert new == "s3" and speakers[-1] == {"id": "s3", "name": "Speaker 1"} and speakers[0]["name"] == "Ali"
+    assert assigned == ["s1", "s3"]
+    assert dubs.set_speaker(dub, "o1", None) is None and _speakers(dub)[1] == [None, "s3"]
+    with pytest.raises(dubs.ws.WorkspaceError, match="no longer exists"):
+        dubs.set_speaker(dub, "o1", "s9")
+
+
+def test_merge_and_restore(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.set_found_speakers(dub, [0, 1])
+    before = dubs.speakers_state(dubs.load_dub(dub))
+    assert before == {"speakers": [{"id": "s1", "name": "Speaker 1"}, {"id": "s2", "name": "Speaker 2"}],
+                      "assignments": {"o1": "s1", "o2": "s2"}}
+    dubs.merge_speakers(dub, "s2", "s1")
+    assert _speakers(dub) == ([{"id": "s1", "name": "Speaker 1"}], ["s1", "s1"])
+    with pytest.raises(dubs.ws.WorkspaceError):
+        dubs.merge_speakers(dub, "s1", "s1")
+    dubs.restore_speakers(dub, before)
+    assert dubs.speakers_state(dubs.load_dub(dub)) == before
+    assert dubs.set_speaker(dub, "o1", "new") == "s3"  # the counter stays past restored ids
+
+
+def test_restored_sentence_drops_a_merged_speaker(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.set_found_speakers(dub, [0, 1])
+    data = dubs.load_dub(dub)
+    source, clip = data["tracks"][0]["clips"][1], data["tracks"][1]["clips"][1]
+    dubs.delete_source_clip(dub, "o2")
+    dubs.merge_speakers(dub, "s2", "s1")
+    dubs.restore_sentence(dub, source, {"en": clip}, 1)
+    assert "speaker" not in dubs.load_dub(dub)["tracks"][0]["clips"][1]
+
+
+def test_transcribing_again_clears_speakers(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.set_found_speakers(dub, [0, 1])
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    assert _speakers(dub) == ([], [None, None])
+
+
+def test_rename_refuses_an_empty_name(tmp_workspace, tmp_path):
+    dub = _dub_with_audio(tmp_path, seconds=12)
+    dubs.set_found_speakers(dub, [0, 1])
+    with pytest.raises(dubs.ws.WorkspaceError, match="needs a name"):
+        dubs.rename_speaker(dub, "s1", "  ")
