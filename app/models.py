@@ -1,5 +1,6 @@
 """Model install/remove and worker processes. See SPEC.md §5 and §6."""
 import contextlib
+import glob
 import json
 import os
 import queue
@@ -254,6 +255,18 @@ TOOLS = {
         # PyTorch (the shared CUDA build) runs it on the GPU when there is one, else on the CPU.
         "pip_steps": [("PyTorch", TORCH_CUDA), ("SpeechBrain", ["speechbrain==1.1.0", "soundfile"])],
     },
+    "ffmpeg": {
+        "title": "Video export (FFmpeg)",
+        "summary": "Exports a dub as a video: the original video as it is, with the dub as its sound (one language, or "
+                   "every language as its own audio track).",
+        "url": "https://github.com/imageio/imageio-ffmpeg",
+        "disk_gb": 0.1,
+        "vram_gb": 0,  # copies the video and encodes the sound on the processor
+        "downloads": "PyPI (FFmpeg's program, in the imageio-ffmpeg package)",
+        "license": "The imageio-ffmpeg wrapper is BSD-2-Clause; the FFmpeg program it brings is a GPL build. It is "
+                   "downloaded to this computer by the install, never shipped with Vokalit.",
+        "pip_steps": [("FFmpeg", ["imageio-ffmpeg==0.6.0"])],
+    },
 }
 
 
@@ -302,6 +315,15 @@ def _worker_script(name):
 
 def _marker(name):
     return os.path.join(model_dir(name), "installed")
+
+
+def ffmpeg_path():
+    """The FFmpeg program the video export tool installed (inside its environment), or None."""
+    if not is_installed("ffmpeg"):
+        return None
+    found = sorted(glob.glob(os.path.join(model_dir("ffmpeg"), "venv", "**", "imageio_ffmpeg", "binaries", "ffmpeg*"),
+                             recursive=True))
+    return next((path for path in found if os.path.isfile(path)), None)
 
 
 def is_installed(name):
