@@ -127,7 +127,8 @@ def _component_view(name):
         "license": info["license"], "disk_gb": info["disk_gb"], "installed": installed,
         "frees_gb": _frees_gb(name) if installed else None}
     return {**view, "kind": "model" if name in models.MODELS else "tool", "recommended": info.get("recommended", False),
-            "vram_gb": info.get("vram_gb"), "needs_gb": models.needs_gb(name), "runtime": models.runtime(name)}
+            "vram_gb": info.get("vram_gb"), "needs_gb": models.needs_gb(name), "runtime": models.runtime(name),
+            "downloads": info.get("downloads", "PyPI and Hugging Face")}
 
 
 def _check_component(name):

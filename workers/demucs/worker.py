@@ -14,6 +14,7 @@ import socket
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 MODEL = "htdemucs"
 
@@ -28,6 +29,12 @@ def block_network():
     socket.socket.connect_ex = blocked
     socket.socket.sendto = blocked
     socket.getaddrinfo = blocked
+
+
+def use_installed_weights():
+    """The weights the install downloaded (.local/demucs/cache), also when this is run by hand (--selftest); the app
+    sets TORCH_HOME itself."""
+    os.environ.setdefault("TORCH_HOME", str(Path(__file__).resolve().parents[2] / ".local" / "demucs" / "cache"))
 
 
 def load():
@@ -87,6 +94,7 @@ def selftest():
 
 
 def main():
+    use_installed_weights()
     if "--download" in sys.argv:
         load()
         return
@@ -121,6 +129,11 @@ def main():
                 torch.cuda.empty_cache()
                 send(ok=False, error=str(error), oom=True)
                 continue
+            # A CUDA error leaves the GPU context unusable for the rest of this process. Report it and exit; the app
+            # starts a fresh worker (as the voice model workers do).
+            if "CUDA" in str(error) or "device-side assert" in str(error):
+                send(ok=False, error=str(error), restart=True)
+                sys.exit(1)
             send(ok=False, error=str(error))
 
 

@@ -162,7 +162,7 @@ export async function renderModels(root) {
       el("div", {},
         el("strong", {}, `Install ${model.title}?`),
         el("ul", {},
-          el("li", {}, model.kind === "tool"
+          el("li", {}, model.kind === "tool" && !model.vram_gb
             ? `Disk space: about ${model.disk_gb} GB (the program and its model; runs on the processor)`
             : `Disk space: about ${model.disk_gb} GB (PyTorch with CUDA, libraries and the model; PyTorch files are shared with other installed models)`),
           model.vram_gb ? el("li", {}, `GPU memory: about ${model.vram_gb} GB while it is loaded. Vokalit unloads it `
@@ -176,7 +176,7 @@ export async function renderModels(root) {
           el("li", {}, model.license.startsWith("CC-BY-NC")
             ? "License: CC-BY-NC \u2014 the model's weights may not be used commercially."
             : `License: ${model.license}`),
-          el("li", {}, "Downloads from PyPI and Hugging Face. Nothing else leaves your computer."))),
+          el("li", {}, `Downloads from ${model.downloads}. Nothing else leaves your computer.`))),
       el("div", { class: "spacer" }),
       el("button", { class: "btn", onclick: () => refresh() }, "Cancel"),
       el("button", { class: "btn btn-primary", disabled: tooFull, title: tooFull ? "Not enough free disk space" : null,

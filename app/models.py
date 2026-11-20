@@ -232,7 +232,9 @@ TOOLS = {
         "summary": "Separates speech from music and effects for Dub: voices are copied from clean speech, and the "
                    "music stays at full level under the dub.",
         "url": "https://github.com/facebookresearch/demucs",
-        "disk_gb": 0.6,  # estimate, besides PyTorch (shared with the voice models)
+        "disk_gb": 5.6,  # estimate: PyTorch (5.0, shared with the voice models) and the model
+        "vram_gb": 2.0,  # estimate: separated in segments, so a long file does not need more
+        "downloads": "PyPI, download.pytorch.org (PyTorch) and Meta's download server (the model)",
         "license": "Code MIT. The pretrained htdemucs weights have no clear license (an old note calls them research "
                    "use); they are downloaded to this computer by the install, never shipped with Vokalit.",
         # PyTorch (the shared CUDA build) runs it on the GPU when there is one, else on the CPU.
