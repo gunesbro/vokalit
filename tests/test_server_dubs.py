@@ -154,7 +154,8 @@ def test_dub_generate_gives_omnivoice_its_target(api, tmp_path, monkeypatch):
     api("PATCH", f"/api/dubs/{dub['id']}/clips/d2", {"translation": "How are you?"})
     _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d2"]})
     assert _wait(api, job["id"])["state"] == "done"
-    assert timings == [{"target": 5.0, "min_speed": 0.85, "max_speed": 1.25}]  # spoken 4.0-9.0 s
+    # Spoken 4.0-9.0 s; may run on until the end of the file (12.0 s) less FIT_GAP.
+    assert timings == [{"target": 5.0, "room": 7.95, "min_speed": 0.85, "max_speed": 1.25}]
     take = dubs.load_dub(dub["id"])["tracks"][1]["clips"][1]["takes"][0]
     assert take["pace"] == 1.1  # Fit counts it
 
@@ -395,6 +396,17 @@ def test_restore_route(api, tmp_path, monkeypatch):
     status, dub, _ = api("POST", f"/api/dubs/{dub['id']}/source/restore",
                          {"source": source, "clips": {"en": clip}, "index": 1})
     assert status == 200 and [c["id"] for c in dub["tracks"][1]["clips"]] == ["d1", "d2"]
+
+
+def test_join_and_split_routes(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    first = {"source": dub["tracks"][0]["clips"][0], "clips": {t["language"]: t["clips"][0] for t in dub["tracks"][1:]}}
+    second = {"source": dub["tracks"][0]["clips"][1], "index": 1, "voices": {},
+              "clips": {t["language"]: t["clips"][1] for t in dub["tracks"][1:]}}
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/source/o1/join")
+    assert status == 200 and body["joined"] == "o2" and [s["id"] for s in body["tracks"][0]["clips"]] == ["o1"]
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/source/split", {"first": first, "second": second})
+    assert status == 200 and body["tracks"] == dub["tracks"]
 
 
 def test_a_generating_language_cannot_be_removed(api, tmp_path, monkeypatch):

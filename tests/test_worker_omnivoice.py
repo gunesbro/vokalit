@@ -112,6 +112,19 @@ def test_timed_duration_clamps_to_natural_pace():
     assert worker.timed_duration({**t, "target": 1.0}, 2.0, speed=2.0) == 1.0  # the speed setting sets the pace
 
 
+def test_timed_duration_keeps_its_natural_pace_within_the_room():
+    import importlib.util
+    path = Path(__file__).resolve().parent.parent / "workers" / "omnivoice" / "worker.py"
+    spec = importlib.util.spec_from_file_location("omnivoice_worker", path)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    t = {"min_speed": 0.85, "max_speed": 1.25}
+    assert worker.timed_duration({**t, "target": 1.0, "room": 3.0}, 2.0) == 2.0  # ends after the speaker: natural
+    assert worker.timed_duration({**t, "target": 1.0, "room": 1.8}, 2.0) == 1.8  # until the next sentence
+    assert worker.timed_duration({**t, "target": 1.0, "room": 1.0}, 2.0) == 1.6  # at most 1.25x faster
+    assert worker.timed_duration({**t, "target": 2.2, "room": 3.0}, 2.0) == 2.2  # slowed to end with the speaker
+
+
 def _ref_with_silence(path):
     """1 s of silence, then 2 s of tone: OmniVoice's prompt keeps the 2 s."""
     import wave

@@ -1337,6 +1337,26 @@ def delete_dub_source(req, did, oid):
     return _dub_view(did)
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)/join")
+def join_dub_sentence(req, did, oid):
+    """Joins a sentence with the next one; the view says which went ("joined")."""
+    _dub_or_404(did)
+    _dub_free(did)
+    joined = dubs.join_with_next(did, oid)
+    return {**_dub_view(did), "joined": joined}
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/split")
+def split_dub_sentence(req, did):
+    """Undo of a join: {first: {source, clips}, second: as /source/restore takes it}."""
+    _dub_or_404(did)
+    body = req["json"]
+    first = body["first"]
+    dubs.split_joined(did, dict(first["source"]), {str(k): dict(v) for k, v in (first.get("clips") or {}).items()},
+                      dict(body["second"]))
+    return _dub_view(did)
+
+
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/restore")
 def restore_dub_sentence(req, did):
     """Undo of a deleted sentence: puts it back as it was."""

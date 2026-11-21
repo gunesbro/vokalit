@@ -36,13 +36,15 @@ def _out_of_memory(error):
 
 
 def timed_duration(timing, natural, speed=1.0):
-    """The length to generate a dub take to: the target (where its speaker stops), but no more than max_speed faster
-    or min_speed slower than its natural pace (`natural` seconds, divided by the speed setting). No estimate: None,
-    its natural length."""
+    """The length to generate a dub take to: its natural pace (`natural` seconds, divided by the speed setting) when
+    that ends between the target (where its speaker stops) and the room (before the next sentence; the target when
+    not given), else the nearer of the two; but no more than max_speed faster or min_speed slower than natural. No
+    estimate: None, its natural length."""
     pace = natural / speed
     if pace <= 0:
         return None
-    return round(min(max(timing["target"], pace / timing["max_speed"]), pace / timing["min_speed"]), 2)
+    wanted = min(max(pace, timing["target"]), max(timing.get("room", timing["target"]), timing["target"]))
+    return round(min(max(wanted, pace / timing["max_speed"]), pace / timing["min_speed"]), 2)
 
 
 def guidance_weights(accent):

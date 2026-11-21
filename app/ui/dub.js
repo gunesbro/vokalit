@@ -623,6 +623,18 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
       () => api("POST", path("/source/restore"), payload));
   }
 
+  // One sentence of this one and the next (Whisper splits a thought at a pause), in every language: generated as one
+  // take, it flows as one. Undo splits them again as they were.
+  function joinWithNext(clip) {
+    const source = sourceOf(clip);
+    const next = sources()[sources().indexOf(source) + 1];
+    const number = clips().indexOf(clip) + 1;
+    const first = sentencePayload(dub, source.id);
+    const second = sentencePayload(dub, next.id);
+    act(`joining sentences ${number} and ${number + 1}`, () => api("POST", path(`/source/${source.id}/join`)),
+      () => api("POST", path("/source/split"), { first, second }));
+  }
+
   // --- Jobs ------------------------------------------------------------------------------------
 
   async function follow(started, kind, ids = [], language = track().language) {
@@ -1086,6 +1098,11 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
       icon(ICONS.trash))));
     const remove = el("button", { class: "btn btn-ghost btn-small danger", title: "Delete this sentence (undo brings it back)",
       onclick: () => deleteSentence(clip) }, "Delete sentence");
+    const after = sources()[sources().indexOf(source) + 1];
+    const join = el("button", { class: "btn btn-ghost btn-small", disabled: !after || Boolean(after?.keep_original)
+      || Boolean(job), title: !after ? "This is the last sentence" : after.keep_original ? "The next sentence keeps the original"
+      : "One sentence of this and the next, in every language: generated as one take it flows as one, like a single "
+        + "thought (undo splits them again)", onclick: () => joinWithNext(clip) }, "Join with next");
     const kept = isKept(clip);
     const keep = el("label", { class: "row small dub-keep", title: "For music or singing: the original plays here at full "
       + "volume in every language, and nothing is translated or generated (K)" },
@@ -1128,7 +1145,7 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
           : el("button", { class: "btn btn-primary btn-small", disabled: Boolean(job) || !clip.translation.trim(),
             title: !clip.translation.trim() ? "Write the translation first" : !model() ? "Choose a voice model first" : "Ctrl+Enter",
             onclick: () => generate([clip.id]) }, clip.takes.length ? "Generate again" : "Generate"),
-        el("div", { class: "spacer" }), remove));
+        el("div", { class: "spacer" }), join, remove));
   }
 
   function drawLanes() {
