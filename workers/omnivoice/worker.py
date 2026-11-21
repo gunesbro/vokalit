@@ -69,8 +69,6 @@ def accent_guidance(model, weights):
     if weights is None:
         yield
         return
-    import torch
-
     prepare, forward, predict = model._prepare_inference_inputs, model.forward, model._predict_tokens_with_scoring
     held = {}
 
@@ -80,9 +78,13 @@ def accent_guidance(model, weights):
         if ref_audio_tokens is not None:  # the same text, language and style, without the reference
             alone = prepare(text, num_target_tokens, None, None, lang, instruct, denoise)
             held["prefix"] = alone["input_ids"][..., :-num_target_tokens]
+        else:  # never another text's prefix
+            held.pop("prefix", None)
         return inputs
 
     def forward_also_text(*args, **kwargs):
+        import torch
+
         output = forward(*args, **kwargs)
         held.pop("text", None)
         ids, mask = kwargs.get("input_ids"), kwargs.get("audio_mask")
@@ -105,17 +107,26 @@ def accent_guidance(model, weights):
             return predict(c_logits, u_logits, gen_config)
         mixed = dual_guidance(F.log_softmax(c_logits, dim=-1), F.log_softmax(u_logits, dim=-1),
                               F.log_softmax(text, dim=-1), *weights)
+        held["mixed"] = held.get("mixed", 0) + 1
         return predict(mixed, mixed, gen_config)  # equal inputs: its own guidance adds nothing, the rest is the same
     predict_mixed.weights = weights
 
+    names = ("_prepare_inference_inputs", "forward", "_predict_tokens_with_scoring")
+    before = {name: model.__dict__[name] for name in names if name in model.__dict__}  # e.g. a loader's own hooks
     model._prepare_inference_inputs = prepare_also_text
     model.forward = forward_also_text
     model._predict_tokens_with_scoring = predict_mixed
     try:
         yield
-    finally:  # the class's own methods again
-        for name in ("_prepare_inference_inputs", "forward", "_predict_tokens_with_scoring"):
-            model.__dict__.pop(name, None)
+    finally:  # exactly what the model had
+        for name in names:
+            if name in before:
+                setattr(model, name, before[name])
+            else:
+                model.__dict__.pop(name, None)
+    if not held.get("mixed"):  # OmniVoice decoded some other way: say so rather than ignore the setting
+        raise RuntimeError("Native accent could not be applied: this OmniVoice version works differently. "
+                           "Set Native accent to 0.")
 
 
 def _natural_seconds(model, text, prompt):

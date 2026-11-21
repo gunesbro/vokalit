@@ -183,15 +183,39 @@ def test_dual_guidance_mixes_three_predictions():
 
 
 def test_native_accent_guides_only_that_call(installed, tmp_path):
+    """The stub never runs OmniVoice's decoding, so the guidance cannot be applied: the worker says so rather than
+    hand back a take that silently ignored the setting. The next call is OmniVoice's own again."""
     from conftest import make_wav
     _, local = installed
     ref = make_wav(tmp_path / "ref.wav", 2)
     out = str(Path(local) / "accent.wav")
-    models.generate("omnivoice", "hello", str(ref), out, seed=1, settings={"accent": 1.0}, language="tr", ref_text="Hi")
-    assert "guidance=2.0,5.0" in _read(out)
+    with pytest.raises(RuntimeError, match="Native accent could not be applied"):
+        models.generate("omnivoice", "hello", str(ref), out, seed=1, settings={"accent": 1.0}, language="tr",
+                        ref_text="Hi")
     again = str(Path(local) / "plain.wav")
     models.generate("omnivoice", "hello", str(ref), again, seed=1, settings={}, language="tr", ref_text="Hi")
     assert "guidance=" not in _read(again)  # put back after the call
+
+
+def test_native_accent_restores_what_the_model_had():
+    worker = _worker()
+
+    class Model:
+        def _prepare_inference_inputs(self, *a):
+            return "class"
+
+        def forward(self, *a, **k):
+            return "class"
+
+        def _predict_tokens_with_scoring(self, *a):
+            return "class"
+
+    model = Model()
+    own = model.forward = lambda *a, **k: "its own"  # e.g. a loader's hook on the instance
+    with pytest.raises(RuntimeError):
+        with worker.accent_guidance(model, (2.0, 5.0)):
+            pass  # nothing decoded: the guidance was never applied
+    assert model.forward is own and "_predict_tokens_with_scoring" not in model.__dict__
 
 
 def test_native_accent_is_an_omnivoice_setting():
