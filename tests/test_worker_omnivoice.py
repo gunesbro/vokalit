@@ -189,7 +189,7 @@ def test_native_accent_guides_only_that_call(installed, tmp_path):
     _, local = installed
     ref = make_wav(tmp_path / "ref.wav", 2)
     out = str(Path(local) / "accent.wav")
-    with pytest.raises(RuntimeError, match="Native accent could not be applied"):
+    with pytest.raises(RuntimeError, match="could not be applied"):
         models.generate("omnivoice", "hello", str(ref), out, seed=1, settings={"accent": 1.0}, language="tr",
                         ref_text="Hi")
     again = str(Path(local) / "plain.wav")
@@ -258,3 +258,11 @@ def test_accent_removal_is_an_omnivoice_setting():
     spec = {s["key"]: s for s in models.MODELS["omnivoice"]["settings"]}["accent_removal"]
     assert (spec["default"], spec["min"], spec["max"], spec["step"]) == (0, 0, 8, 0.5)
     assert models.MODELS["omnivoice"]["accent_removal"] is True
+
+
+def test_branch_rows_mark_a_sample_s_tokens_as_audio():
+    """A proxy branch's prefix holds its sample's audio tokens: they are audio to the model, like the line's own
+    sample, not text (the text-alone branch has none)."""
+    worker = _worker()
+    # prefixes of 10 (text alone), 30 (text, then a sample from 12), 25 (a sample from 9); 5 target tokens
+    assert worker.branch_layout([10, 30, 25], [10, 12, 9], 5) == [(15, 10), (35, 12), (30, 9)]

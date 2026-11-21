@@ -66,8 +66,8 @@ English script. Unmute the player to listen.
   setting: it leans on the text more than on the sample (more native, a little less like the speaker, about 1.5x
   slower). That costs some of the moment's mood; **Accent removal (experimental)** keeps the speaker's sample as it is
   and takes out only the accent, estimated from four short "accent voices" the dub makes once (one female and one male
-  voice, each speaking the original's language and the dub's); about twice as slow. A part Whisper missed can be added: drag over it
-  on the Original lane of the timeline and press *Add sentence*; Whisper writes what it hears there (*Listen* does it
+  voice, each speaking the original's language and the dub's); two to three times as slow. A part Whisper missed can
+  be added: drag over it on the Original lane of the timeline and press *Add sentence*; Whisper writes what it hears there (*Listen* does it
   again for any sentence), and you correct it. Start and end times can be typed in. Takes can be deleted one by one,
   or all of a tab's sentences with *Delete takes*. Every change can be undone
   (Ctrl+Z). The mix is exported as one audio file, or, with **Video export** (FFmpeg, on the Models screen), as

@@ -1122,6 +1122,10 @@ def transcribe_dub(req, did):
 ACCENT_SEEDS = {"female": 101, "male": 202}  # the accent voices can be made again the same
 
 
+class AccentVoicesFailed(ws.WorkspaceError):
+    """The accent voices could not be made: the whole Generate job stops, with that one reason."""
+
+
 def _accent_voices(job, did, name, language):
     """The dub's accent voices for `language` (Accent removal), made once: for each gender, a voice with no sample
     speaking the translations (native), and the same voice cloned speaking the original's language."""
@@ -1133,16 +1137,20 @@ def _accent_voices(job, did, name, language):
     if not source_language:
         raise ws.WorkspaceError("Accent removal needs the original's language (transcribe first).")
     source_text, target_text = dubs.accent_voice_texts(did, language)
+    # What is actually spoken (sound tags the model does not take are dropped): the samples' texts must match them.
+    source_text, target_text = models.text_for(name, source_text), models.text_for(name, target_text)
     job["progress"] = "Preparing accent voices\u2026"
     voices = []
     for gender, seed in ACCENT_SEEDS.items():
+        if job.get("cancelled"):
+            raise Cancelled()
         target = dubs.accent_voice_path(did, language, gender, "tgt")
         source = dubs.accent_voice_path(did, language, gender, "src")
         job["model"] = name  # what cancelling stops
         try:
-            models.design(name, models.text_for(name, target_text), str(target), seed, language, gender)
-            models.generate(name, models.text_for(name, source_text), str(target), str(source), seed,
-                            models.default_settings(name), source_language, ref_text=target_text)
+            models.design(name, target_text, str(target), seed, language, gender)
+            models.generate(name, source_text, str(target), str(source), seed, models.default_settings(name),
+                            source_language, ref_text=target_text)
         except Exception as error:
             if job.get("cancelled"):
                 raise Cancelled() from None
@@ -1455,19 +1463,21 @@ def generate_dub(req, did):
                 timed = {"timing": dubs.generation_timing(did, cid, language)} \
                     if models.MODELS[name].get("timed") else {}
                 if models.MODELS[name].get("accent_removal") and settings.get("accent_removal", 0) > 0:
-                    if "error" in accent:  # tried once in this job: not again for every sentence
-                        raise ws.WorkspaceError(accent["error"])
                     if "voices" not in accent:
                         try:
                             accent["voices"] = _accent_voices(job, did, name, language)
-                        except ws.WorkspaceError as error:
-                            accent["error"] = str(error)
-                            raise
+                        except ws.WorkspaceError as error:  # once for the whole job, not once per sentence
+                            out.unlink(missing_ok=True)
+                            raise AccentVoicesFailed(str(error)) from None
+                        if job.get("cancelled"):
+                            raise Cancelled()
                         job["progress"] = f"Sentence {i} of {len(ids)}"
                         job["model"] = name
                     timed["proxies"] = accent["voices"]
                 seconds = models.generate(name, text, str(ref), str(out), take_seed, settings, language,
                                           ref_text=ref_text, **timed)
+            except AccentVoicesFailed:
+                raise
             except Exception as error:
                 if job.get("cancelled"):
                     out.unlink(missing_ok=True)  # a take cut off halfway

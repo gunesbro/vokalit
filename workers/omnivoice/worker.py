@@ -80,6 +80,13 @@ def aag_mix(c, u, t, sources, targets, a_s, a_t, beta):
     return mixed
 
 
+def branch_layout(prefix_sizes, audio_starts, length):
+    """Where each extra branch row ends and where its audio starts: a row is its prefix then the `length` target
+    tokens; a prefix with a sample has audio from the sample on (its tokens are audio, not text), one without from
+    the target on."""
+    return [(size + length, start) for size, start in zip(prefix_sizes, audio_starts)]
+
+
 @contextlib.contextmanager
 def accent_guidance(model, plan, proxies=()):
     """For one generate call, OmniVoice's guidance as `plan` (guidance_plan) asks: its input preparation also builds
@@ -101,13 +108,18 @@ def accent_guidance(model, plan, proxies=()):
         if ref_audio_tokens is None:  # never another text's branches
             held.pop("prefixes", None)
             return inputs
-        cut = lambda tokens, ref: prepare(text, num_target_tokens, getattr(ref, "ref_text", None),  # noqa: E731
-                                          getattr(ref, "ref_audio_tokens", None), lang, instruct,
-                                          denoise)["input_ids"][..., :-num_target_tokens]
-        prefixes = [cut(None, None)]  # the same text, language and style, without a sample
+        def cut(ref):  # the prefix (style, text, the sample's tokens if any) and where its audio starts
+            branch = prepare(text, num_target_tokens, getattr(ref, "ref_text", None),
+                             getattr(ref, "ref_audio_tokens", None), lang, instruct, denoise)
+            ids, mask = branch["input_ids"][..., :-num_target_tokens], branch["audio_mask"][0, :-num_target_tokens]
+            audio = mask.nonzero()
+            return ids, int(audio[0]) if len(audio) else ids.size(2)
+
+        branches = [cut(None)]  # the same text, language and style, without a sample
         for source, target in proxies:
-            prefixes += [cut(None, source), cut(None, target)]
-        held["prefixes"] = prefixes
+            branches += [cut(source), cut(target)]
+        held["prefixes"] = [ids for ids, _ in branches]
+        held["audio_starts"] = [start for _, start in branches]
         held["length"] = num_target_tokens
         return inputs
 
@@ -120,14 +132,15 @@ def accent_guidance(model, plan, proxies=()):
         if "prefixes" in held and ids is not None and ids.size(0) == 2:
             length, prefixes = held["length"], held["prefixes"]
             target = ids[1:2, :, :length]  # the unconditional row holds just the target tokens so far
-            sizes = [p.size(2) + length for p in prefixes]
+            layout = branch_layout([p.size(2) for p in prefixes], held["audio_starts"], length)
+            sizes = [end for end, _ in layout]
             size, rows = max(sizes), len(prefixes)
             batch = torch.full((rows, ids.size(1), size), model.config.audio_mask_id, dtype=ids.dtype, device=ids.device)
             audio = torch.zeros(rows, size, dtype=torch.bool, device=ids.device)
             attention = torch.zeros(rows, 1, size, size, dtype=torch.bool, device=ids.device)
-            for k, (prefix, end) in enumerate(zip(prefixes, sizes)):  # left-aligned, padded as OmniVoice pads
+            for k, (prefix, (end, audio_from)) in enumerate(zip(prefixes, layout)):  # left-aligned, padded as OmniVoice
                 batch[k, :, :end] = torch.cat([prefix, target], dim=2)[0]
-                audio[k, end - length:end] = True
+                audio[k, audio_from:end] = True  # a proxy's sample and the target are audio, as OmniVoice marks them
                 attention[k, :, :end, :end] = True
                 if end < size:
                     pad = torch.arange(end, size, device=ids.device)
@@ -164,8 +177,8 @@ def accent_guidance(model, plan, proxies=()):
             else:
                 model.__dict__.pop(name, None)
     if not held.get("mixed"):  # OmniVoice decoded some other way: say so rather than ignore the setting
-        raise RuntimeError("Native accent could not be applied: this OmniVoice version works differently. "
-                           "Set Native accent and Accent removal to 0.")
+        raise RuntimeError("Native accent or Accent removal could not be applied: this OmniVoice version works "
+                           "differently. Set both to 0.")
 
 
 _prompts = {}  # (path, modified, text) -> voice clone prompt: the accent voices are the same for every line of a dub

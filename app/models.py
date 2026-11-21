@@ -145,7 +145,7 @@ MODELS = {
              "default": 0.0,
              "help": "Dub only: takes out the accent the original's language puts in the voice, keeping the "
                      "speaker's sample (and its mood). 5 is the paper's setting; higher is more native, less like the "
-                     "speaker. About twice as slow. 0 is off."},
+                     "speaker. About two to three times as slow. 0 is off."},
         ],
         "pip_steps": [
             ("PyTorch with CUDA", TORCH_CUDA),  # the same files as Chatterbox's: shared, not downloaded again

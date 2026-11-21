@@ -1126,3 +1126,21 @@ def test_accent_voices_are_kept_until_transcribing_again(tmp_workspace, tmp_path
     assert dubs.accent_voices(dub, "en") is None  # a missing file: made again
     dubs.set_transcript(dub, "tr", SEGMENTS)
     assert not (dubs.dub_dir(dub) / "accent").exists()
+
+
+def test_accent_voice_texts_skip_a_sentence_too_long_to_fit(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(1.0, 2.0, None), (3.0, 4.0, None)])
+    dubs.update_source_clip(dub, "o1", text="x" * 250)
+    dubs.update_dub_clip(dub, "d1", translation="y" * 250)
+    dubs.update_dub_clip(dub, "d2", translation="Fine.")
+    assert dubs.accent_voice_texts(dub, "en") == ("T2", "Fine.")
+
+
+def test_accent_voice_texts_count_cjk_as_longer(tmp_workspace, tmp_path):
+    """A Japanese or Chinese character takes several times as long to say: the sample stays a few seconds long."""
+    dub = _talk(tmp_path, 70, [(n, n + 0.5, None) for n in range(1, 30)])
+    for n in range(1, 30):
+        dubs.update_source_clip(dub, f"o{n}", text="こんにちは")  # 5 kana
+        dubs.update_dub_clip(dub, f"d{n}", translation="Hello there.")
+    source, _ = dubs.accent_voice_texts(dub, "en")
+    assert 20 <= len(source.replace(" ", "")) <= 40  # 4-8 sentences, not 30+

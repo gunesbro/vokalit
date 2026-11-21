@@ -288,7 +288,13 @@ def set_transcript(dub_id: str, language: str, segments: list[dict]) -> None:
     shutil.rmtree(dub_dir(dub_id) / "accent", ignore_errors=True)  # their texts were the old sentences'
 
 
-ACCENT_TEXT = (60, 200)  # characters of an accent voice's text: at least, at most
+ACCENT_TEXT = (60, 160)  # how long an accent voice's text is (about 4-10 s): at least, at most (see _spoken_length)
+
+
+def _spoken_length(text: str) -> int:
+    """About how long a text takes to say, in Latin characters: a Chinese, Japanese or Korean character counts as 3."""
+    return sum(3 if "\u2e80" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af" or "\uf900" <= ch <= "\ufaff" else 1
+               for ch in text)
 
 
 def accent_voice_texts(dub_id: str, language: str) -> tuple[str, str]:
@@ -300,9 +306,10 @@ def accent_voice_texts(dub_id: str, language: str) -> tuple[str, str]:
     def joined(texts):
         out = ""
         for text in texts:
-            if len(out) >= ACCENT_TEXT[0] or len(out) + len(text) + 1 > ACCENT_TEXT[1]:
+            if _spoken_length(out) >= ACCENT_TEXT[0]:
                 break
-            out = f"{out} {text}".strip()
+            if _spoken_length(out) + _spoken_length(text) + 1 <= ACCENT_TEXT[1]:  # one too long is skipped
+                out = f"{out} {text}".strip()
         return out
 
     source = joined(s["text"].strip() for s in _source_clips(data) if s["id"] not in kept and s["text"].strip())
