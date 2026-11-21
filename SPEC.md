@@ -93,7 +93,7 @@ file. Everything is done by clicking in a desktop window.
 | Code license | MIT | Apache 2.0 | Apache 2.0 |
 | **Weights license** | MIT | **CC-BY-NC (no commercial use)** | Apache 2.0 |
 | Without a reference | Built-in default voice | "Auto Voice": random unless a seed is set | A random voice |
-| Settings | Expressiveness, Pace control, Variation | Speed, Quality (diffusion steps, any whole number 16–64) | Style (text, sent as `(style)text`; parentheses in the line become commas), Style strength (`cfg_value` 1–3), Quality (`inference_timesteps` 4–30) |
+| Settings | Expressiveness, Pace control, Variation | Speed, Quality (diffusion steps, any whole number 16–64), Native accent (0–1: guidance with separate reference and text weights, (3−x, 3+2x), one extra forward pass per step; 0 is OmniVoice's own guidance) | Style (text, sent as `(style)text`; parentheses in the line become commas), Style strength (`cfg_value` 1–3), Quality (`inference_timesteps` 4–30) |
 | Voice conversion | Yes (`ChatterboxVC`) | No | No |
 | Note | Adds a PerTh watermark to outputs | | 48 kHz output; denoiser and text normalizer off; `voxcpm==2.0.3` |
 

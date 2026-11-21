@@ -62,7 +62,9 @@ English script. Unmute the player to listen.
   sentence panel, name or merge speakers under *Speakers…*, or *Find speakers again…* with a count when the guess is
   off: its threshold is a first guess). Each sentence is then cloned from its own sound joined with the same
   speaker's nearest sentences within a minute, about 8 s (at most 10 s): a steadier voice and accent that still
-  carries the moment's mood. A part Whisper missed can be added: drag over it
+  carries the moment's mood. When the original's accent carries into the dub, raise OmniVoice's **Native accent**
+  setting: it leans on the text more than on the sample (more native, a little less like the speaker, about 1.5x
+  slower). A part Whisper missed can be added: drag over it
   on the Original lane of the timeline and press *Add sentence*; Whisper writes what it hears there (*Listen* does it
   again for any sentence), and you correct it. Start and end times can be typed in. Takes can be deleted one by one,
   or all of a tab's sentences with *Delete takes*. Every change can be undone

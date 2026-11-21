@@ -137,6 +137,9 @@ MODELS = {
             {"key": "num_step", "label": "Quality", "min": 16, "max": 64, "step": 1, "default": 32,
              "help": "Higher sounds better but takes longer; 16 is quick. Sounds such as [laughter] come out clearer "
                      "when it is higher."},
+            {"key": "accent", "label": "Native accent", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.0,
+             "help": "When the sample is in another language than the line: higher sounds more native and less like "
+                     "the sample; about 1.5\u00d7 slower. 0 is off."},
         ],
         "pip_steps": [
             ("PyTorch with CUDA", TORCH_CUDA),  # the same files as Chatterbox's: shared, not downloaded again

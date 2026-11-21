@@ -155,3 +155,45 @@ def test_no_timing_sends_no_duration(installed):
     out = str(Path(local) / "untimed.wav")
     models.generate("omnivoice", "hello", "/refs/me.wav", out, seed=1, settings={}, language="en", ref_text="Hi")
     assert "duration=" not in _read(out) and "pad_duration" not in _read(out) and "ref_audio=/refs/me.wav" in _read(out)
+
+
+def _worker():
+    import importlib.util
+    path = Path(__file__).resolve().parent.parent / "workers" / "omnivoice" / "worker.py"
+    spec = importlib.util.spec_from_file_location("omnivoice_worker_accent", path)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    return worker
+
+
+def test_native_accent_weights():
+    worker = _worker()
+    assert worker.guidance_weights(0) is None and worker.guidance_weights(None) is None
+    assert worker.guidance_weights(1.0) == (2.0, 5.0)  # the dubbing setting of the paper
+    assert worker.guidance_weights(0.5) == (2.5, 4.0)
+    assert worker.guidance_weights(3) == (2.0, 5.0)  # never past it
+
+
+def test_dual_guidance_mixes_three_predictions():
+    import numpy as np
+    worker = _worker()
+    c, u, t = np.array([0.0, -1.0]), np.array([-2.0, -0.5]), np.array([-1.0, -1.0])
+    assert np.allclose(worker.dual_guidance(c, u, t, 3, 3), u + 3 * (c - u))  # equal weights: plain guidance
+    assert np.allclose(worker.dual_guidance(c, u, t, 2, 5), u + 5 * (t - u) + 2 * (c - t))
+
+
+def test_native_accent_guides_only_that_call(installed, tmp_path):
+    from conftest import make_wav
+    _, local = installed
+    ref = make_wav(tmp_path / "ref.wav", 2)
+    out = str(Path(local) / "accent.wav")
+    models.generate("omnivoice", "hello", str(ref), out, seed=1, settings={"accent": 1.0}, language="tr", ref_text="Hi")
+    assert "guidance=2.0,5.0" in _read(out)
+    again = str(Path(local) / "plain.wav")
+    models.generate("omnivoice", "hello", str(ref), again, seed=1, settings={}, language="tr", ref_text="Hi")
+    assert "guidance=" not in _read(again)  # put back after the call
+
+
+def test_native_accent_is_an_omnivoice_setting():
+    spec = {s["key"]: s for s in models.MODELS["omnivoice"]["settings"]}["accent"]
+    assert spec["default"] == 0 and spec["min"] == 0 and spec["max"] == 1 and spec["label"] == "Native accent"

@@ -48,6 +48,16 @@ class OmniVoice:
     def create_voice_clone_prompt(self, ref_audio, ref_text=None):
         return _Prompt(ref_audio, ref_text)
 
+    # The internals the worker's "Native accent" guidance wraps (here they only need to exist).
+    def _prepare_inference_inputs(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def _predict_tokens_with_scoring(self, c_logits, u_logits, gen_config):
+        raise NotImplementedError
+
     @classmethod
     def from_pretrained(cls, name, device_map=None, dtype=None):
         print(f"stub omnivoice {name} loaded on {device_map} as {dtype}")
@@ -60,6 +70,8 @@ class OmniVoice:
             raise RuntimeError("CUDA error: device-side assert triggered")
         if text == "OOM":
             raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+        if "_predict_tokens_with_scoring" in self.__dict__:  # the worker's guidance is on for this call
+            kwargs["guidance"] = ",".join(str(w) for w in getattr(self._predict_tokens_with_scoring, "weights", ()))
         extra = "|".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
         return [f"text={text}|language={language}|ref_audio={ref_audio}|ref_text={ref_text}|speed={speed}|{extra}"
                 f"|seed={torch.last_seed}"]
