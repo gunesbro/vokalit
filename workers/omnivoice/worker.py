@@ -8,6 +8,7 @@ sample's transcript, so that never happens (and could not: the network is blocke
 """
 import contextlib
 import json
+import os
 import socket
 import sys
 import time
@@ -60,61 +61,99 @@ def dual_guidance(c, u, t, a_s, a_t):
     return u + a_t * (t - u) + a_s * (c - t)
 
 
+def guidance_plan(accent, removal):
+    """(reference weight, text weight, accent removal) for "Native accent" and "Accent removal", or None for OmniVoice's
+    own guidance. Removal keeps the sample's weight (its mood) and takes the accent out instead (Accent Analogy
+    Guidance, arXiv 2609.29123: (3, 5, 5) on OmniVoice); Native accent lowers the sample's weight."""
+    weights = guidance_weights(accent) or (3.0, 3.0)
+    if removal and removal > 0:
+        return (weights[0], max(5.0, weights[1]), removal)
+    return None if weights == (3.0, 3.0) else (*weights, 0)
+
+
+def aag_mix(c, u, t, sources, targets, a_s, a_t, beta):
+    """dual_guidance minus the accent direction: for each proxy voice, its prediction with a sample in the original's
+    language minus with a sample in the line's language (the voice cancels, the accent remains), averaged, times beta."""
+    mixed = dual_guidance(c, u, t, a_s, a_t)
+    if beta and sources:
+        mixed = mixed - beta / len(sources) * sum(src - tgt for src, tgt in zip(sources, targets))
+    return mixed
+
+
 @contextlib.contextmanager
-def accent_guidance(model, weights):
-    """For one generate call, OmniVoice's guidance with separate reference and text weights (dual_guidance): its input
-    preparation also builds the text alone (no reference), its forward pass also predicts from that, and its token
-    choice mixes the three. Built on OmniVoice 0.2.1's internals; one text per call (dub and Studio lines), else its
-    own guidance."""
-    if weights is None:
+def accent_guidance(model, plan, proxies=()):
+    """For one generate call, OmniVoice's guidance as `plan` (guidance_plan) asks: its input preparation also builds
+    the text alone and, for accent removal, the text with each proxy voice's two samples (`proxies`: [(prompt in the
+    original's language, prompt in the line's)]); its forward pass also predicts those, in one padded batch; its token
+    choice mixes them (aag_mix). Built on OmniVoice 0.2.1's internals; one text per call (dub and Studio lines), else
+    its own guidance. Raises when the guidance was never applied, rather than ignore the setting."""
+    if plan is None:
         yield
         return
+    a_s, a_t, beta = plan
+    proxies = list(proxies) if beta else []
     prepare, forward, predict = model._prepare_inference_inputs, model.forward, model._predict_tokens_with_scoring
     held = {}
 
-    def prepare_also_text(text, num_target_tokens, ref_text=None, ref_audio_tokens=None, lang=None, instruct=None,
-                          denoise=True):
+    def prepare_also_branches(text, num_target_tokens, ref_text=None, ref_audio_tokens=None, lang=None, instruct=None,
+                              denoise=True):
         inputs = prepare(text, num_target_tokens, ref_text, ref_audio_tokens, lang, instruct, denoise)
-        if ref_audio_tokens is not None:  # the same text, language and style, without the reference
-            alone = prepare(text, num_target_tokens, None, None, lang, instruct, denoise)
-            held["prefix"] = alone["input_ids"][..., :-num_target_tokens]
-        else:  # never another text's prefix
-            held.pop("prefix", None)
+        if ref_audio_tokens is None:  # never another text's branches
+            held.pop("prefixes", None)
+            return inputs
+        cut = lambda tokens, ref: prepare(text, num_target_tokens, getattr(ref, "ref_text", None),  # noqa: E731
+                                          getattr(ref, "ref_audio_tokens", None), lang, instruct,
+                                          denoise)["input_ids"][..., :-num_target_tokens]
+        prefixes = [cut(None, None)]  # the same text, language and style, without a sample
+        for source, target in proxies:
+            prefixes += [cut(None, source), cut(None, target)]
+        held["prefixes"] = prefixes
+        held["length"] = num_target_tokens
         return inputs
 
-    def forward_also_text(*args, **kwargs):
+    def forward_also_branches(*args, **kwargs):
         import torch
 
+        held.pop("branches", None)
         output = forward(*args, **kwargs)
-        held.pop("text", None)
-        ids, mask = kwargs.get("input_ids"), kwargs.get("audio_mask")
-        if "prefix" in held and ids is not None and mask is not None and ids.size(0) == 2:
-            length = int(mask[1].sum())  # the unconditional row holds just the target tokens so far
-            whole = torch.cat([held["prefix"], ids[1:2, :, :length]], dim=2)
-            size = whole.size(2)
-            audio = torch.zeros(1, size, dtype=torch.bool, device=whole.device)
-            audio[0, size - length:] = True
-            attention = torch.ones(1, 1, size, size, dtype=torch.bool, device=whole.device)
-            logits = forward(input_ids=whole, audio_mask=audio, attention_mask=attention).logits.to(torch.float32)
-            held["text"] = logits[:, :, size - length:, :]
+        ids = kwargs.get("input_ids")
+        if "prefixes" in held and ids is not None and ids.size(0) == 2:
+            length, prefixes = held["length"], held["prefixes"]
+            target = ids[1:2, :, :length]  # the unconditional row holds just the target tokens so far
+            sizes = [p.size(2) + length for p in prefixes]
+            size, rows = max(sizes), len(prefixes)
+            batch = torch.full((rows, ids.size(1), size), model.config.audio_mask_id, dtype=ids.dtype, device=ids.device)
+            audio = torch.zeros(rows, size, dtype=torch.bool, device=ids.device)
+            attention = torch.zeros(rows, 1, size, size, dtype=torch.bool, device=ids.device)
+            for k, (prefix, end) in enumerate(zip(prefixes, sizes)):  # left-aligned, padded as OmniVoice pads
+                batch[k, :, :end] = torch.cat([prefix, target], dim=2)[0]
+                audio[k, end - length:end] = True
+                attention[k, :, :end, :end] = True
+                if end < size:
+                    pad = torch.arange(end, size, device=ids.device)
+                    attention[k, :, pad, pad] = True
+            logits = forward(input_ids=batch, audio_mask=audio, attention_mask=attention).logits.to(torch.float32)
+            held["branches"] = [logits[k:k + 1, :, end - length:end, :] for k, end in enumerate(sizes)]
         return output
 
     def predict_mixed(c_logits, u_logits, gen_config):
         import torch.nn.functional as F
 
-        text = held.get("text")
-        if text is None or text.shape != c_logits.shape:  # a batch of several texts: OmniVoice's own guidance
+        branches = held.get("branches")
+        if not branches or any(b.shape != c_logits.shape for b in branches):  # several texts: its own guidance
             return predict(c_logits, u_logits, gen_config)
-        mixed = dual_guidance(F.log_softmax(c_logits, dim=-1), F.log_softmax(u_logits, dim=-1),
-                              F.log_softmax(text, dim=-1), *weights)
+        lp = lambda x: F.log_softmax(x, dim=-1)  # noqa: E731
+        text, pairs = lp(branches[0]), branches[1:]
+        mixed = aag_mix(lp(c_logits), lp(u_logits), text, [lp(b) for b in pairs[0::2]], [lp(b) for b in pairs[1::2]],
+                        a_s, a_t, beta)
         held["mixed"] = held.get("mixed", 0) + 1
         return predict(mixed, mixed, gen_config)  # equal inputs: its own guidance adds nothing, the rest is the same
-    predict_mixed.weights = weights
+    predict_mixed.weights = (a_s, a_t) if not beta else (a_s, a_t, beta)
 
     names = ("_prepare_inference_inputs", "forward", "_predict_tokens_with_scoring")
     before = {name: model.__dict__[name] for name in names if name in model.__dict__}  # e.g. a loader's own hooks
-    model._prepare_inference_inputs = prepare_also_text
-    model.forward = forward_also_text
+    model._prepare_inference_inputs = prepare_also_branches
+    model.forward = forward_also_branches
     model._predict_tokens_with_scoring = predict_mixed
     try:
         yield
@@ -126,7 +165,19 @@ def accent_guidance(model, weights):
                 model.__dict__.pop(name, None)
     if not held.get("mixed"):  # OmniVoice decoded some other way: say so rather than ignore the setting
         raise RuntimeError("Native accent could not be applied: this OmniVoice version works differently. "
-                           "Set Native accent to 0.")
+                           "Set Native accent and Accent removal to 0.")
+
+
+_prompts = {}  # (path, modified, text) -> voice clone prompt: the accent voices are the same for every line of a dub
+
+
+def _prompt(model, path, text):
+    key = (path, os.path.getmtime(path), text)
+    if key not in _prompts:
+        if len(_prompts) > 16:
+            _prompts.clear()
+        _prompts[key] = model.create_voice_clone_prompt(path, text)
+    return _prompts[key]
 
 
 def _natural_seconds(model, text, prompt):
@@ -192,8 +243,12 @@ def main():
                     # No silence added around it: the take lasts what was asked.
                     options.update(duration=duration, pad_duration=0)
                     pace = round(natural / duration, 2)
-            # "Native accent": less of the sample's accent when it is in another language than the line.
-            guided = accent_guidance(model, guidance_weights(settings.get("accent")) if request.get("ref") else None)
+            # "Native accent" and "Accent removal": less of the sample's accent when it is in another language than
+            # the line. Removal needs the dub's accent voices (proxies); without them (Studio) it is off.
+            proxies = [(_prompt(model, p["src"], p["src_text"]), _prompt(model, p["tgt"], p["tgt_text"]))
+                       for p in request.get("proxies") or []]
+            plan = guidance_plan(settings.get("accent"), settings.get("accent_removal") if proxies else 0)
+            guided = accent_guidance(model, plan if request.get("ref") else None, proxies)
             with guided:
                 audio = model.generate(text=request["text"], language=request.get("language"), **reference,
                                        speed=settings.get("speed", 1.0), num_step=int(settings.get("num_step", 32)),

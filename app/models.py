@@ -121,6 +121,7 @@ MODELS = {
         "summary": "600+ languages \u00b7 cloning \u00b7 sound tags",
         "url": "https://huggingface.co/k2-fsa/OmniVoice",
         "timed": True,  # generates to a given length (dubs: where the speaker stops)
+        "accent_removal": True,  # takes proxy "accent voices" (dubs.accent_voices) for its Accent removal setting
         "disk_gb": 9.0,  # estimate until measured on Windows
         "license": "CC-BY-NC (non-commercial)",  # the weights, because of the training data; the code is Apache 2.0
         "supports_convert": False,
@@ -140,6 +141,11 @@ MODELS = {
             {"key": "accent", "label": "Native accent", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.0,
              "help": "When the sample is in another language than the line: higher sounds more native and less like "
                      "the sample; about 1.5\u00d7 slower. 0 is off."},
+            {"key": "accent_removal", "label": "Accent removal (experimental)", "min": 0.0, "max": 8.0, "step": 0.5,
+             "default": 0.0,
+             "help": "Dub only: takes out the accent the original's language puts in the voice, keeping the "
+                     "speaker's sample (and its mood). 5 is the paper's setting; higher is more native, less like the "
+                     "speaker. About twice as slow. 0 is off."},
         ],
         "pip_steps": [
             ("PyTorch with CUDA", TORCH_CUDA),  # the same files as Chatterbox's: shared, not downloaded again
@@ -961,7 +967,7 @@ def model_language(name, code):
     return MODELS[name].get("language_codes", {}).get(code, code)
 
 
-def generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None):
+def generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None, proxies=None):
     """Returns the generation time in seconds. `ref_text`: what is said in `ref` (models that need it). `timing`: for
     a "timed" model, {"target", "min_speed", "max_speed"} (dubs.generation_timing); the worker's "pace" (how much
     faster than its natural pace the take was made) is added to it when it used them."""
@@ -970,6 +976,8 @@ def generate(name, text, ref, out, seed, settings, language, ref_text=None, timi
     settings = validate_settings(name, settings)
     message = {"text": text, "ref": ref, "out": out, "seed": seed, "settings": settings,
                "language": model_language(name, language), "ref_text": ref_text}
+    if proxies:  # the dub's accent voices, for Accent removal
+        message["proxies"] = proxies
     if timing is None:
         return _ask(name, message)
     reply = _request(name, {**message, "timing": timing})

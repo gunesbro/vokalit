@@ -1094,3 +1094,35 @@ def test_reference_skips_sentences_without_text(tmp_workspace, tmp_path):
     dub = _talk(tmp_path, 70, [(16.0, 19.0, 0), (20.0, 22.0, 0)])
     dubs.update_source_clip(dub, "o1", text="")
     assert _reference(dub, "d2") == (_joined(2), "T2")
+
+
+def test_accent_voice_texts_join_sentences(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(1.0, 2.0, None), (3.0, 4.0, None), (5.0, 6.0, None)])
+    for n, words in enumerate(["Hello there my friend.", "How have you been lately?", "It is nice to see you."], 1):
+        dubs.update_dub_clip(dub, f"d{n}", translation=words)
+    source, target = dubs.accent_voice_texts(dub, "en")
+    assert source == "T1 T2 T3"  # all there is (under 60 characters)
+    assert target == "Hello there my friend. How have you been lately? It is nice to see you."
+
+
+def test_accent_voice_texts_need_translations(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(1.0, 2.0, None)])
+    with pytest.raises(dubs.ws.WorkspaceError, match="needs translations"):
+        dubs.accent_voice_texts(dub, "en")
+
+
+def test_accent_voices_are_kept_until_transcribing_again(tmp_workspace, tmp_path):
+    dub = _talk(tmp_path, 70, [(1.0, 2.0, None)])
+    assert dubs.accent_voices(dub, "en") is None
+    voices = []
+    for gender in ("female", "male"):
+        src, tgt = dubs.accent_voice_path(dub, "en", gender, "src"), dubs.accent_voice_path(dub, "en", gender, "tgt")
+        make_wav(src, 1)
+        make_wav(tgt, 1)
+        voices.append({"gender": gender, "src": str(src), "src_text": "T1", "tgt": str(tgt), "tgt_text": "Hi."})
+    dubs.save_accent_voices(dub, "en", voices)
+    assert dubs.accent_voices(dub, "en") == voices
+    Path(voices[1]["src"]).unlink()
+    assert dubs.accent_voices(dub, "en") is None  # a missing file: made again
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    assert not (dubs.dub_dir(dub) / "accent").exists()

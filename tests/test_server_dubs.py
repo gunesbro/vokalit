@@ -803,3 +803,67 @@ def test_a_speaker_count_must_be_sensible(api, tmp_path, monkeypatch):
     for count in (-2, 0, 21, "abc"):
         status, body, _ = api("POST", f"/api/dubs/{dub['id']}/speakers", {"count": count})
         assert status == 400 and "between 1 and 20" in body["error"], (count, body)
+
+
+def _accent_fakes(monkeypatch, calls):
+    def design(name, text, out, seed, language, description):
+        calls.append(("design", language, description, text))
+        make_wav(out, 1)
+        return 0.1
+
+    def generate(name, text, ref, out, seed, settings, language, ref_text=None, timing=None, proxies=None):
+        calls.append(("generate", language, Path(ref).name, ref_text, text, proxies))
+        make_wav(out, 1)
+        return 0.1
+
+    monkeypatch.setattr(models, "design", design)
+    monkeypatch.setattr(models, "generate", generate)
+
+
+def test_accent_removal_prepares_the_accent_voices_once(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    did = dub["id"]
+    calls = []
+    _accent_fakes(monkeypatch, calls)
+    api("PATCH", f"/api/dubs/{did}", {"model": "omnivoice", "settings": {"omnivoice": {"accent_removal": 5}}})
+    api("PATCH", f"/api/dubs/{did}/clips/d1", {"translation": "Hello there."})
+    api("PATCH", f"/api/dubs/{did}/clips/d2", {"translation": "How are you?"})
+    _, job, _ = api("POST", f"/api/dubs/{did}/generate", {"clips": ["d1", "d2"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done", done
+    designs = [c for c in calls if c[0] == "design"]
+    assert [(c[1], c[2]) for c in designs] == [("en", "female"), ("en", "male")]  # native: no sample
+    assert designs[0][3] == "Hello there. How are you?"
+    clones = [c for c in calls if c[0] == "generate" and c[4] == "Merhaba. Nasılsın?"]
+    assert [(c[1], c[2], c[3]) for c in clones] == [("tr", "en-female-tgt.wav", "Hello there. How are you?"),
+                                                    ("tr", "en-male-tgt.wav", "Hello there. How are you?")]
+    lines = [c for c in calls if c[0] == "generate" and c[4] in ("Hello there.", "How are you?")]
+    assert len(lines) == 2 and all(len(c[5]) == 2 and c[5][0]["gender"] == "female" for c in lines)
+    calls.clear()
+    _, job, _ = api("POST", f"/api/dubs/{did}/generate", {"clips": ["d1"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert [c[0] for c in calls] == ["generate"] and calls[0][5]  # made once, used again
+
+
+def test_no_accent_removal_sends_no_accent_voices(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    calls = []
+    _accent_fakes(monkeypatch, calls)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello there."})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    assert _wait(api, job["id"])["state"] == "done"
+    assert [c[0] for c in calls] == ["generate"] and calls[0][5] is None
+
+
+def test_accent_removal_needs_the_original_s_language(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    with dubs._editing(dub["id"]) as data:
+        data["source"]["language"] = None
+    calls = []
+    _accent_fakes(monkeypatch, calls)
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice", "settings": {"omnivoice": {"accent_removal": 5}}})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello there."})
+    _, job, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    done = _wait(api, job["id"])
+    assert done["state"] == "failed" and "needs the original's language" in done["error"] and calls == []

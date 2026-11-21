@@ -213,7 +213,7 @@ def test_native_accent_restores_what_the_model_had():
     model = Model()
     own = model.forward = lambda *a, **k: "its own"  # e.g. a loader's hook on the instance
     with pytest.raises(RuntimeError):
-        with worker.accent_guidance(model, (2.0, 5.0)):
+        with worker.accent_guidance(model, (2.0, 5.0, 0)):
             pass  # nothing decoded: the guidance was never applied
     assert model.forward is own and "_predict_tokens_with_scoring" not in model.__dict__
 
@@ -221,3 +221,40 @@ def test_native_accent_restores_what_the_model_had():
 def test_native_accent_is_an_omnivoice_setting():
     spec = {s["key"]: s for s in models.MODELS["omnivoice"]["settings"]}["accent"]
     assert spec["default"] == 0 and spec["min"] == 0 and spec["max"] == 1 and spec["label"] == "Native accent"
+
+
+def test_guidance_plan_keeps_the_reference_weight_for_accent_removal():
+    worker = _worker()
+    assert worker.guidance_plan(0, 0) is None
+    assert worker.guidance_plan(1.0, 0) == (2.0, 5.0, 0)  # Native accent alone, as before
+    assert worker.guidance_plan(0, 5) == (3.0, 5.0, 5)  # the paper's OmniVoice setting: the sample keeps its weight
+    assert worker.guidance_plan(0.5, 5) == (2.5, 5.0, 5)
+
+
+def test_aag_mix_takes_out_the_accent_direction():
+    import numpy as np
+    worker = _worker()
+    c, u, t = np.array([0.0, -1.0]), np.array([-2.0, -0.5]), np.array([-1.0, -1.0])
+    src = [np.array([-0.2, -0.9]), np.array([-0.4, -0.7])]
+    tgt = [np.array([-0.5, -0.5]), np.array([-0.6, -0.6])]
+    assert np.allclose(worker.aag_mix(c, u, t, src, tgt, 3, 5, 0), worker.dual_guidance(c, u, t, 3, 5))
+    expected = worker.dual_guidance(c, u, t, 3, 5) - 5 / 2 * ((src[0] - tgt[0]) + (src[1] - tgt[1]))
+    assert np.allclose(worker.aag_mix(c, u, t, src, tgt, 3, 5, 5), expected)
+
+
+def test_accent_removal_is_refused_when_it_cannot_be_applied(installed, tmp_path):
+    from conftest import make_wav
+    _, local = installed
+    ref = make_wav(tmp_path / "ref.wav", 2)
+    proxies = [{"gender": g, "src": str(make_wav(tmp_path / f"{g}-src.wav", 2)), "src_text": "konnichiwa",
+                "tgt": str(make_wav(tmp_path / f"{g}-tgt.wav", 2)), "tgt_text": "merhaba"} for g in ("female", "male")]
+    out = str(Path(local) / "aag.wav")
+    with pytest.raises(RuntimeError, match="could not be applied"):
+        models.generate("omnivoice", "hello", str(ref), out, seed=1, settings={"accent_removal": 5}, language="tr",
+                        ref_text="Hi", proxies=proxies)
+
+
+def test_accent_removal_is_an_omnivoice_setting():
+    spec = {s["key"]: s for s in models.MODELS["omnivoice"]["settings"]}["accent_removal"]
+    assert (spec["default"], spec["min"], spec["max"], spec["step"]) == (0, 0, 8, 0.5)
+    assert models.MODELS["omnivoice"]["accent_removal"] is True

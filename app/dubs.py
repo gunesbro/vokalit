@@ -3,6 +3,7 @@ their own voices. Stored as tracks of clips (seconds, never pixels), so the time
 
 dub.json, source.<ext> (the imported file), audio.wav (its sound, decoded by the window), refs/, takes/, exports/.
 """
+import json
 import os
 import re
 import shutil
@@ -284,6 +285,58 @@ def set_transcript(dub_id: str, language: str, segments: list[dict]) -> None:
             _language_track(t["language"], t.get("model"), t.get("settings"), sources) for t in data["tracks"][1:]]
         data["last_sentence"] = len(sources)
         data["speakers"] = []  # new sentences: who says them is found again
+    shutil.rmtree(dub_dir(dub_id) / "accent", ignore_errors=True)  # their texts were the old sentences'
+
+
+ACCENT_TEXT = (60, 200)  # characters of an accent voice's text: at least, at most
+
+
+def accent_voice_texts(dub_id: str, language: str) -> tuple[str, str]:
+    """What the accent voices say: the original's sentences joined until ACCENT_TEXT characters, and the language's
+    translations the same way (sentences kept as the original, or empty, are skipped)."""
+    data = load_dub(dub_id)
+    kept = {s["id"] for s in _kept(data)}
+
+    def joined(texts):
+        out = ""
+        for text in texts:
+            if len(out) >= ACCENT_TEXT[0] or len(out) + len(text) + 1 > ACCENT_TEXT[1]:
+                break
+            out = f"{out} {text}".strip()
+        return out
+
+    source = joined(s["text"].strip() for s in _source_clips(data) if s["id"] not in kept and s["text"].strip())
+    target = joined(c["translation"].strip() for c in _dub_clips(data, language)
+                    if c["source_clip"] not in kept and c["translation"].strip())
+    if not source:
+        raise ws.WorkspaceError("Accent removal needs the original's sentences (transcribe first).")
+    if not target:
+        raise ws.WorkspaceError("Accent removal needs translations: translate a few sentences first.")
+    return source, target
+
+
+def accent_voice_path(dub_id: str, language: str, gender: str, side: str) -> Path:
+    """One accent voice: `side` "src" speaks the original's language, "tgt" the dub's (named by the target)."""
+    folder = dub_dir(dub_id) / "accent"
+    folder.mkdir(exist_ok=True)
+    return folder / f"{language}-{gender}-{side}.wav"
+
+
+def accent_voices(dub_id: str, language: str) -> list | None:
+    """The accent voices made for `language`, or None when there are none (or a file is missing)."""
+    index = dub_dir(dub_id) / "accent" / f"{language}.json"
+    try:
+        voices = json.loads(index.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not all(Path(v["src"]).is_file() and Path(v["tgt"]).is_file() for v in voices):
+        return None
+    return voices
+
+
+def save_accent_voices(dub_id: str, language: str, voices: list) -> None:
+    accent_voice_path(dub_id, language, "x", "x")  # the folder
+    (dub_dir(dub_id) / "accent" / f"{language}.json").write_text(json.dumps(voices), encoding="utf-8")
 
 
 def _next_sentence(data: dict) -> int:
