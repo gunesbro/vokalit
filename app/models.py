@@ -264,6 +264,24 @@ TOOLS = {
         # PyTorch (the shared CUDA build) runs it on the GPU when there is one, else on the CPU.
         "pip_steps": [("PyTorch", TORCH_CUDA), ("SpeechBrain", ["speechbrain==1.1.0", "soundfile"])],
     },
+    "seedvc": {
+        "title": "Voice conversion (Seed-VC)",
+        "summary": "For Dub's Convert voice: a native speaker says each translation and Seed-VC turns it into the "
+                   "original speaker's voice, so the dub keeps their voice without their accent.",
+        "url": "https://github.com/Plachtaa/seed-vc",
+        "disk_gb": 8.5,  # measured on Windows: PyTorch (5.0, shared with the voice models), libraries 1.7, weights 1.8
+        "vram_gb": 2.0,  # estimate: the speech model, Whisper's encoder and the vocoder
+        "downloads": "PyPI, download.pytorch.org (PyTorch), GitHub (Seed-VC's code) and Hugging Face (the weights)",
+        "license": "Code GPL-3.0 (Seed-VC), downloaded to this computer by the install and run here, never shipped "
+                   "with Vokalit; its weights come with the same project.",
+        # Its libraries pin PyTorch to the shared CUDA build, so none of them pulls a different one.
+        "pip_steps": [("PyTorch", TORCH_CUDA),
+                      ("Seed-VC libraries", ["scipy==1.13.1", "librosa==0.10.2", "huggingface-hub==0.36.2",
+                                             "munch==4.0.0", "einops==0.8.0", "descript-audio-codec==1.0.0",
+                                             "transformers==4.46.3", "soundfile==0.14.0", "numpy==1.26.4",
+                                             "pyyaml==6.0.4", "torch==2.8.0", "torchaudio==2.8.0",
+                                             "--extra-index-url", "https://download.pytorch.org/whl/cu128"])],
+    },
     "ffmpeg": {
         "title": "Video export (FFmpeg)",
         "summary": "Exports a dub as a video: the original video as it is, with the dub as its sound (one language, or "
@@ -908,7 +926,22 @@ def transcribe(audio, language):
     if not is_installed("whisper"):
         raise RuntimeError("Whisper is not installed.")
     reply = _request("whisper", {"task": "transcribe", "audio": audio, "language": language})
-    return {"text": reply["text"], "language": reply.get("language")}
+    return {"text": reply["text"], "language": reply.get("language"), "logprob": reply.get("logprob")}
+
+
+def convert_voice(source, ref, out):
+    """Says the WAV `source` again in the voice of `ref` (Seed-VC, on this computer), keeping its words, timing and
+    intonation; writes `out`. Returns the time it took in seconds."""
+    if not is_installed("seedvc"):
+        raise RuntimeError("Voice conversion is not installed. Install it in Models.")
+    return _ask("seedvc", {"task": "convert", "source": source, "ref": ref, "out": out})
+
+
+def median_pitch(audio):
+    """The median pitch (Hz) of what is said in `audio`, or None (Seed-VC's environment measures it)."""
+    if not is_installed("seedvc"):
+        raise RuntimeError("Voice conversion is not installed. Install it in Models.")
+    return _request("seedvc", {"task": "pitch", "audio": audio}).get("hz")
 
 
 def separate(audio, voices, background):

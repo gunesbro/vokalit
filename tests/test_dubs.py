@@ -380,6 +380,29 @@ def test_split_joined_puts_both_back(tmp_workspace):
     assert dubs.load_dub(dub)["tracks"] == before["tracks"]
 
 
+def test_take_score_counts_the_words_heard_then_the_confidence():
+    assert dubs.take_score("Nerde o herif?", "Nerde o herif?", -0.2) > dubs.take_score("Nerde o herif?", "Nerde o", -0.1)
+    assert dubs.take_score("[shouting] Hey!", "Hey", -0.5) == round(1.0 - 0.05, 4)  # a tag is not said
+    assert dubs.take_score("Hey", "Hey", -0.1) > dubs.take_score("Hey", "Hey", -0.6)
+    assert dubs.take_score("", "x", None) == -0.1
+
+
+def test_closest_voice_matches_the_speaker_s_pitch():
+    voices = [{"gender": "female"}, {"gender": "male"}]
+    assert dubs.closest_voice(voices, [210.0, 110.0], 125.0)["gender"] == "male"
+    assert dubs.closest_voice(voices, [210.0, 110.0], 260.0)["gender"] == "female"  # a shout is high
+    assert dubs.closest_voice(voices, [210.0, None], None)["gender"] == "female"  # unknown: the first
+
+
+def test_voice_mode_is_per_language_and_checked(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.set_language_options(dub, None, voice="converted")
+    assert dubs.load_dub(dub)["tracks"][1]["voice"] == {"mode": "converted"}
+    with pytest.raises(ws.WorkspaceError):
+        dubs.set_language_options(dub, None, voice="robot")
+
+
 def test_old_single_language_dubs_are_migrated(tmp_workspace):
     dub = dubs.create_dub("Old", b"x", "mp3")
     data = dubs.load_dub(dub)

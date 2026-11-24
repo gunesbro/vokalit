@@ -868,6 +868,55 @@ def test_no_accent_removal_sends_no_accent_voices(api, tmp_path, monkeypatch):
     assert [c[0] for c in calls] == ["generate"] and calls[0][5] is None
 
 
+def _conversion_fakes(monkeypatch, calls, heard):
+    """Seed-VC copies the native take; pitches: the female voice 210 Hz, the male 110, the speaker 120. Whisper hears
+    `heard` in turn, one per try."""
+    import shutil
+
+    def convert_voice(source, ref, out):
+        calls.append(("convert", Path(ref).name))
+        shutil.copy(source, out)
+        return 0.2
+
+    pitches = {"en-female-tgt.wav": 210.0, "en-male-tgt.wav": 110.0}
+    monkeypatch.setattr(models, "convert_voice", convert_voice)
+    monkeypatch.setattr(models, "median_pitch", lambda audio: pitches.get(Path(audio).name, 120.0))
+    heard = iter(heard)
+    monkeypatch.setattr(models, "transcribe", lambda audio, language: {"text": next(heard), "language": language,
+                                                                        "logprob": -0.3})
+
+
+def test_convert_voice_keeps_the_clearest_of_three_tries(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    did = dub["id"]
+    calls = []
+    _accent_fakes(monkeypatch, calls)
+    _conversion_fakes(monkeypatch, calls, ["Hello.", "Hello there.", ""])
+    api("PATCH", f"/api/dubs/{did}", {"model": "omnivoice", "voice": "converted"})
+    api("PATCH", f"/api/dubs/{did}/clips/d1", {"translation": "Hello there."})
+    _, job, _ = api("POST", f"/api/dubs/{did}/generate", {"clips": ["d1"], "seed": 5})
+    done = _wait(api, job["id"])
+    assert done["state"] == "done", done
+    # Said by the native voice nearest the speaker's pitch (male, 110 Hz), then turned into the speaker's voice.
+    lines = [c for c in calls if c[0] == "generate" and c[4] == "Hello there."]
+    assert [(c[2], c[3], c[5]) for c in lines] == [("en-male-tgt.wav", "Hello there.", None)] * 3
+    assert [c for c in calls if c[0] == "convert"] == [("convert", "o1.wav")] * 3
+    clip = dubs.load_dub(did)["tracks"][1]["clips"][0]
+    assert [t["seed"] for t in clip["takes"]] == [5, 6, 7] and all(t["voice"] == "converted" for t in clip["takes"])
+    assert clip["selected"] == clip["takes"][1]["file"]  # Whisper heard every word of the second try
+
+
+def test_convert_voice_needs_voice_conversion(api, tmp_path, monkeypatch):
+    dub = _transcribed(api, tmp_path, monkeypatch)
+    monkeypatch.setattr(models, "is_installed", lambda name: name != "seedvc")
+    api("PATCH", f"/api/dubs/{dub['id']}", {"model": "omnivoice", "voice": "converted"})
+    api("PATCH", f"/api/dubs/{dub['id']}/clips/d1", {"translation": "Hello there."})
+    status, body, _ = api("POST", f"/api/dubs/{dub['id']}/generate", {"clips": ["d1"]})
+    assert status == 400 and "Seed-VC" in body["error"]
+    status, body, _ = api("PATCH", f"/api/dubs/{dub['id']}", {"voice": "robot"})
+    assert status == 400
+
+
 def test_accent_removal_needs_the_original_s_language(api, tmp_path, monkeypatch):
     dub = _transcribed(api, tmp_path, monkeypatch)
     with dubs._editing(dub["id"]) as data:

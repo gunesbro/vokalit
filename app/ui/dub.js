@@ -50,6 +50,7 @@ const LISTENING = "Whisper is finding the sentences on the CPU; a long file take
 const SEPARATING_THEN_LISTENING = "Separating the voices from the music, then Whisper finds the sentences; a long file "
   + "takes a while.";
 const SPEAKERS_HINT = "Install the speaker finder on the Models screen to find who says what.";
+const VOICE_HINT = "Install Voice conversion (Seed-VC) on the Models screen to convert the voice.";
 const SEPARATING = "Separating the voices from the music and effects; a long file takes a while.";
 const SEPARATION_HINT = "Install Voice separation on the Models screen to keep the music and clean the voices.";
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select, [contenteditable]"));
@@ -75,6 +76,7 @@ export async function renderDub(root) {
   let demucs = false; // Voice separation
   let speakerTool = false; // The speaker finder
   let videoTool = false; // Video export (FFmpeg)
+  let voiceTool = false; // Voice conversion (Seed-VC)
   let formats = [];
   let view = null; // the open dub's screen (see openDub), stopped when another opens
   let transcribeNext = null; // a dub just imported: transcribed once it is open
@@ -105,7 +107,7 @@ export async function renderDub(root) {
     }
     rememberOpened("dub", id);
     try {
-      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, demucs, speakerTool, videoTool, formats,
+      view = openDub(main, await api("GET", `/api/dubs/${id}`), { models, whisper, demucs, speakerTool, videoTool, voiceTool, formats,
         refreshList });
       if (transcribeNext === id) {
         transcribeNext = null;
@@ -183,13 +185,14 @@ export async function renderDub(root) {
   demucs = installedTool("demucs");
   speakerTool = installedTool("speakers");
   videoTool = installedTool("ffmpeg");
+  voiceTool = installedTool("seedvc");
   await refreshList();
   show();
 }
 
 // One dub, laid out like a subtitle editor: a sentence table (left), the video and the selected sentence (right), and
 // the timeline (bottom). Every change the user makes goes through act(), so it can be undone. Returns {stop, transcribe}.
-function openDub(main, initial, { models, whisper, demucs, speakerTool, videoTool, formats, refreshList }) {
+function openDub(main, initial, { models, whisper, demucs, speakerTool, videoTool, voiceTool, formats, refreshList }) {
   if (!sizesRead) {
     Object.assign(sizes, preference("dubSizes", {}));
     sizesRead = true;
@@ -213,6 +216,7 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
   const fit = () => dub.fit[track().language] || {};
   const q = (code = track().language) => `?language=${encodeURIComponent(code)}`;
   const model = () => models.find((m) => m.name === track().model);
+  const voiceMode = () => track().voice?.mode || "original";
   const clips = () => track().clips;
   const sources = () => dub.tracks[0].clips;
   // Lookups built once per dub and language, not per row: a dub can have tens of thousands of sentences.
@@ -400,9 +404,9 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
 
   // Model and settings belong to the language shown; name and the original's volume to the dub.
   function setOption(label, key, value) {
-    const perLanguage = key === "model" || key === "settings";
+    const perLanguage = key === "model" || key === "settings" || key === "voice";
     const at = perLanguage ? q() : "";
-    const before = perLanguage ? track()[key] : dub[key];
+    const before = key === "voice" ? voiceMode() : perLanguage ? track()[key] : dub[key];
     if (before === null || before === undefined) return change(api("PATCH", path(at), { [key]: value }));
     act(perLanguage ? inLanguage(label) : label, () => api("PATCH", path(at), { [key]: value }),
       () => api("PATCH", path(at), { [key]: before }), perLanguage ? track().language : null);
@@ -784,7 +788,7 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
     installed.map((m) => el("option", { value: m.name }, m.title)));
     modelSelect.value = chosen?.name || "";
     const target = languageTabs();
-    const settingsButton = el("button", { class: "btn", disabled: !chosen, title: "Generation settings",
+    const settingsButton = el("button", { class: "btn", disabled: !chosen, title: "Voice and generation settings",
       onclick: () => popover(settingsButton, el("div", { class: "menu settings-pop" }, settingsPanel(chosen))) }, "\u2699");
     const all = clips();
     const keptCount = all.filter(isKept).length;
@@ -888,11 +892,22 @@ function openDub(main, initial, { models, whisper, demucs, speakerTool, videoToo
   function settingsPanel(chosen) {
     const overrides = track().settings[chosen.name] || {};
     const defaults = Object.fromEntries(chosen.settings.map((s) => [s.key, s.default]));
-    return sliders(chosen.settings, { ...defaults, ...overrides }, defaults,
+    // Clone: the model copies each sentence's speaker, accent included. Convert: a native voice says it and Seed-VC
+    // turns it into the speaker's voice, without their accent.
+    const voiceSelect = el("select", { class: "select", "aria-label": "Voice",
+      title: voiceTool ? "Clone: the model copies the speaker, accent included. Convert: a native voice says it and "
+        + "it is turned into the speaker's voice, without the accent (three tries per sentence with Whisper; the "
+        + "clearest is used)" : VOICE_HINT,
+      onchange: () => setOption("changing the voice", "voice", voiceSelect.value) },
+    el("option", { value: "original" }, "Clone voice"),
+    el("option", { value: "converted", disabled: !voiceTool && voiceMode() !== "converted" }, "Convert voice"));
+    voiceSelect.value = voiceMode();
+    return el("div", {}, el("div", { class: "row small" }, el("label", { class: "field-label" }, "Voice"), voiceSelect),
+      sliders(chosen.settings, { ...defaults, ...overrides }, defaults,
       (spec, value, base) => (value === base ? "Default" : `Default: ${base}`),
       (key, value) => setOption(`${chosen.title} settings`, "settings",
         { ...track().settings, [chosen.name]: { ...overrides, [key]: value } }),
-      `dub:${dub.id}`);
+      `dub:${dub.id}`));
   }
 
   function drawTable() {

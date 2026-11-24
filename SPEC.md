@@ -128,6 +128,21 @@ when there is one. One request per dub: `{audio, spans, count}` gives a speaker 
 distance (cut at `count` groups, or at 0.6, a first guess), at most 2000 of them (the longest of each stretch of the
 file); shorter and remaining spans join the nearest group; silent ones get none (`workers/speakers/grouping.py`, pure).
 
+**Voice conversion** (`TOOLS["seedvc"]`, Dub only): Seed-VC's code (GPL-3.0) from GitHub at a fixed commit, unpacked
+into `.local/seedvc/cache` by `--download`, which also loads it once to fetch its weights (Hugging Face: the v1 22 kHz
+speech model, Whisper-small's encoder, CAM++, BigVGAN) into its `checkpoints` folder; its libraries are pinned with the
+shared CUDA PyTorch so none pulls another. The worker loads the model once and runs Seed-VC's own `inference.main`
+(30 diffusion steps, CFG 0.7, no pitch conditioning: the source's pitch is kept). `{task: "convert", source, ref,
+out}` writes `out` (16-bit PCM, 22.05 kHz); `{task: "pitch", audio}` gives `{hz}`, the median pitch (YIN) of its
+louder frames. Dub's **voice mode** is per language, chosen at the top of the ⚙ settings popover (`track["voice"]["mode"]`, `PATCH /api/dubs/<id>` `{voice:
+"original" | "converted"}`, undoable): "converted" makes the dub's accent voices once (with the dub's model when it
+can design a voice, else OmniVoice, else VoxCPM2), picks per sentence the one whose pitch (`dubs.closest_voice`, in
+semitones) is nearest the sentence's reference, has the dub's model say the translation in it (timed as usual; no
+Accent removal: the voice is native), converts it to the reference's voice, and, with Whisper installed, does this
+`CONVERTED_TRIES` (3) times with seeds seed, seed+1, …: each try is transcribed in the dub's language and scored
+(`dubs.take_score`: the share of the translation's words heard, plus 0.1 x Whisper's mean log-prob), every try is
+kept as a take (`voice: "converted"`, `score`), and the best is selected. Without Whisper, one try.
+
 ## 5. Architecture
 
 ```

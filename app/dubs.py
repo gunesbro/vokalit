@@ -40,6 +40,8 @@ LEVEL_GATE_DB = 30  # frames this far below the loudest are pauses, not speech
 LEVEL_MAX_GAIN_DB = 12  # a new take is raised or lowered at most this much to match its sentence
 LEVEL_PEAK_DB = -1  # and never peaks above this (dBFS)
 SHORT_GAP = 0.4  # seconds a take may end before its speaker does without counting as too short
+VOICE_MODES = ("original", "converted")  # how a language's voices are made (set_language_options)
+CONVERTED_TRIES = 3  # takes made per sentence with a converted voice: the native reading varies a lot from try to try
 
 
 class NeedsShorter(ws.WorkspaceError):
@@ -498,13 +500,36 @@ def remove_language(dub_id: str, language: str) -> None:
 
 
 def set_language_options(dub_id: str, language: str | None, *, model: str | None = None,
-                         settings: dict | None = None) -> None:
+                         settings: dict | None = None, voice: str | None = None) -> None:
+    """`voice`: "original" (the model clones each sentence's speaker) or "converted" (a native voice says it and
+    voice conversion turns it into the speaker's voice: their voice without their accent)."""
     with _editing(dub_id) as data:
         track = _track(data, language)
         if model is not None:
             track["model"] = model
         if settings is not None:
             track["settings"] = settings
+        if voice is not None:
+            if voice not in VOICE_MODES:
+                raise ws.WorkspaceError("Choose how the voice is made: clone it or convert it.")
+            track["voice"] = {**track.get("voice", {}), "mode": voice}
+
+
+def take_score(wanted: str, heard: str, logprob: float | None) -> float:
+    """How well a take says its text, as Whisper heard it: the share of the wanted words it wrote down, plus a little
+    for its confidence (mean log-prob per token, about -1 to 0), which breaks ties. An accent or a slurred word
+    costs words first."""
+    words = lambda text: re.findall(r"\w+", text.lower())  # noqa: E731
+    want, got = words(re.sub(r"\[[^\]]*\]", " ", wanted)), set(words(heard))  # tags are not said
+    share = sum(w in got for w in want) / len(want) if want else 0.0
+    return round(share + 0.1 * (logprob or -1.0), 4)
+
+
+def closest_voice(voices: list[dict], pitches: list[float | None], speaker_hz: float | None) -> dict:
+    """The native voice whose pitch is nearest the speaker's (in semitones): voice conversion keeps the native
+    speaker's pitch, so it should be the speaker's. The first when a pitch is unknown."""
+    known = [(abs(np.log2(hz / speaker_hz)), n) for n, hz in enumerate(pitches) if hz and speaker_hz]
+    return voices[min(known)[1]] if known else voices[0]
 
 
 def update_source_clip(dub_id: str, clip_id: str, text: str | None = None, start: float | None = None,
