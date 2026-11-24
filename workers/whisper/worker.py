@@ -59,9 +59,13 @@ def main():
                          for s in segments]
                 send(ok=True, segments=found, language=info.language, seconds=round(time.perf_counter() - start, 1))
                 continue
+            segments = list(segments)
             text = " ".join(segment.text.strip() for segment in segments).strip()
-            # The language it heard (detected when none was given).
-            send(ok=True, text=text, language=info.language, seconds=round(time.perf_counter() - start, 1))
+            # The language it heard (detected when none was given), and how sure it was of the words (mean log-prob
+            # per token): Dub's Convert voice keeps the clearest of its tries.
+            logprob = round(sum(s.avg_logprob for s in segments) / len(segments), 3) if segments else None
+            send(ok=True, text=text, language=info.language, logprob=logprob,
+                 seconds=round(time.perf_counter() - start, 1))
         except Exception as error:
             send(ok=False, error=str(error))
 

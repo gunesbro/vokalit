@@ -128,6 +128,21 @@ when there is one. One request per dub: `{audio, spans, count}` gives a speaker 
 distance (cut at `count` groups, or at 0.6, a first guess), at most 2000 of them (the longest of each stretch of the
 file); shorter and remaining spans join the nearest group; silent ones get none (`workers/speakers/grouping.py`, pure).
 
+**Voice conversion** (`TOOLS["seedvc"]`, Dub only): Seed-VC's code (GPL-3.0) from GitHub at a fixed commit, unpacked
+into `.local/seedvc/cache` by `--download`, which also loads it once to fetch its weights (Hugging Face: the v1 22 kHz
+speech model, Whisper-small's encoder, CAM++, BigVGAN) into its `checkpoints` folder; its libraries are pinned with the
+shared CUDA PyTorch so none pulls another. The worker loads the model once and runs Seed-VC's own `inference.main`
+(30 diffusion steps, CFG 0.7, no pitch conditioning: the source's pitch is kept). `{task: "convert", source, ref,
+out}` writes `out` (16-bit PCM, 22.05 kHz); `{task: "pitch", audio}` gives `{hz}`, the median pitch (YIN) of its
+louder frames. Dub's **voice mode** is per language, chosen at the top of the ⚙ settings popover (`track["voice"]["mode"]`, `PATCH /api/dubs/<id>` `{voice:
+"original" | "converted"}`, undoable): "converted" makes the dub's accent voices once (with the dub's model when it
+can design a voice, else OmniVoice, else VoxCPM2), picks per sentence the one whose pitch (`dubs.closest_voice`, in
+semitones) is nearest the sentence's reference, has the dub's model say the translation in it (timed as usual; no
+Accent removal: the voice is native), converts it to the reference's voice, and, with Whisper installed, does this
+`CONVERTED_TRIES` (3) times with seeds seed, seed+1, …: each try is transcribed in the dub's language and scored
+(`dubs.take_score`: the share of the translation's words heard, plus 0.1 x Whisper's mean log-prob), every try is
+kept as a take (`voice: "converted"`, `score`), and the best is selected. Without Whisper, one try.
+
 ## 5. Architecture
 
 ```
@@ -317,12 +332,15 @@ All interface text is English. The visual design is the design canvas; behaviour
   translations" (placed by number, or in order, a copied-back time dropped; summary of found and missing; one request);
   only the rows in view are drawn (fixed 38 px rows; the row being typed in stays drawn), lookups are built once per
   change, and the timeline draws only the clips around its window, so tens of thousands of sentences stay quick;
-  dub.json is written compact. Generate: a "timed" model (OmniVoice) is given where the speaker stops
-  (`dubs.generation_timing`: the speaker's end, capped by the room before the next sentence) and generates to it,
-  within 0.85x-1.25x of its own natural-length estimate (from its voice prompt, the reference without silence;
+  dub.json is written compact. Generate: a "timed" model (OmniVoice) is given where the speaker stops (`target`) and
+  the room before the next sentence (`room`, `dubs.generation_timing`; the target is capped by the room) and keeps
+  its own natural-length estimate when that ends between the two, else the nearer one (a translation usually takes
+  longer to say than the original: squeezed to the speaker's end it sounds rushed and more accented), within
+  0.85x-1.25x of natural (from its voice prompt, the reference without silence;
   `duration=`, no edge padding; none without the reference's text), and the take keeps that `pace`, which Fit's
-  limits count; every new take is then brought to its
-  sentence's level (`dubs.match_level`: gated RMS over 50 ms frames, 30 dB gate, the voices stem when separated,
+  limits count; every new take is then brought to its speaker's level around it (`dubs.match_level`: the same
+  speaker's sentences within 60 s measured together, so one speaker's takes do not jump in level; its own sentence's
+  level when the speaker is unknown; gated RMS over 50 ms frames, 30 dB gate, the voices stem when separated,
   at most ±12 dB, peak at most -1 dBFS). Fit: a too-long take is sped up with the same pitch (WSOLA, `app/stretch.py`) to end
   0.05 s before the next sentence, as a new selected take that remembers its original (fitting again starts from it),
   up to 1.25x; beyond that, "Shorten the translation". "Fit" on the selected sentence, "Fit N" in the Too long tab (a
@@ -357,7 +375,12 @@ All interface text is English. The visual design is the design canvas; behaviour
   span only, from the voices when separated; it saves nothing: the window puts the text in as an undoable edit if the
   Original was not changed meanwhile, else shows "Whisper heard: …"). The panel has Listen and Start/End fields
   (at least 0.2 s, inside the sound; a new start moves the sentence's clips by as much in every language; the order
-  follows the times; undoable). Takes are deleted with a trash button under each (inline confirm) or "Delete takes N"
+  follows the times; undoable). "Join with next" (`POST /source/<id>/join`, not while the dub works; not with a
+  sentence that keeps the original) makes one sentence of it and the next: it ends where the next ended, the texts
+  and every language's translations are joined with a space, the next sentence goes as if deleted (its takes' files
+  stay) and sentences that took their voice from it take the joined one's; its takes stay (Too short until generated
+  again). Undo: `POST /source/split` {first: the sentence's payload, second: the next one's, as restore takes it}.
+  Takes are deleted with a trash button under each (inline confirm) or "Delete takes N"
   for the tab's sentences (confirmed): not undoable, files removed, a deleted selected take gives way to the newest
   left, undo steps that select a deleted take are dropped (take steps carry their files); not while the dub works.
   Speakers: a coloured chip before each original ("S1" for "Speaker 1", else initials; 8 colours by place), a Speaker

@@ -40,6 +40,8 @@ LEVEL_GATE_DB = 30  # frames this far below the loudest are pauses, not speech
 LEVEL_MAX_GAIN_DB = 12  # a new take is raised or lowered at most this much to match its sentence
 LEVEL_PEAK_DB = -1  # and never peaks above this (dBFS)
 SHORT_GAP = 0.4  # seconds a take may end before its speaker does without counting as too short
+VOICE_MODES = ("original", "converted")  # how a language's voices are made (set_language_options)
+CONVERTED_TRIES = 3  # takes made per sentence with a converted voice: the native reading varies a lot from try to try
 
 
 class NeedsShorter(ws.WorkspaceError):
@@ -65,16 +67,20 @@ def _room(data: dict, clips: list[dict], clip: dict) -> float:
 
 
 def generation_timing(dub_id: str, clip_id: str, language: str | None = None) -> dict | None:
-    """For a model that can fix its length: where a clip's new take should end (as _target), and the speeds it may
-    take to get there. None when there is no speaker to match or no room."""
+    """For a model that can fix its length: where a clip's new take should end at the earliest (as _target) and at
+    the latest (the room before the next sentence), and the speeds it may take to get there. Between the two it keeps
+    its natural pace: a translation usually takes longer to say than the original, and squeezing it to the speaker's
+    end sounds rushed. None when there is no speaker to match or no room."""
     data = load_dub(dub_id)
     clips = _dub_clips(data, language)
     clip = _find(clips, clip_id)
     source = next((s for s in _source_clips(data) if s["id"] == clip.get("source_clip")), None)
-    target = round(_target(clip, source, _room(data, clips, clip)), 2)
+    room = _room(data, clips, clip)
+    target = round(_target(clip, source, room), 2)
     if source is None or target <= 0:
         return None
-    return {"target": target, "min_speed": MIN_SPEED, "max_speed": MAX_SPEEDUP}
+    return {"target": target, "room": round(room, 2) if room != float("inf") else target,
+            "min_speed": MIN_SPEED, "max_speed": MAX_SPEEDUP}
 
 
 def _can_lengthen(duration: float, target: float, pace: float = 1.0) -> bool:
@@ -494,13 +500,36 @@ def remove_language(dub_id: str, language: str) -> None:
 
 
 def set_language_options(dub_id: str, language: str | None, *, model: str | None = None,
-                         settings: dict | None = None) -> None:
+                         settings: dict | None = None, voice: str | None = None) -> None:
+    """`voice`: "original" (the model clones each sentence's speaker) or "converted" (a native voice says it and
+    voice conversion turns it into the speaker's voice: their voice without their accent)."""
     with _editing(dub_id) as data:
         track = _track(data, language)
         if model is not None:
             track["model"] = model
         if settings is not None:
             track["settings"] = settings
+        if voice is not None:
+            if voice not in VOICE_MODES:
+                raise ws.WorkspaceError("Choose how the voice is made: clone it or convert it.")
+            track["voice"] = {**track.get("voice", {}), "mode": voice}
+
+
+def take_score(wanted: str, heard: str, logprob: float | None) -> float:
+    """How well a take says its text, as Whisper heard it: the share of the wanted words it wrote down, plus a little
+    for its confidence (mean log-prob per token, about -1 to 0), which breaks ties. An accent or a slurred word
+    costs words first."""
+    words = lambda text: re.findall(r"\w+", text.lower())  # noqa: E731
+    want, got = words(re.sub(r"\[[^\]]*\]", " ", wanted)), set(words(heard))  # tags are not said
+    share = sum(w in got for w in want) / len(want) if want else 0.0
+    return round(share + 0.1 * (logprob or -1.0), 4)
+
+
+def closest_voice(voices: list[dict], pitches: list[float | None], speaker_hz: float | None) -> dict:
+    """The native voice whose pitch is nearest the speaker's (in semitones): voice conversion keeps the native
+    speaker's pitch, so it should be the speaker's. The first when a pitch is unknown."""
+    known = [(abs(np.log2(hz / speaker_hz)), n) for n, hz in enumerate(pitches) if hz and speaker_hz]
+    return voices[min(known)[1]] if known else voices[0]
 
 
 def update_source_clip(dub_id: str, clip_id: str, text: str | None = None, start: float | None = None,
@@ -551,6 +580,56 @@ def delete_source_clip(dub_id: str, clip_id: str) -> None:
             for clip in track["clips"]:
                 if clip["voice_from"] == clip_id:
                     clip["voice_from"] = clip["source_clip"]
+
+
+def _joined(first: str, second: str) -> str:
+    return " ".join(t for t in (first.strip(), second.strip()) if t)
+
+
+def join_with_next(dub_id: str, clip_id: str) -> str:
+    """Joins a sentence with the next one (Whisper often splits one thought at a pause): it then lasts until the next
+    one ends, says both texts, and in every language both translations, so it is generated as one take with one
+    flow. The next sentence goes as if deleted (its take files stay, so undo can bring it back); sentences that took
+    their voice from it take it from the joined one. Returns the id of the sentence that went."""
+    with _editing(dub_id) as data:
+        sources = _source_clips(data)
+        first = _find(sources, clip_id)
+        place = sources.index(first)
+        if place + 1 >= len(sources):
+            raise ws.WorkspaceError("This is the last sentence: there is none after it to join.")
+        second = sources[place + 1]
+        if first.get("keep_original") or second.get("keep_original"):
+            raise ws.WorkspaceError("A sentence that keeps the original cannot be joined.")
+        first["end"] = max(first["end"], second["end"])
+        first["text"] = _joined(first["text"], second["text"])
+        data["tracks"][0]["clips"] = [s for s in sources if s["id"] != second["id"]]
+        for track in data["tracks"][1:]:
+            mine = next((c for c in track["clips"] if c["source_clip"] == first["id"]), None)
+            theirs = next((c for c in track["clips"] if c["source_clip"] == second["id"]), None)
+            if mine is not None and theirs is not None:
+                mine["translation"] = _joined(mine["translation"], theirs["translation"])
+            track["clips"] = [c for c in track["clips"] if c["source_clip"] != second["id"]]
+            for clip in track["clips"]:
+                if clip["voice_from"] == second["id"]:
+                    clip["voice_from"] = first["id"]
+        return second["id"]
+
+
+def split_joined(dub_id: str, first: dict, clips: dict[str, dict], second: dict) -> None:
+    """Undo of join_with_next: the joined sentence's times, text and translations as they were (`first`, `clips` by
+    language; takes made since are kept), and the next sentence put back (`second`, as restore_sentence takes it)."""
+    with _editing(dub_id) as data:
+        source = _find(_source_clips(data), first["id"])
+        source.update(start=first["start"], end=first["end"], text=first["text"])
+        for track in data["tracks"][1:]:
+            before = clips.get(track["language"])
+            clip = next((c for c in track["clips"] if c["source_clip"] == source["id"]), None)
+            if before is not None and clip is not None:
+                clip["translation"] = before["translation"]
+                clip["voice_from"] = before["voice_from"]
+    restore_sentence(dub_id, dict(second["source"]), {str(k): dict(v) for k, v in (second.get("clips") or {}).items()},
+                     int(second.get("index", 0)), voices={str(k): [str(v) for v in ids]
+                                                          for k, ids in (second.get("voices") or {}).items()})
 
 
 def restore_sentence(dub_id: str, source: dict, clips: dict[str, dict], index: int,
@@ -746,13 +825,21 @@ def _loudness(samples: np.ndarray, rate: int) -> float | None:
 
 
 def match_level(dub_id: str, clip_id: str, take: Path, language: str | None = None) -> float:
-    """Raises or lowers a new take to how loud its sentence was spoken (the voices when separated, else the whole
-    sound), at most LEVEL_MAX_GAIN_DB and never peaking above LEVEL_PEAK_DB. Rewrites the take; returns the gain in
+    """Raises or lowers a new take to how loud its speaker speaks around it (the same speaker's sentences within
+    REFERENCE_WINDOW, together), or, with no speaker known, how loud its sentence was spoken (the voices when
+    separated, else the whole sound): one speaker's takes stay at one level instead of jumping from sentence to
+    sentence. At most LEVEL_MAX_GAIN_DB and never peaking above LEVEL_PEAK_DB. Rewrites the take; returns the gain in
     dB, 0.0 (untouched) when either is silent."""
     data = load_dub(dub_id)
     source = _find(_source_clips(data), _find(_dub_clips(data, language), clip_id)["source_clip"])
-    rate, original = _read_span(voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id), source["start"],
-                                source["end"])
+    speaker = source.get("speaker")
+    kept = {s["id"] for s in _kept(data)}
+    spans = [s for s in _source_clips(data) if s["id"] == source["id"] or (
+        speaker and s.get("speaker") == speaker and s["id"] not in kept
+        and abs((s["start"] + s["end"]) / 2 - (source["start"] + source["end"]) / 2) <= REFERENCE_WINDOW)]
+    sound = voices_path(dub_id) if has_stems(dub_id) else audio_path(dub_id)
+    pieces = [_read_span(sound, s["start"], s["end"]) for s in spans]
+    rate, original = pieces[0][0], np.concatenate([p[1] for p in pieces])
     take_rate, samples = _read(take)
     wanted = _loudness(original, rate)
     current = _loudness(samples, take_rate)

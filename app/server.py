@@ -1040,8 +1040,9 @@ def update_dub(req, did):
                     if name in models.MODELS}
     volume = None if body.get("original_volume") is None else float(body["original_volume"])
     voices = None if body.get("voices_volume") is None else float(body["voices_volume"])
+    voice = None if body.get("voice") is None else str(body["voice"])  # "original" or "converted"
     dubs.set_options(did, original_volume=volume, voices_volume=voices)
-    dubs.set_language_options(did, code, model=model, settings=settings)
+    dubs.set_language_options(did, code, model=model, settings=settings, voice=voice)
     return _dub_view(did)
 
 
@@ -1161,6 +1162,62 @@ def _accent_voices(job, did, name, language):
                        "tgt_text": target_text})
     dubs.save_accent_voices(did, language, voices)
     return voices
+
+
+def _design_model(name):
+    """The model that makes the dub's native voices: the dub's own when it can design a voice, else an installed one
+    that can (OmniVoice first)."""
+    for candidate in (name, "omnivoice", "voxcpm"):
+        if models.MODELS.get(candidate, {}).get("design") and models.is_installed(candidate):
+            return candidate
+    raise ws.WorkspaceError("Convert voice needs OmniVoice or VoxCPM2 to make a native voice. Install one in Models.")
+
+
+def _converted_takes(job, did, cid, language, name, text, wanted, ref, settings, first_seed, state):
+    """Takes for a sentence with a converted voice: a native voice (the dub's accent voice nearest the speaker's
+    pitch) says `text` with model `name`, and Seed-VC turns it into the speaker's voice (`ref`). Several tries when
+    Whisper is installed, each scored on how well it says `wanted` (dubs.take_score). Returns the take entries, each
+    brought to its speaker's level; `state` keeps the native voices and their pitches for the job."""
+    if "voices" not in state:
+        try:
+            state["voices"] = _accent_voices(job, did, _design_model(name), language)
+        except ws.WorkspaceError as error:  # once for the whole job, not once per sentence
+            raise AccentVoicesFailed(str(error)) from None
+        job["model"] = "seedvc"
+        state["pitches"] = [models.median_pitch(v["tgt"]) for v in state["voices"]]
+    job["model"] = "seedvc"
+    voice = dubs.closest_voice(state["voices"], state["pitches"], models.median_pitch(str(ref)))
+    tries = dubs.CONVERTED_TRIES if models.is_installed("whisper") else 1
+    made = []
+    for k in range(tries):
+        if job.get("cancelled"):
+            raise Cancelled()
+        seed = first_seed + k
+        native, out = ws.workspace_temp_file(".wav"), dubs.new_take_path(did, cid, language)
+        timing = dubs.generation_timing(did, cid, language) if models.MODELS[name].get("timed") else None
+        try:
+            job["model"] = name
+            seconds = models.generate(name, text, voice["tgt"], str(native), seed, settings, language,
+                                      ref_text=voice["tgt_text"], timing=timing)
+            if ws.wav_duration(native) < 0.05:  # no sound: try again with the next seed
+                continue
+            job["model"] = "seedvc"
+            seconds += models.convert_voice(str(native), str(ref), str(out))
+        finally:
+            native.unlink(missing_ok=True)
+        score = None
+        if tries > 1:
+            job["model"] = "whisper"
+            heard = models.transcribe(str(out), language)
+            score = dubs.take_score(wanted, heard["text"], heard.get("logprob"))
+        job["model"] = None
+        dubs.match_level(did, cid, out, language)  # as loud as its speaker speaks
+        pace = (timing or {}).get("pace")
+        made.append({"file": str(out), "seed": seed, "model": name, "settings": settings, "language": language,
+                     "text": wanted, "voice": "converted", "generation_seconds": seconds,
+                     "duration": round(ws.wav_duration(out), 2), **({"pace": pace} if pace else {}),
+                     **({"score": score} if score is not None else {})})
+    return made
 
 
 def _find_speakers(job, did, count=None):
@@ -1337,6 +1394,26 @@ def delete_dub_source(req, did, oid):
     return _dub_view(did)
 
 
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/(?P<oid>o[0-9]+)/join")
+def join_dub_sentence(req, did, oid):
+    """Joins a sentence with the next one; the view says which went ("joined")."""
+    _dub_or_404(did)
+    _dub_free(did)
+    joined = dubs.join_with_next(did, oid)
+    return {**_dub_view(did), "joined": joined}
+
+
+@route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/split")
+def split_dub_sentence(req, did):
+    """Undo of a join: {first: {source, clips}, second: as /source/restore takes it}."""
+    _dub_or_404(did)
+    body = req["json"]
+    first = body["first"]
+    dubs.split_joined(did, dict(first["source"]), {str(k): dict(v) for k, v in (first.get("clips") or {}).items()},
+                      dict(body["second"]))
+    return _dub_view(did)
+
+
 @route("POST", "/api/dubs/(?P<did>[0-9-]+)/source/restore")
 def restore_dub_sentence(req, did):
     """Undo of a deleted sentence: puts it back as it was."""
@@ -1425,6 +1502,11 @@ def generate_dub(req, did):
     if language not in models.MODELS[name].get("languages", []):
         raise ws.WorkspaceError(f"{models.MODELS[name]['title']} does not support "
                                 f"{models.LANGUAGE_NAMES.get(language, language)}.")
+    converted = track.get("voice", {}).get("mode") == "converted"
+    if converted:
+        if not models.is_installed("seedvc"):
+            raise ws.WorkspaceError("Convert voice needs Voice conversion (Seed-VC). Install it in Models.")
+        _design_model(name)
     ids = [str(c) for c in req["json"].get("clips", [])]
     _dub_free(did)
     seed = req["json"].get("seed")
@@ -1456,6 +1538,29 @@ def generate_dub(req, did):
             ref, ref_text = dubs.cut_reference(did, cid, language)
             settings = models.validate_settings(name, track_now["settings"].get(name, {}))
             take_seed = _random_seed() if seed is None else seed
+            if converted:
+                try:
+                    made = _converted_takes(job, did, cid, language, name, text, clip["translation"], ref, settings,
+                                            take_seed, accent)
+                except (AccentVoicesFailed, Cancelled):
+                    raise
+                except Exception as error:
+                    if job.get("cancelled"):
+                        raise Cancelled() from None
+                    errors.append(f"Sentence {number}: {error}")
+                    continue
+                finally:
+                    job["model"] = None
+                if not made:
+                    errors.append(f"Sentence {number}: the model returned no sound. Generate it again or change the "
+                                  "translation.")
+                    continue
+                for take in made:
+                    dubs.add_take(did, cid, take, language)
+                best = max(made, key=lambda t: t.get("score", 0))  # the clearest try is the one used
+                dubs.select_take(did, cid, Path(best["file"]).resolve().relative_to(
+                    dubs.dub_dir(did).resolve()).as_posix(), language)
+                continue
             out = dubs.new_take_path(did, cid, language)
             job["model"] = name  # what cancelling stops
             try:

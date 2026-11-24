@@ -336,6 +336,73 @@ def test_restore_sentence_points_voices_back_at_it(tmp_workspace):
     assert dubs.load_dub(dub)["tracks"][1]["clips"][1]["voice_from"] == "o1"
 
 
+def _payload(data, source_id):
+    """As the window's sentencePayload: what restore_sentence needs to put a sentence back."""
+    sources = data["tracks"][0]["clips"]
+    index = next(n for n, s in enumerate(sources) if s["id"] == source_id)
+    return {"source": sources[index], "index": index,
+            "clips": {t["language"]: next(c for c in t["clips"] if c["source_clip"] == source_id) for t in data["tracks"][1:]},
+            "voices": {t["language"]: [c["id"] for c in t["clips"] if c["source_clip"] != source_id
+                                       and c["voice_from"] == source_id] for t in data["tracks"][1:]}}
+
+
+def test_join_with_next_makes_one_sentence_of_two(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.set_translations(dub, {"d1": "Hello.", "d2": "How are you?"})
+    assert dubs.join_with_next(dub, "o1") == "o2"
+    data = dubs.load_dub(dub)
+    assert data["tracks"][0]["clips"] == [{**SEGMENTS[0], "id": "o1", "end": 9.0, "text": "Merhaba. Nasılsın?"}]
+    assert [(c["id"], c["translation"]) for c in data["tracks"][1]["clips"]] == [("d1", "Hello. How are you?")]
+    with pytest.raises(ws.WorkspaceError):  # nothing after it
+        dubs.join_with_next(dub, "o1")
+
+
+def test_join_refuses_a_kept_sentence(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.set_keep_original(dub, "o2", True)
+    with pytest.raises(ws.WorkspaceError):
+        dubs.join_with_next(dub, "o1")
+
+
+def test_split_joined_puts_both_back(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS + [{"start": 10.0, "end": 11.0, "text": "Iyi."}])
+    dubs.set_translations(dub, {"d1": "Hello.", "d2": "How are you?"})
+    _with_take(dub, "d2")
+    dubs.update_dub_clip(dub, "d3", voice_from="o2")
+    before = dubs.load_dub(dub)
+    first, second = _payload(before, "o1"), _payload(before, "o2")
+    dubs.join_with_next(dub, "o1")
+    assert dubs.load_dub(dub)["tracks"][1]["clips"][1]["voice_from"] == "o1"  # its voice now comes from the joined one
+    dubs.split_joined(dub, first["source"], first["clips"], second)
+    assert dubs.load_dub(dub)["tracks"] == before["tracks"]
+
+
+def test_take_score_counts_the_words_heard_then_the_confidence():
+    assert dubs.take_score("Nerde o herif?", "Nerde o herif?", -0.2) > dubs.take_score("Nerde o herif?", "Nerde o", -0.1)
+    assert dubs.take_score("[shouting] Hey!", "Hey", -0.5) == round(1.0 - 0.05, 4)  # a tag is not said
+    assert dubs.take_score("Hey", "Hey", -0.1) > dubs.take_score("Hey", "Hey", -0.6)
+    assert dubs.take_score("", "x", None) == -0.1
+
+
+def test_closest_voice_matches_the_speaker_s_pitch():
+    voices = [{"gender": "female"}, {"gender": "male"}]
+    assert dubs.closest_voice(voices, [210.0, 110.0], 125.0)["gender"] == "male"
+    assert dubs.closest_voice(voices, [210.0, 110.0], 260.0)["gender"] == "female"  # a shout is high
+    assert dubs.closest_voice(voices, [210.0, None], None)["gender"] == "female"  # unknown: the first
+
+
+def test_voice_mode_is_per_language_and_checked(tmp_workspace):
+    dub = dubs.create_dub("I", b"x", "mp3")
+    dubs.set_transcript(dub, "tr", SEGMENTS)
+    dubs.set_language_options(dub, None, voice="converted")
+    assert dubs.load_dub(dub)["tracks"][1]["voice"] == {"mode": "converted"}
+    with pytest.raises(ws.WorkspaceError):
+        dubs.set_language_options(dub, None, voice="robot")
+
+
 def test_old_single_language_dubs_are_migrated(tmp_workspace):
     dub = dubs.create_dub("Old", b"x", "mp3")
     data = dubs.load_dub(dub)
@@ -686,12 +753,15 @@ def _timed_dub(tmp_path, next_start):
 
 def test_generation_timing_targets_where_the_speaker_stops(tmp_workspace, tmp_path):
     dub = _timed_dub(tmp_path, 8.0)
-    assert dubs.generation_timing(dub, "d1") == {"target": 4.0, "min_speed": 0.85, "max_speed": 1.25}
+    # At the earliest where the speaker stops, at the latest before the next sentence.
+    assert dubs.generation_timing(dub, "d1") == {"target": 4.0, "room": round(7.0 - dubs.FIT_GAP, 2),
+                                                 "min_speed": 0.85, "max_speed": 1.25}
 
 
 def test_generation_timing_stops_before_the_next_sentence(tmp_workspace, tmp_path):
     dub = _timed_dub(tmp_path, 3.0)
-    assert dubs.generation_timing(dub, "d1")["target"] == round(2.0 - dubs.FIT_GAP, 2)
+    timing = dubs.generation_timing(dub, "d1")
+    assert timing["target"] == timing["room"] == round(2.0 - dubs.FIT_GAP, 2)
 
 
 def test_generation_timing_is_none_without_room(tmp_workspace, tmp_path):
@@ -761,6 +831,22 @@ def test_match_level_measures_the_voices_stem(tmp_workspace, tmp_path):
     dubs._write(dubs.background_path(dub), rate, np.zeros(len(audio)))
     dubs.match_level(dub, "d1", take)
     assert abs(_span_loudness(dub, take) - _span_loudness(dub, dubs.voices_path(dub))) < 0.1
+
+
+def test_match_level_keeps_one_speaker_at_one_level(tmp_workspace, tmp_path):
+    import numpy as np
+    dub, take = _level_dub(tmp_path, 0.2, 0.1)
+    rate, audio = dubs._read(dubs.audio_path(dub))
+    loud, quiet = _tone(0.2, 3.5), _tone(0.05, 12 - 3.5)
+    dubs._write(dubs.audio_path(dub), rate, np.concatenate([loud, quiet]))  # sentence 1 shouted, sentence 2 quiet
+    speaker = dubs.set_speaker(dub, "o1", "new")
+    dubs.set_speaker(dub, "o2", speaker)
+    dubs.match_level(dub, "d1", take)
+    data = dubs.load_dub(dub)
+    _, both = dubs._read_span(dubs.audio_path(dub), 0.5, 3.0)
+    _, second = dubs._read_span(dubs.audio_path(dub), data["tracks"][0]["clips"][1]["start"],
+                                data["tracks"][0]["clips"][1]["end"])
+    assert abs(_span_loudness(dub, take) - dubs._loudness(np.concatenate([both, second]), rate)) < 0.1
 
 
 def test_match_level_with_a_sentence_past_the_end(tmp_workspace, tmp_path):

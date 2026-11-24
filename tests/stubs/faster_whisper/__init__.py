@@ -11,6 +11,7 @@ class _Segment:
     def __init__(self, text, start=0.0, end=0.0):
         self.text, self.start, self.end = text, start, end
         self.words = [_Word(start, end, text)]
+        self.avg_logprob = -0.25
 
 
 class WhisperModel:

@@ -547,7 +547,8 @@ def test_components_lists_whisper_first(api, tmp_path, monkeypatch):
     assert first["name"] == "whisper" and first["kind"] == "tool" and first["recommended"] is True
     kinds = [item["kind"] for item in body["items"]]
     assert kinds == ["tool"] * kinds.count("tool") + ["model"] * kinds.count("model")  # the tools, then the models
-    assert [item["name"] for item in body["items"] if item["kind"] == "tool"] == ["whisper", "demucs", "speakers", "ffmpeg"]
+    assert [item["name"] for item in body["items"] if item["kind"] == "tool"] == ["whisper", "demucs", "speakers", "seedvc",
+                                                                                     "ffmpeg"]
     assert body["installing"] is None and "total_gb" in body
 
 
